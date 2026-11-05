@@ -39,12 +39,12 @@ What was verified on the **web target** with real input:
 
 Problems found, with workarounds:
 
-1. **Web: dragging the mouse doesn't select text in `RichEditor`** (read-only or editable). Pointer events arrive, and the same synthetic drag selects in a plain `<textarea>`. Shift+click and Shift+arrow keys do select. **This would block highlighting on the web until fixed upstream**; it isn't reported in the nsh repo yet.
+1. **Web: dragging the mouse doesn't select text in `RichEditor`** (read-only or editable). Pointer events arrive, and the same synthetic drag selects in a plain `<textarea>`. Shift+click and Shift+arrow keys do select. nsh's own hosted demo behaves the same way. **This would block highlighting on the web until fixed upstream**: [longbridge/nsh#1004](https://github.com/longbridge/nsh/issues/1004).
 2. **Decoration `attrs.style` is ignored**: the text is split at the range but nothing is drawn. `attrs.class` works, so highlights use Tailwind classes.
 3. **`RichEditor` loads Markdown, JSON or plain text, but not HTML.** That's fine, because the server keeps Markdown for every article. Raw HTML embeds in the Markdown (`<iframe>`) would show as literal text, so the reader strips them.
 4. **`TextView` (the obvious reading component) has no API for reading the selection.** The prototype therefore uses a read-only `RichEditor`, which has one.
 5. **Passing a signal's `set` as a bare function** throws "not a live signal" in QuickJS (devices and headless tests) but works in a browser's JS engine. Wrap it: `(v) => sig.set(v)`.
 
 **Not verified yet:**
-- **Linux GTK:** it would need a headless X server (`xorg-server-xvfb` and `xdotool`) or driving the desktop.
+- **Linux GTK: deferred.** A Linux desktop app isn't a goal for now. Verifying it would need a headless X server (`xorg-server-xvfb` and `xdotool`).
 - **iOS and macOS:** they need a Mac. iOS matters most for a read-later app. Long-press selection plus the bubble menu on iOS is the next thing to try.

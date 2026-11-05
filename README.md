@@ -100,5 +100,5 @@ The OpenAPI 3.1 document is served at `/openapi.json`, generated from the zod sc
 1. More importers as needed: Netscape bookmark HTML (browsers), Pocket export.
 2. Per-site cookies for the browser fallback (Zhihu and other login walls); screenshot thumbnails.
 3. **Permanent copies**: single-file archives via `monolith`; periodic broken-link checks.
-4. **Clients**: the nsh reader prototype works on the web (findings in `apps/reader/README.md`). Next: verify iOS (long-press selection and the bubble menu), then the full apps with a Swift share extension and keychain. The extension's Safari build comes along with the Apple apps.
+4. **Clients**: the nsh reader prototype works on the web (findings in `apps/reader/README.md`; drag-to-select on the web is [longbridge/nsh#1004](https://github.com/longbridge/nsh/issues/1004); a Linux desktop app is deferred). Next: verify iOS (long-press selection and the bubble menu), then the full apps with a Swift share extension and keychain. The extension's Safari build comes along with the Apple apps.
 5. Semantic search (a Meilisearch embedder, e.g. Ollama → `MEILI_EMBEDDER`), suggested tags, text-to-speech.

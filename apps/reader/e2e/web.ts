@@ -75,7 +75,7 @@ try {
   known(
     "a mouse drag selects text in the read-only RichEditor",
     Boolean(await page.waitForText("Highlight", 1500).catch(() => null)),
-    "nsh 0.4.0 web: RichEditor ignores drag-to-select (Shift+click and Shift+arrows work)",
+    "nsh 0.4.0 web: RichEditor ignores drag-to-select, longbridge/nsh#1004 (Shift+click and Shift+arrows work)",
   );
   await page.click(box.x - 40, box.y - 30); // collapse whatever happened
 
