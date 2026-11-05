@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="manifest.open_in_tab" content="true" />
+    <title>lofu · settings</title>
+  </head>
+  <body>
+    <main class="sheet">
+      <header class="masthead">
+        <h1><span class="wordmark">lofu</span> <span class="sub">extension settings</span></h1>
+      </header>
+
+      <section class="block" aria-labelledby="server-h">
+        <h2 id="server-h"><span class="num">I.</span> Your server</h2>
+        <p class="lede">
+          The address you reach lofu at: your Tailscale name (e.g.
+          <code>https://homebox.tail1234.ts.net</code>) or a LAN address. Create a token on the server with
+          <code>bun run stack:token create browser</code>.
+        </p>
+        <form id="server-form" class="form" autocomplete="off">
+          <label class="label" for="server-url">Server address</label>
+          <input id="server-url" type="url" required placeholder="https://homebox.tail1234.ts.net" spellcheck="false" />
+          <label class="label" for="token">API token</label>
+          <input id="token" type="password" required placeholder="lofu_…" spellcheck="false" />
+          <div class="row">
+            <button type="submit" class="btn">Connect</button>
+            <span id="conn" class="conn" role="status" aria-live="polite"></span>
+          </div>
+        </form>
+      </section>
+
+      <section class="block" aria-labelledby="repair-h">
+        <h2 id="repair-h"><span class="num">II.</span> Repair pages the server can't read</h2>
+        <p class="lede">
+          Some sites refuse servers: logins (Zhihu), bot checks (Medium, V2EX). With auto-repair on, when you
+          visit a page you've already saved that the server couldn't read, the extension sends the page
+          as your browser shows it. Only those pages, nothing else. The list is checked locally, so your browsing
+          isn't reported to the server. Turning this on asks for access to all sites.
+        </p>
+        <label class="switch">
+          <input id="auto-repair" type="checkbox" />
+          <span class="track" aria-hidden="true"><span class="knob"></span></span>
+          <span>Auto-repair on visit</span>
+        </label>
+
+        <div class="needs">
+          <div class="needs-head">
+            <h3>Needs your browser <span id="needs-count" class="count"></span></h3>
+            <button type="button" class="link" id="refresh">Refresh</button>
+          </div>
+          <ol id="needs-list" class="needs-list"></ol>
+          <p id="needs-empty" class="empty" hidden>Nothing to repair. Every saved page is readable.</p>
+        </div>
+      </section>
+
+      <section class="block" aria-labelledby="keys-h">
+        <h2 id="keys-h"><span class="num">III.</span> Saving</h2>
+        <ul class="facts">
+          <li><kbd>Alt</kbd> <kbd>Shift</kbd> <kbd>S</kbd> or the toolbar button saves the current page.</li>
+          <li>Right-click a page or link: <em>Save to lofu</em>.</li>
+          <li>Pages are sent as you see them, so articles behind your logins save in full.</li>
+        </ul>
+      </section>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

@@ -6,11 +6,12 @@ Self-hosted bookmarks and read-later, in the spirit of Raindrop.io and Pocket. I
 apps/server       Bun + Hono API, SQLite, job queue, extraction workers, search indexer
 packages/shared   zod schemas (API contract → OpenAPI) and URL normalization
 crates/lofu-cli   `lofu` CLI in Rust
+apps/extension    Browser extension (WXT; Chrome/Edge/Brave and Firefox)
 skills/lofu       Agent skill describing the CLI
 docker/           compose stack (server + Meilisearch) and Dockerfile
 ```
 
-Clients (nsh app, browser extension, iOS share extension) come next. See the roadmap below.
+Clients still to come: the nsh app and the iOS share extension. See the roadmap below.
 
 ## Quick start (development)
 
@@ -59,6 +60,21 @@ Numbers below were measured on the dev box (32 cores, loopback) with the real st
 | CLI | Rust (clap + ureq), 2.6 MB static binary | `lofu ls`: **0.7 ms** round trip; `--help`: 0.3 ms. A compiled Bun binary would start in ~2 ms and weigh ~86 MB. |
 | Auth | 256-bit bearer tokens, SHA-256 hashed, verified once and cached in memory | No KDF on every request. Revocation takes effect within 60 s. |
 
+## Browser extension
+
+```sh
+bun run ext:build      # → apps/extension/.output/chrome-mv3 and firefox-mv3
+```
+
+Chrome/Edge/Brave: open `chrome://extensions`, turn on developer mode, and use *Load unpacked* on `apps/extension/.output/chrome-mv3`. Firefox: `about:debugging` → *Load Temporary Add-on* (or `bun run --cwd apps/extension zip` to produce a zip you can sign). Then enter the server address and a token in the options page.
+
+- **Saving:** the toolbar button or <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> saves the page the moment the popup opens. Tags, collection, note and favorite autosave. Right-click menus save a page or a link.
+- **Pages are sent as your browser rendered them**, so pages behind your logins and bot checks (Zhihu, Medium, V2EX) save in full. Bodies over 32 KB are gzipped.
+- **Auto-repair (opt-in):** when you revisit a saved page the server couldn't read, the extension sends it. It checks against a local list of those URLs, so your browsing isn't sent anywhere. The options page lists the pages that need a visit.
+- **Permissions:** saving uses `activeTab`, the access a browser grants when you click the button, use the shortcut or right-click. All-sites access is requested only when you turn on auto-repair. The server allows extension origins through CORS, and every request still needs your token.
+
+`bun run ext:e2e` builds the extension and drives it in Chrome for Testing against a real server: popup save of a 403 bot wall, autosave, the "on shelf" state, auto-repair. Screenshots go to `apps/extension/e2e/screens/`.
+
 ## Importing from Raindrop.io
 
 ```sh
@@ -76,11 +92,12 @@ The OpenAPI 3.1 document is served at `/openapi.json`, generated from the zod sc
 - `GET /v1/search`, `GET /v1/tags`, `/v1/collections`, `/v1/bookmarks/{id}/highlights`, `/v1/highlights/{id}`
 - `GET /v1/sync?since=<cursor>`: everything changed since the cursor, deletions included
 - `POST /v1/import/raindrop` (body: the CSV file): returns an import report
+- `GET /v1/bookmarks/lookup?url=`: the bookmark for any variant of a URL. Request bodies may be `Content-Encoding: gzip`.
 
 ## Roadmap
 
 1. More importers as needed: Netscape bookmark HTML (browsers), Pocket export.
 2. Per-site cookies for the browser fallback (Zhihu and other login walls); screenshot thumbnails.
 3. **Permanent copies**: single-file archives via `monolith`; periodic broken-link checks.
-4. **Clients**: nsh prototype of the reader view with highlights (the riskiest part), then a web app, then iOS/macOS with a Swift share extension and keychain; a WXT browser extension that sends rendered HTML.
+4. **Clients**: an nsh prototype of the reader view with highlights (the riskiest part), then a web app, then iOS/macOS with a Swift share extension and keychain. The extension's Safari build comes along with the Apple apps.
 5. Semantic search (a Meilisearch embedder, e.g. Ollama → `MEILI_EMBEDDER`), suggested tags, text-to-speech.

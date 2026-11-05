@@ -10,7 +10,9 @@
       "!.claude",
       "!.hermes",
       "!skills-lock.json",
-      "!**/*.md"
+      "!**/*.md",
+      "!**/.output",
+      "!**/.wxt"
     ]
   },
   "formatter": {

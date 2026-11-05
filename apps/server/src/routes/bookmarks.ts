@@ -50,6 +50,17 @@ export function bookmarkRoutes(app: OpenAPIHono, ctx: AppContext) {
   app.openapi(
     createRoute({
       method: "get",
+      path: "/v1/bookmarks/lookup",
+      summary: "Find the bookmark for a URL (compared after normalization)",
+      request: { query: z.object({ url: z.string().min(1) }) },
+      responses: { 200: json(Bookmark, "The bookmark"), 404: notFound },
+    }),
+    (c) => c.json(bookmarks.findByUrl(c.req.valid("query").url), 200),
+  );
+
+  app.openapi(
+    createRoute({
+      method: "get",
       path: "/v1/bookmarks/{id}",
       summary: "Get a bookmark, optionally with its extracted content",
       request: {

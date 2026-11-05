@@ -1,6 +1,7 @@
 import {
   type Bookmark,
   type BookmarkType,
+  type ContentStatus,
   type CreateBookmark,
   domainOf,
   normalizeUrl,
@@ -26,6 +27,7 @@ export interface ListFilter {
   archived?: boolean | undefined;
   favorite?: boolean | undefined;
   type?: BookmarkType | undefined;
+  contentStatus?: ContentStatus | undefined;
   limit: number;
   cursor?: string | undefined;
 }
@@ -84,6 +86,17 @@ export class BookmarkStore {
       .query<BookmarkRow, [string]>("SELECT * FROM bookmarks WHERE id = ?")
       .get(id);
     if (!row || row.deleted_at !== null) throw new NotFoundError(`bookmark ${id} not found`);
+    return toBookmark(row);
+  }
+
+  /** Finds a live bookmark by URL, compared after normalization. */
+  findByUrl(url: string): Bookmark {
+    const row = this.db
+      .query<BookmarkRow, [string]>(
+        "SELECT * FROM bookmarks WHERE url_key = ? AND deleted_at IS NULL",
+      )
+      .get(normalizeUrl(url));
+    if (!row) throw new NotFoundError("no bookmark for this URL");
     return toBookmark(row);
   }
 
@@ -257,6 +270,10 @@ export class BookmarkStore {
     if (f.type !== undefined) {
       where.push("type = ?");
       params.push(f.type);
+    }
+    if (f.contentStatus !== undefined) {
+      where.push("content_status = ?");
+      params.push(f.contentStatus);
     }
     if (f.tags?.length) {
       // AND semantics; json_each keeps a single cached statement shape for any tag count.

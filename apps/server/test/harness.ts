@@ -62,5 +62,5 @@ export function setupServer(overrides: Partial<Config> = {}) {
     site.stop(true);
   });
 
-  return { sys, app, api, base, withSearch };
+  return { sys: Object.assign(sys, { app, token }), app, api, base, withSearch };
 }

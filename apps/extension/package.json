@@ -1,0 +1,26 @@
+{
+  "name": "@lofu/extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
+    "build": "wxt build",
+    "build:firefox": "wxt build -b firefox",
+    "zip": "wxt zip && wxt zip -b firefox",
+    "postinstall": "wxt prepare",
+    "typecheck": "wxt prepare && tsc --noEmit",
+    "icons": "bun scripts/icons.ts",
+    "e2e": "LOFU_E2E=1 wxt build && bun e2e/run.ts"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5",
+    "@fontsource/instrument-sans": "^5",
+    "@fontsource/instrument-serif": "^5",
+    "@lofu/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "wxt": "^0.21.5"
+  }
+}

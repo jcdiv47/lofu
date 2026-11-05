@@ -137,6 +137,47 @@ describe("bookmarks", () => {
     expect(b.content).toContain("axolotls");
   });
 
+  test("lookup finds a bookmark by any variant of its URL", async () => {
+    const r = await api(
+      "GET",
+      `/v1/bookmarks/lookup?url=${encodeURIComponent(`${base}/article?utm_medium=x#frag`)}`,
+    );
+    expect([r.status, r.data.id]).toEqual([200, id]);
+    const miss = await api(
+      "GET",
+      `/v1/bookmarks/lookup?url=${encodeURIComponent(`${base}/never-saved`)}`,
+    );
+    expect(miss.status).toBe(404);
+  });
+
+  test("gzip-compressed uploads are accepted", async () => {
+    const body = JSON.stringify({
+      url: "https://unreachable.invalid/gzipped",
+      html: `<html><head><title>Zipped</title></head><body><article><p>${"Compressed upload about narwhals and their tusks. ".repeat(20)}</p></article></body></html>`,
+    });
+    const res = await sys.app.request("/v1/bookmarks", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${sys.token}`,
+        "content-type": "application/json",
+        "content-encoding": "gzip",
+      },
+      body: Bun.gzipSync(body),
+    });
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { id: string };
+    await sys.runner.idle();
+    const b = (await api("GET", `/v1/bookmarks/${created.id}?content=text`)).data;
+    expect([b.contentStatus, b.title]).toEqual(["ok", "Zipped"]);
+    expect(b.content).toContain("narwhals");
+  });
+
+  test("list filters by content status", async () => {
+    const failed = await api("GET", "/v1/bookmarks?contentStatus=failed&limit=100");
+    expect(failed.data.items.length).toBeGreaterThan(0);
+    expect(failed.data.items.every((b: any) => b.contentStatus === "failed")).toBe(true);
+  });
+
   test("list filters by tags and paginates with a cursor", async () => {
     const tagged = await api("GET", "/v1/bookmarks?tags=baking,science");
     expect(tagged.data.items.map((b: any) => b.id)).toEqual([id]);
@@ -221,5 +262,29 @@ describe("sync and deletes", () => {
     await api("DELETE", `/v1/bookmarks/${r.data.id}`);
     const again = await api("POST", "/v1/bookmarks", { url: `${base}/gone2` });
     expect([again.status, again.data.id]).toEqual([201, r.data.id]);
+  });
+});
+
+describe("cors", () => {
+  test("extension origins may call the API; web pages may not", async () => {
+    const pre = (origin: string) =>
+      app.request("/v1/bookmarks", {
+        method: "OPTIONS",
+        headers: {
+          origin,
+          "access-control-request-method": "POST",
+          "access-control-request-headers": "authorization",
+        },
+      });
+    const ext = await pre("chrome-extension://abcdefghijklmnop");
+    expect(ext.headers.get("access-control-allow-origin")).toBe(
+      "chrome-extension://abcdefghijklmnop",
+    );
+    expect(
+      (await pre("moz-extension://1234-uuid")).headers.get("access-control-allow-origin"),
+    ).toBe("moz-extension://1234-uuid");
+    expect(
+      (await pre("https://evil.example")).headers.get("access-control-allow-origin"),
+    ).toBeNull();
   });
 });

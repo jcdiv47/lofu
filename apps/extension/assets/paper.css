@@ -1,0 +1,143 @@
+/*
+ * lofu paper: a library catalog card. Warm stock, iron-gall ink, a red
+ * date stamp, faint blue rules. Fonts are bundled (no network), latin
+ * subsets only; CJK titles fall back to the system's CJK serif.
+ */
+@import "@fontsource/instrument-serif/latin-400.css";
+@import "@fontsource/instrument-serif/latin-400-italic.css";
+@import "@fontsource/instrument-sans/latin-400.css";
+@import "@fontsource/instrument-sans/latin-500.css";
+@import "@fontsource/instrument-sans/latin-600.css";
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+@import "@fontsource/ibm-plex-mono/latin-500.css";
+
+:root {
+  --paper: #f3ece0;
+  --paper-deep: #e9e0d0;
+  --ink: #1f1b16;
+  --ink-soft: #5d554a;
+  --ink-faint: #9a9081;
+  --rule: #d8cdbb;
+  --rule-blue: #b9c6d6;
+  --stamp: #c2412d;
+  --ok: #2f6b3a;
+  --focus: #1f1b16;
+
+  --serif: "Instrument Serif", "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", serif;
+  --sans: "Instrument Sans", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+  --mono: "IBM Plex Mono", "SFMono-Regular", monospace;
+
+  /* Paper grain: fractal noise, multiplied in at low opacity. */
+  --grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.35  0 0 0 0 0.28  0 0 0 0 0.2  0 0 0 .16 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #1b1915;
+    --paper-deep: #24211c;
+    --ink: #ece4d6;
+    --ink-soft: #b3a998;
+    --ink-faint: #7a7264;
+    --rule: #39332b;
+    --rule-blue: #2b3646;
+    --stamp: #f0694f;
+    --ok: #7fbf8a;
+    --focus: #ece4d6;
+    --grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 .95  0 0 0 0 .85  0 0 0 .07 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  color: var(--ink);
+  font: 400 13px / 1.45 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+html {
+  background: var(--paper) var(--grain);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 1.5px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.label {
+  display: block;
+  font: 500 10px / 1 var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: 6px;
+}
+
+.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+/* The ink stamp. Uneven ink comes from masking with the same noise. */
+.stamp {
+  --tilt: -7deg;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 10px 4px;
+  border: 2.5px solid currentColor;
+  border-radius: 4px;
+  box-shadow:
+    inset 0 0 0 1.5px var(--paper),
+    inset 0 0 0 3px currentColor;
+  color: var(--stamp);
+  font-family: var(--mono);
+  text-transform: uppercase;
+  transform: rotate(var(--tilt));
+  /* Uneven ink: knock small specks out of the stamp (solid minus sparse noise). */
+  --specks: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='s'><feTurbulence type='fractalNoise' baseFrequency='1.3' numOctaves='1' seed='7'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -9 4.5'/></filter><rect width='100%' height='100%' filter='url(%23s)'/></svg>");
+  -webkit-mask-image: linear-gradient(#000, #000), var(--specks);
+  -webkit-mask-composite: source-out;
+  mask-image: linear-gradient(#000, #000), var(--specks);
+  mask-composite: subtract;
+}
+
+.stamp-word {
+  font: 500 15px / 1 var(--mono);
+  letter-spacing: 0.18em;
+}
+
+.stamp-date {
+  font: 400 9.5px / 1 var(--mono);
+  letter-spacing: 0.16em;
+}
+
+@media (prefers-color-scheme: light) {
+  .stamp {
+    mix-blend-mode: multiply;
+  }
+}

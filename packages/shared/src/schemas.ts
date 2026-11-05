@@ -109,6 +109,7 @@ export const ListBookmarksQuery = z.object({
   archived: boolParam.optional(),
   favorite: boolParam.optional(),
   type: BookmarkType.optional(),
+  contentStatus: ContentStatus.optional(),
   limit: z.coerce.number().int().min(1).max(500).default(50),
   /** Opaque cursor from a previous page's `nextCursor`. */
   cursor: z.string().optional(),

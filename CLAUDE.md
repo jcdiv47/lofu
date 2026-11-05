@@ -1,6 +1,6 @@
 # lofu — notes for coding agents
 
-See README.md for layout and commands. Before finishing a change, run `bun test`, `bun run typecheck`, `bun run lint`, and for the CLI `cargo clippy -p lofu-cli`.
+See README.md for layout and commands. Before finishing a change, run `bun test`, `bun run typecheck` (server and extension), `bun run lint`, `cargo clippy -p lofu-cli`, and for extension changes `bun run ext:e2e`. Look at the screenshots it writes, because UI regressions don't fail assertions.
 
 Invariants that the code relies on:
 

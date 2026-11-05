@@ -1,6 +1,7 @@
 import { SQLiteError } from "bun:sqlite";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { compress } from "hono/compress";
+import { cors } from "hono/cors";
 import type { AppContext } from "./context.ts";
 import { bookmarkRoutes } from "./routes/bookmarks.ts";
 import { importRoutes } from "./routes/imports.ts";
@@ -33,11 +34,43 @@ export function createApp(ctx: AppContext) {
     return c.json({ error: "internal error" }, 500);
   });
 
+  // Browser extensions call the API from their own origin. Allowing them is
+  // safe: every /v1 request still needs a bearer token (no cookies are used).
+  const EXTENSION_ORIGIN = /^(chrome|moz|safari-web)-extension:\/\/[\w.-]+$/;
+  app.use(
+    "*",
+    cors({
+      origin: (origin) => (EXTENSION_ORIGIN.test(origin) ? origin : null),
+      allowHeaders: ["authorization", "content-type", "content-encoding"],
+      allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+      maxAge: 86_400,
+    }),
+  );
+
   app.get("/health", async (c) =>
     c.json({ ok: true, version: VERSION, search: ctx.searcher ? await ctx.meiliHealthy() : null }),
   );
 
   app.use("/v1/*", compress({ threshold: 2048 }));
+  // Clients may gzip large uploads (the browser extension sends rendered
+  // pages of several MB); decode before any validator reads the body.
+  app.use("/v1/*", async (c, next) => {
+    const encoding = c.req.header("content-encoding")?.toLowerCase();
+    if (!encoding || encoding === "identity" || !c.req.raw.body) return next();
+    if (encoding !== "gzip" && encoding !== "deflate") {
+      return c.json({ error: `unsupported content-encoding: ${encoding}` }, 415);
+    }
+    const headers = new Headers(c.req.raw.headers);
+    headers.delete("content-encoding");
+    headers.delete("content-length");
+    c.req.raw = new Request(c.req.raw.url, {
+      method: c.req.raw.method,
+      headers,
+      body: c.req.raw.body.pipeThrough(new DecompressionStream(encoding)),
+      duplex: "half",
+    } as RequestInit);
+    return next();
+  });
   app.use("/v1/*", async (c, next) => {
     if (ctx.config.authDisabled) return next();
     const header = c.req.header("authorization");

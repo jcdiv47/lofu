@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>lofu</title>
+  </head>
+  <body>
+    <main class="card" id="card" data-state="saving">
+      <header class="masthead">
+        <span class="wordmark">lofu</span>
+        <span class="callno" id="callno">№ ———</span>
+      </header>
+
+      <section class="subject">
+        <h1 class="title" id="title">&nbsp;</h1>
+        <p class="meta">
+          <span id="domain"></span>
+          <span class="dot" aria-hidden="true">·</span>
+          <span id="status-line" class="status-line">Shelving…</span>
+        </p>
+        <div class="stamp" id="stamp" role="status" aria-live="polite">
+          <span class="stamp-word" id="stamp-word">Shelved</span>
+          <span class="stamp-date" id="stamp-date"></span>
+        </div>
+      </section>
+
+      <section class="problem" id="problem" hidden>
+        <p id="problem-text"></p>
+        <button type="button" class="link" id="open-options">Open settings</button>
+      </section>
+
+      <section class="fields" id="fields">
+        <div class="field">
+          <label class="label" for="tag-input">Tags</label>
+          <div class="chips" id="chips">
+            <input
+              id="tag-input"
+              class="tag-input"
+              placeholder="add a tag"
+              autocomplete="off"
+              spellcheck="false"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-controls="suggest"
+              aria-expanded="false"
+            />
+          </div>
+          <div class="suggest" id="suggest" role="listbox" hidden></div>
+        </div>
+
+        <div class="field">
+          <label class="label" for="collection">Shelf</label>
+          <div class="select-wrap">
+            <select id="collection">
+              <option value="">Unsorted</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="label" for="note">Note</label>
+          <textarea id="note" class="note" rows="3" placeholder="Why it's worth keeping…"></textarea>
+        </div>
+      </section>
+
+      <footer class="actions" id="actions">
+        <button type="button" class="act" id="fav" aria-pressed="false">
+          <span class="star" aria-hidden="true">★</span> Favorite
+        </button>
+        <button type="button" class="act" id="archive" aria-pressed="false">Archive</button>
+        <button type="button" class="act danger" id="remove">Remove</button>
+        <span class="sync" id="sync" aria-live="polite"></span>
+      </footer>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
