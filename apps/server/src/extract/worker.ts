@@ -6,6 +6,7 @@
  * (zero-copy).
  */
 import { Defuddle } from "defuddle/node";
+import { detectBlockPage } from "./blocked.ts";
 import type { ExtractRequest, ExtractResponse } from "./protocol.ts";
 import { markdownToText } from "./text.ts";
 
@@ -40,6 +41,8 @@ self.onmessage = async (ev: MessageEvent<ExtractRequest>) => {
       publishedAt: nonEmpty(r.published),
       extractor: r.extractorType ?? null,
       ogType,
+      textLength: text.length,
+      blocked: detectBlockPage(nonEmpty(r.title), text),
       parseMs: performance.now() - t0,
     };
     const msg: ExtractResponse = { id, ok: true, out };

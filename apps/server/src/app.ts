@@ -3,6 +3,7 @@ import { OpenAPIHono } from "@hono/zod-openapi";
 import { compress } from "hono/compress";
 import type { AppContext } from "./context.ts";
 import { bookmarkRoutes } from "./routes/bookmarks.ts";
+import { importRoutes } from "./routes/imports.ts";
 import { miscRoutes } from "./routes/misc.ts";
 import { NotFoundError } from "./store/bookmarks.ts";
 
@@ -47,6 +48,7 @@ export function createApp(ctx: AppContext) {
 
   bookmarkRoutes(app, ctx);
   miscRoutes(app, ctx);
+  importRoutes(app, ctx);
 
   app.openAPIRegistry.registerComponent("securitySchemes", "bearer", {
     type: "http",

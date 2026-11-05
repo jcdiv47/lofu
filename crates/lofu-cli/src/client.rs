@@ -132,6 +132,16 @@ impl Client {
         Self::parse(self.finish(req.send_json(body))?)
     }
 
+    /// POSTs a raw body (e.g. a CSV file) and parses the JSON response.
+    pub fn post_raw(&self, path: &str, content_type: &str, body: &[u8]) -> Result<Value, Error> {
+        let req = self
+            .agent
+            .post(self.url(path))
+            .header("authorization", &self.auth)
+            .header("content-type", content_type);
+        Self::parse(self.finish(req.send(body))?)
+    }
+
     pub fn patch(&self, path: &str, body: &Value) -> Result<Value, Error> {
         let req = self
             .agent

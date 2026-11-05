@@ -20,10 +20,28 @@ export const config = {
   extractWorkers: int("LOFU_EXTRACT_WORKERS", Math.max(1, Math.min(4, availableParallelism() - 1))),
   fetchConcurrency: int("LOFU_FETCH_CONCURRENCY", 8),
   fetchPerHost: int("LOFU_FETCH_PER_HOST", 2),
+  fetchHostIntervalMs: int("LOFU_FETCH_HOST_INTERVAL_MS", 1000),
+  /**
+   * Jobs in flight. Jobs waiting on per-host limits are just parked promises,
+   * so this is set well above the fetch concurrency to keep other hosts busy.
+   */
+  jobConcurrency: int("LOFU_JOB_CONCURRENCY", 64),
   fetchTimeoutMs: int("LOFU_FETCH_TIMEOUT_MS", 20_000),
   fetchMaxBytes: int("LOFU_FETCH_MAX_BYTES", 15 * 1024 * 1024),
   /** Try HTTP/2 first for https pages (Bun's experimental h2 client). */
   fetchHttp2: process.env.LOFU_FETCH_HTTP2 !== "0",
+  /**
+   * Headless-Chromium fallback: "auto" (launch a local Chromium on demand if
+   * one is found), "off", or a CDP endpoint URL such as http://browser:9222.
+   */
+  browser: process.env.LOFU_BROWSER ?? "auto",
+  chromePath: process.env.LOFU_CHROME_PATH ?? "",
+  /** Extra Chromium flags, space-separated (e.g. "--no-sandbox" in containers). */
+  chromeArgs: (process.env.LOFU_CHROME_ARGS ?? "").split(/\s+/).filter(Boolean),
+  browserConcurrency: int("LOFU_BROWSER_CONCURRENCY", 2),
+  browserTimeoutMs: int("LOFU_BROWSER_TIMEOUT_MS", 25_000),
+  /** Shut the launched browser down after this long without renders. */
+  browserIdleMs: int("LOFU_BROWSER_IDLE_MS", 5 * 60_000),
   meiliUrl: process.env.MEILI_URL ?? "",
   meiliKey: process.env.MEILI_MASTER_KEY ?? "",
   meiliIndex: process.env.MEILI_INDEX ?? "bookmarks",

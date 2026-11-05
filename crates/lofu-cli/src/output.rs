@@ -228,6 +228,37 @@ impl Out {
         }
     }
 
+    pub fn import_report(&self, r: &Value) {
+        if self.json {
+            return self.value(r);
+        }
+        self.print(&format!(
+            "{} rows: {} new, {} already saved, {} skipped, {} highlights ({} ms)",
+            r["total"],
+            r["created"],
+            r["merged"],
+            r["skipped"].as_array().map_or(0, Vec::len),
+            r["highlightsAdded"],
+            r["durationMs"]
+        ));
+        if let Some(cols) = r["collectionsCreated"].as_array().filter(|c| !c.is_empty()) {
+            let names: Vec<&str> = cols.iter().map(s).collect();
+            self.print(&format!("new collections: {}", names.join(", ")));
+        }
+        for sk in r["skipped"].as_array().into_iter().flatten() {
+            self.print(&self.dim(&format!(
+                "  skipped row {}: {} ({})",
+                sk["row"],
+                s(&sk["url"]),
+                s(&sk["reason"])
+            )));
+        }
+        self.print(&format!(
+            "{} pages queued for fetching; extraction continues in the background",
+            r["queued"]
+        ));
+    }
+
     pub fn error(&self, e: &Error) {
         let mut stderr = std::io::stderr().lock();
         if self.json {

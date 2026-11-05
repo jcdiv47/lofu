@@ -47,6 +47,12 @@ lofu collections add "Reading list" [--parent <id>]
 
 Tags are lowercased. Saving returns immediately with `contentStatus: "pending"`; extraction finishes in the background, usually within a few seconds.
 
+## Importing
+
+```sh
+raindrop bookmark export --format csv | lofu import raindrop -   # idempotent; prints a report
+```
+
 ## Setup
 
 Configuration comes from `LOFU_URL` / `LOFU_TOKEN` or `~/.config/lofu/config.json`, written by `lofu login --url <server> --token <token>`. If you get exit code 5 or 4, tell the user; don't guess a different server.

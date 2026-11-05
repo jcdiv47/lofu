@@ -20,7 +20,8 @@ const server = Bun.serve({
 });
 console.log(
   `lofu ${VERSION} listening on http://${server.hostname}:${server.port} ` +
-    `(extract workers: ${config.extractWorkers}, search: ${config.meiliUrl || "disabled"})`,
+    `(extract workers: ${config.extractWorkers}, search: ${config.meiliUrl || "disabled"}, ` +
+    `browser: ${sys.browser?.description ?? "off"})`,
 );
 
 sys.start().catch((e) => {

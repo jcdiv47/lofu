@@ -51,11 +51,21 @@ Numbers below were measured on the dev box (32 cores, loopback) with the real st
 | Change feed | One global `seq` number, allocated in memory and assigned on every write | One change number feeds both client delta sync (`/v1/sync`) and the search indexer. It's gap-free because the main thread is the only writer, and there's no counter row to contend on. |
 | Extraction | Defuddle + linkedom on a **worker-thread pool** that replaces timed-out workers | Defuddle costs ~450 ms CPU per large page. Pre-stripping scripts and styles (a candidate for a Rust pre-pass) saved almost nothing, so parallelism is the fix. The API's event loop never blocks. |
 | Fetching | HTTP/2 first for https with fallback to HTTP/1.1 (remembered per host); global + per-host concurrency caps; charset detection | Some sites reject HTTP/1.1 clients (paulgraham.com returns 500). GBK, Big5 and Shift_JIS pages decode correctly. |
-| Content storage | Article HTML, markdown and text stored zstd-compressed, in a separate table | Lists never page in large blobs. `/content` sends the stored zstd bytes unchanged to clients that accept zstd, at zero CPU cost. |
+| Hard pages | Unreadable pages are recognized and handled instead of being saved as junk. **401/403 bot walls** and **JavaScript-only pages** fall back to headless Chromium, which is launched on demand, closed when idle, and driven over raw CDP. It blocks images, fonts and media, and polls until the page stops looking like a challenge. **Captcha/challenge pages** served with a 200 are detected. Rate-limit captchas (WeChat) slow down that host instead. **PDFs** get full text via poppler, and arXiv titles and abstracts come from the abstract page. | On a real 897-link Raindrop library, honest failures fell from 195 to 126 while extracted pages rose to 736. Weibo, Notion, Feishu and Google Docs now work. The ones that still fail: Cloudflare Turnstile (Medium, V2EX) and Zhihu's login wall. Those need HTML from your own browser (the `html` field, and the future extension). |
+| Content storage | Article HTML, markdown and text stored zstd-compressed, in a separate table | 866 MB of fetched HTML for 897 bookmarks became **16 MB** stored. Lists never page in large blobs. `/content` sends the stored zstd bytes unchanged to clients that accept zstd, at zero CPU cost. |
 | Search | Meilisearch returns **ids only**; bookmarks are hydrated from SQLite, and snippets are cut locally | Letting Meilisearch crop/highlight article bodies cut throughput from **~35k to ~620 req/s**. With local snippets: **~4k req/s** (p50 7.7 ms), or **~13k req/s** with `snippets=false`. |
+| Jobs | Durable SQLite queue; up to 64 jobs in flight (waiting ones are just parked promises); interactive work before bulk; random order within bulk | Importing 1,161 Raindrop rows takes **31 ms**, and the import never starves interactive saves or the other hosts. |
 | Indexing | Incremental and batched, driven by `seq`. The cursor only advances after Meilisearch confirms the write. | Bursts (imports) collapse into a few batches. A Meilisearch outage just means indexing catches up later. |
 | CLI | Rust (clap + ureq), 2.6 MB static binary | `lofu ls`: **0.7 ms** round trip; `--help`: 0.3 ms. A compiled Bun binary would start in ~2 ms and weigh ~86 MB. |
 | Auth | 256-bit bearer tokens, SHA-256 hashed, verified once and cached in memory | No KDF on every request. Revocation takes effect within 60 s. |
+
+## Importing from Raindrop.io
+
+```sh
+raindrop bookmark export --format csv | lofu import raindrop -   # or: lofu import raindrop export.csv
+```
+
+The import takes the CSV export from Raindrop (Settings → Export, or the `raindrop` CLI) and is safe to re-run. Folders become collections. Tags, notes, excerpts, highlights, favorites and the original save dates are carried over. Duplicates within the export are merged, since URLs are compared after normalization. Raindrop's `rdl.ink` screenshot covers are dropped in favor of the page's own image. Unfetchable URLs such as `chrome-extension://` are skipped and listed in the report. Placeholder titles (the URL, a file name, "Webpage: x") aren't kept, so the real title wins. Pages are then fetched in the background at **bulk priority**, so anything you save meanwhile is fetched first. Bulk jobs run in random order and each host is limited to one request per `LOFU_FETCH_HOST_INTERVAL_MS` (default 1 s), so a backlog of WeChat links doesn't block other sites or trip rate limits.
 
 ## API
 
@@ -65,11 +75,12 @@ The OpenAPI 3.1 document is served at `/openapi.json`, generated from the zod sc
 - `GET /v1/bookmarks` (keyset pagination; filters `collectionId`, `tags`, `archived`, `favorite`, `type`), `GET|PATCH|DELETE /v1/bookmarks/{id}`, `POST /v1/bookmarks/{id}/refetch`, `GET /v1/bookmarks/{id}/content?format=markdown|html|text`
 - `GET /v1/search`, `GET /v1/tags`, `/v1/collections`, `/v1/bookmarks/{id}/highlights`, `/v1/highlights/{id}`
 - `GET /v1/sync?since=<cursor>`: everything changed since the cursor, deletions included
+- `POST /v1/import/raindrop` (body: the CSV file): returns an import report
 
 ## Roadmap
 
-1. **Importers**: Netscape bookmark HTML (browsers, Raindrop), Pocket export, Raindrop CSV.
-2. **Headless fallback**: Playwright/Chromium for pages built in JavaScript; screenshot thumbnails.
+1. More importers as needed: Netscape bookmark HTML (browsers), Pocket export.
+2. Per-site cookies for the browser fallback (Zhihu and other login walls); screenshot thumbnails.
 3. **Permanent copies**: single-file archives via `monolith`; periodic broken-link checks.
 4. **Clients**: nsh prototype of the reader view with highlights (the riskiest part), then a web app, then iOS/macOS with a Swift share extension and keychain; a WXT browser extension that sends rendered HTML.
 5. Semantic search (a Meilisearch embedder, e.g. Ollama → `MEILI_EMBEDDER`), suggested tags, text-to-speech.

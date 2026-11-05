@@ -1,53 +1,7 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { createApp } from "../src/app.ts";
-import { config } from "../src/config.ts";
-import { wire } from "../src/wire.ts";
-import { startFixtureServer } from "./fixtures.ts";
+import { describe, expect, test } from "bun:test";
+import { setupServer } from "./harness.ts";
 
-const site = startFixtureServer();
-const base = `http://localhost:${site.port}`;
-const withSearch = Boolean(process.env.MEILI_URL);
-const sys = wire({
-  ...config,
-  dbPath: ":memory:",
-  authDisabled: false,
-  extractWorkers: 2,
-  meiliUrl: withSearch ? (process.env.MEILI_URL as string) : "",
-  meiliIndex: `test_${Date.now()}`,
-});
-const app = createApp(sys.ctx);
-const { token } = sys.ctx.tokens.create("test");
-
-async function api(
-  method: string,
-  path: string,
-  body?: unknown,
-  headers: Record<string, string> = {},
-) {
-  const res = await app.request(path, {
-    method,
-    headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...headers },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const text = await res.text();
-  let data: any = text;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {}
-  return { status: res.status, data, res };
-}
-
-beforeAll(() => sys.start());
-afterAll(async () => {
-  if (withSearch && sys.indexer) {
-    await fetch(`${process.env.MEILI_URL}/indexes/${sys.indexer.index}`, {
-      method: "DELETE",
-      headers: { authorization: `Bearer ${process.env.MEILI_MASTER_KEY}` },
-    });
-  }
-  await sys.stop();
-  site.stop(true);
-});
+const { sys, app, api, base, withSearch } = setupServer();
 
 describe("auth", () => {
   test("rejects missing and bad tokens", async () => {
@@ -109,7 +63,7 @@ describe("bookmarks", () => {
     const r = await api("POST", "/v1/bookmarks", {
       url: "https://unreachable.invalid/private-page",
       title: "My title",
-      html: "<html><head><title>Server title</title></head><body><article><p>Members-only text about quokkas.</p></article></body></html>",
+      html: "<html><head><title>Server title</title></head><body><article><p>Members-only text about quokkas, the small marsupials of Rottnest Island.</p></article></body></html>",
     });
     await sys.runner.idle();
     const b = await api("GET", `/v1/bookmarks/${r.data.id}?content=text`);
@@ -124,14 +78,63 @@ describe("bookmarks", () => {
     expect((await api("GET", `/v1/bookmarks/${r.data.id}`)).data.title).toBe("你好世界");
   });
 
-  test("non-HTML is typed and skipped; 404 fails permanently", async () => {
+  test("PDFs get full text via poppler; images are typed and skipped; 404 fails", async () => {
     const pdf = await api("POST", "/v1/bookmarks", { url: `${base}/paper.pdf` });
+    const img = await api("POST", "/v1/bookmarks", { url: `${base}/image.png` });
     const missing = await api("POST", "/v1/bookmarks", { url: `${base}/gone` });
     await sys.runner.idle();
-    const p = (await api("GET", `/v1/bookmarks/${pdf.data.id}`)).data;
-    expect([p.contentStatus, p.type, p.title]).toEqual(["skipped", "document", "paper.pdf"]);
+    const p = (await api("GET", `/v1/bookmarks/${pdf.data.id}?content=text`)).data;
+    expect([p.contentStatus, p.type, p.title]).toEqual(["ok", "document", "Quokka Dynamics"]);
+    expect(p.content).toContain("photogenic grin");
+    const i = (await api("GET", `/v1/bookmarks/${img.data.id}`)).data;
+    expect([i.contentStatus, i.type, i.title]).toEqual(["skipped", "image", "image.png"]);
     const m = (await api("GET", `/v1/bookmarks/${missing.data.id}`)).data;
     expect([m.contentStatus, m.contentError]).toEqual(["failed", "HTTP 404"]);
+  });
+
+  test("corrupt PDFs, 403s and JavaScript-only pages fail with a reason", async () => {
+    const ids = await Promise.all(
+      ["broken.pdf", "forbidden", "js-app"].map(
+        async (p) => (await api("POST", "/v1/bookmarks", { url: `${base}/${p}` })).data.id,
+      ),
+    );
+    await sys.runner.idle();
+    const [broken, forbidden, js] = await Promise.all(
+      ids.map(async (id) => (await api("GET", `/v1/bookmarks/${id}`)).data),
+    );
+    expect([broken.contentStatus, broken.contentError]).toEqual([
+      "failed",
+      expect.stringContaining("PDF"),
+    ]);
+    expect([forbidden.contentStatus, forbidden.contentError]).toEqual([
+      "failed",
+      "blocked by site (HTTP 403)",
+    ]);
+    // Metadata survives even though the body was empty.
+    expect([js.contentStatus, js.title]).toEqual(["failed", "A post title"]);
+    expect(js.contentError).toContain("JavaScript");
+  });
+
+  test("captcha pages are not stored as content; the job retries later", async () => {
+    // A different host name for the same fixture server: the captcha penalizes
+    // (slows down) its host, which must not slow the other tests.
+    const r = await api("POST", "/v1/bookmarks", {
+      url: `${base.replace("localhost", "127.0.0.1")}/captcha`,
+    });
+    await sys.runner.idle();
+    expect((await api("GET", `/v1/bookmarks/${r.data.id}`)).data.contentStatus).toBe("pending");
+    const job = sys.ctx.db
+      .query<{ last_error: string }, [string]>("SELECT last_error FROM jobs WHERE bookmark_id = ?")
+      .get(r.data.id);
+    expect(job?.last_error).toBe("blocked by site: WeChat verification page");
+  });
+
+  test("markdown files are stored as content", async () => {
+    const r = await api("POST", "/v1/bookmarks", { url: `${base}/notes.md` });
+    await sys.runner.idle();
+    const b = (await api("GET", `/v1/bookmarks/${r.data.id}?content=markdown`)).data;
+    expect([b.contentStatus, b.type, b.title]).toEqual(["ok", "document", "notes.md"]);
+    expect(b.content).toContain("axolotls");
   });
 
   test("list filters by tags and paginates with a cursor", async () => {

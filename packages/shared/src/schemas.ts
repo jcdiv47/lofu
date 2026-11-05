@@ -262,3 +262,21 @@ export const SyncResponse = z
 export const ApiError = z
   .object({ error: z.string(), details: z.unknown().optional() })
   .meta({ id: "ApiError" });
+
+export const ImportReport = z
+  .object({
+    /** Data rows in the file. */
+    total: z.number().int(),
+    /** New bookmarks (or ones revived from trash). */
+    created: z.number().int(),
+    /** URLs that were already saved; tags merged and provided fields applied. */
+    merged: z.number().int(),
+    skipped: z.array(z.object({ row: z.number().int(), url: z.string(), reason: z.string() })),
+    collectionsCreated: z.array(z.string()),
+    highlightsAdded: z.number().int(),
+    /** Pages queued for fetching and extraction (runs in the background). */
+    queued: z.number().int(),
+    durationMs: z.number(),
+  })
+  .meta({ id: "ImportReport" });
+export type ImportReport = z.infer<typeof ImportReport>;

@@ -87,6 +87,17 @@ enum Cmd {
     Highlights { id: String },
     /// Re-fetch and re-extract a page
     Refetch { id: String },
+    /// Import bookmarks from another service
+    #[command(subcommand)]
+    Import(ImportCmd),
+}
+
+#[derive(Subcommand)]
+enum ImportCmd {
+    /// Import a Raindrop.io CSV export ("-" reads stdin). Safe to re-run.
+    ///
+    /// e.g. `raindrop bookmark export --format csv | lofu import raindrop -`
+    Raindrop { file: String },
 }
 
 #[derive(Args)]
@@ -260,6 +271,19 @@ fn filter_query(f: &Filters) -> Vec<(&'static str, String)> {
     q
 }
 
+/// Reads a file path, or stdin for "-".
+fn read_input(path: &str) -> Result<Vec<u8>, Error> {
+    if path == "-" {
+        let mut buf = Vec::new();
+        std::io::stdin()
+            .read_to_end(&mut buf)
+            .map_err(|e| Error::Other(format!("stdin: {e}")))?;
+        Ok(buf)
+    } else {
+        std::fs::read(path).map_err(|e| Error::Other(format!("{path}: {e}")))
+    }
+}
+
 fn run(cli: Cli, out: &Out) -> Result<(), Error> {
     if let Cmd::Login { url, token } = &cli.cmd {
         let path = config::save(url, token).map_err(|e| Error::Other(e.to_string()))?;
@@ -426,6 +450,10 @@ fn run(cli: Cli, out: &Out) -> Result<(), Error> {
         },
         Cmd::Highlights { id } => {
             out.highlights(&api.get(&format!("/v1/bookmarks/{id}/highlights"), &[])?)
+        }
+        Cmd::Import(ImportCmd::Raindrop { file }) => {
+            let data = read_input(&file)?;
+            out.import_report(&api.post_raw("/v1/import/raindrop", "text/csv", &data)?);
         }
         Cmd::Refetch { id } => {
             out.bookmark(&api.post(&format!("/v1/bookmarks/{id}/refetch"), &json!({}))?)

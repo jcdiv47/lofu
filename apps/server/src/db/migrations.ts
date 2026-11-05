@@ -119,4 +119,8 @@ export const migrations: string[] = [
     last_used_at INTEGER
   );
   `,
+
+  /* 2: job priority (0 = interactive, 1 = bulk import) */ `
+  ALTER TABLE jobs ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
+  `,
 ];

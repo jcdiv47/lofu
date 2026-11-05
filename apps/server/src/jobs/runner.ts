@@ -33,6 +33,7 @@ export class JobRunner {
 
   start() {
     this.stopped = false;
+    this.jobs.releaseAll();
     this.kick();
   }
 

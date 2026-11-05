@@ -1,14 +1,24 @@
 import type { BookmarkType } from "@lofu/shared";
+import { Semaphore } from "../util/semaphore.ts";
 
 export type FetchResult =
   | { kind: "html"; html: string; finalUrl: string; bytes: number }
+  | { kind: "pdf"; data: Uint8Array; finalUrl: string }
+  | { kind: "text"; text: string; markdown: boolean; finalUrl: string; bytes: number }
   | { kind: "other"; type: BookmarkType; contentType: string; finalUrl: string };
+
+/** Papers and books run larger than web pages. */
+const PDF_MAX_BYTES = 64 * 1024 * 1024;
+/** Ceiling for the adaptive per-host backoff. */
+const MAX_PENALTY_MS = 60_000;
 
 export class FetchError extends Error {
   constructor(
     message: string,
     /** Permanent errors (404, unsupported type) are not retried. */
     readonly permanent: boolean,
+    /** 401/403: the site refuses this client; a real browser might get through. */
+    readonly blocked = false,
   ) {
     super(message);
   }
@@ -16,24 +26,6 @@ export class FetchError extends Error {
 
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
-
-/** Counting semaphore. */
-class Semaphore {
-  private waiters: (() => void)[] = [];
-  constructor(private free: number) {}
-  async acquire(): Promise<() => void> {
-    if (this.free > 0) this.free--;
-    else await new Promise<void>((r) => this.waiters.push(r));
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      const next = this.waiters.shift();
-      if (next) next();
-      else this.free++;
-    };
-  }
-}
 
 /**
  * Page fetcher with a global concurrency cap and a per-host cap (politeness:
@@ -50,6 +42,8 @@ export class Fetcher {
       timeoutMs: number;
       maxBytes: number;
       http2: boolean;
+      /** Minimum gap between request starts to the same host. */
+      hostIntervalMs: number;
     },
   ) {
     this.global = new Semaphore(opts.concurrency);
@@ -64,6 +58,7 @@ export class Fetcher {
     }
     h.users++;
     const releaseHost = await h.sem.acquire();
+    await this.pace(host);
     const releaseGlobal = await this.global.acquire();
     try {
       return await this.doFetch(url);
@@ -72,6 +67,46 @@ export class Fetcher {
       releaseHost();
       if (--h.users === 0) this.hosts.delete(host);
     }
+  }
+
+  private nextStart = new Map<string, number>();
+  private penalty = new Map<string, number>();
+
+  /**
+   * Spaces request starts to one host by `hostIntervalMs`, or longer while
+   * the host is penalized. Slots are reserved before sleeping, so concurrent
+   * callers queue up behind each other. Sites like WeChat or Weibo serve
+   * captchas to bursts, so a bulk import that is 30% one host must trickle
+   * rather than hammer it.
+   */
+  private async pace(host: string) {
+    const interval = Math.max(this.opts.hostIntervalMs, this.penalty.get(host) ?? 0);
+    if (interval <= 0) return;
+    const now = Date.now();
+    const at = Math.max(now, this.nextStart.get(host) ?? 0);
+    this.nextStart.set(host, at + interval);
+    if (this.nextStart.size > 10_000) {
+      for (const [k, t] of this.nextStart) if (t < now) this.nextStart.delete(k);
+    }
+    if (at > now) await Bun.sleep(at - now);
+  }
+
+  /**
+   * Adaptive politeness: a host that rate-limits us (429/503, or a captcha
+   * page detected after extraction) gets its interval doubled, up to a
+   * minute. Each successful response relaxes it again.
+   */
+  penalize(url: string) {
+    const host = new URL(url).host;
+    const cur = this.penalty.get(host) ?? 0;
+    this.penalty.set(host, Math.min(MAX_PENALTY_MS, Math.max(5_000, cur * 2)));
+  }
+
+  private relax(host: string) {
+    const cur = this.penalty.get(host);
+    if (cur === undefined) return;
+    if (cur * 0.8 <= this.opts.hostIntervalMs || cur < 500) this.penalty.delete(host);
+    else this.penalty.set(host, cur * 0.8);
   }
 
   /** Hosts whose h2 attempt failed; they go straight to HTTP/1.1 from then on. */
@@ -115,14 +150,38 @@ export class Fetcher {
       throw new FetchError(`fetch failed: ${(e as Error).message}`, false);
     }
     const finalUrl = res.url || url;
+    const host = new URL(url).host;
     if (!res.ok) {
       await res.body?.cancel();
-      const permanent = res.status === 404 || res.status === 410 || res.status === 451;
-      throw new FetchError(`HTTP ${res.status}`, permanent);
+      const s = res.status;
+      if (s === 429 || s === 503) this.penalize(url);
+      // 401/403 here are bot walls (Cloudflare, Zhihu, Medium): retrying from
+      // the same client won't help. They need the (future) browser fallback.
+      if (s === 401 || s === 403) throw new FetchError(`blocked by site (HTTP ${s})`, true, true);
+      throw new FetchError(`HTTP ${s}`, s === 404 || s === 410 || s === 451);
     }
+    this.relax(host);
 
     const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
     const mime = contentType.split(";")[0]!.trim();
+    if (
+      mime === "application/pdf" ||
+      (mime === "application/octet-stream" && /\.pdf$/i.test(new URL(finalUrl).pathname))
+    ) {
+      return { kind: "pdf", data: await readCapped(res, PDF_MAX_BYTES), finalUrl };
+    }
+    if (mime === "text/plain" || mime === "text/markdown" || mime === "text/x-markdown") {
+      const bytes = await readCapped(res, this.opts.maxBytes);
+      const markdown =
+        mime !== "text/plain" || /\.(md|markdown)$/i.test(new URL(finalUrl).pathname);
+      return {
+        kind: "text",
+        text: decodeHtml(bytes, contentType),
+        markdown,
+        finalUrl,
+        bytes: bytes.byteLength,
+      };
+    }
     if (mime && mime !== "text/html" && mime !== "application/xhtml+xml") {
       await res.body?.cancel();
       return { kind: "other", type: typeForMime(mime), contentType: mime, finalUrl };

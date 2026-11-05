@@ -3,6 +3,10 @@ import type { Hooks } from "./hooks.ts";
 
 export type JobKind = "extract";
 
+/** Interactive work (a link the user just saved) always runs before bulk imports. */
+export const Priority = { interactive: 0, bulk: 1 } as const;
+export type Priority = (typeof Priority)[keyof typeof Priority];
+
 export interface Job {
   id: number;
   kind: JobKind;
@@ -20,15 +24,22 @@ export class JobStore {
   ) {}
 
   /** Must be safe to call inside another store's transaction. */
-  enqueue(kind: JobKind, bookmarkId: string, payload: string | null = null, runAt = Date.now()) {
+  enqueue(
+    kind: JobKind,
+    bookmarkId: string,
+    payload: string | null = null,
+    priority: Priority = Priority.interactive,
+    runAt = Date.now(),
+  ) {
     this.db
       .query(
-        `INSERT INTO jobs (kind, bookmark_id, payload, run_at) VALUES (?, ?, ?, ?)
+        `INSERT INTO jobs (kind, bookmark_id, payload, run_at, priority) VALUES (?, ?, ?, ?, ?)
          ON CONFLICT (kind, bookmark_id) DO UPDATE SET
            payload = excluded.payload, run_at = excluded.run_at,
+           priority = min(priority, excluded.priority),
            attempts = 0, locked_until = NULL, last_error = NULL`,
       )
-      .run(kind, bookmarkId, payload, runAt);
+      .run(kind, bookmarkId, payload, runAt, priority);
     this.hooks.jobEnqueued();
   }
 
@@ -36,7 +47,12 @@ export class JobStore {
     this.db.query("DELETE FROM jobs WHERE kind = ? AND bookmark_id = ?").run(kind, bookmarkId);
   }
 
-  /** Atomically leases up to `limit` due jobs. Expired leases are re-claimable. */
+  /**
+   * Atomically leases up to `limit` due jobs. Expired leases are re-claimable.
+   * Interactive jobs go first, in FIFO order. Bulk jobs are picked in random
+   * order so an import dominated by one site (whose fetches are paced per
+   * host) doesn't hold up every other host.
+   */
   claim(limit: number, leaseMs: number): Job[] {
     const now = Date.now();
     return this.db
@@ -45,10 +61,20 @@ export class JobStore {
          WHERE id IN (
            SELECT id FROM jobs
            WHERE run_at <= ? AND (locked_until IS NULL OR locked_until < ?)
-           ORDER BY run_at LIMIT ?)
+           ORDER BY priority, CASE WHEN priority = 0 THEN run_at END, random()
+           LIMIT ?)
          RETURNING id, kind, bookmark_id, payload, run_at, attempts`,
       )
       .all(now + leaseMs, now, now, limit);
+  }
+
+  /**
+   * Clears every lease. Called at startup: this process is the only worker,
+   * so any lease left in the table belongs to a previous, dead process and
+   * would otherwise block its job until the lease expired.
+   */
+  releaseAll() {
+    this.db.query("UPDATE jobs SET locked_until = NULL WHERE locked_until IS NOT NULL").run();
   }
 
   complete(id: number) {

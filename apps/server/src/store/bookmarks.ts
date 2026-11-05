@@ -8,10 +8,16 @@ import {
 } from "@lofu/shared";
 import type { Db } from "../db/index.ts";
 import type { Hooks } from "./hooks.ts";
-import type { JobStore } from "./jobs.ts";
+import { type JobStore, Priority } from "./jobs.ts";
 import { type BookmarkRow, toBookmark } from "./rows.ts";
 
 export class NotFoundError extends Error {}
+
+/** Extra fields importers can set that the public create API doesn't expose. */
+export interface ImportFields {
+  excerpt?: string | null | undefined;
+  coverUrl?: string | null | undefined;
+}
 export class ConflictError extends Error {}
 
 export interface ListFilter {
@@ -103,7 +109,11 @@ export class BookmarkStore {
    * merges tags and applies any provided fields instead of duplicating; saving
    * a previously deleted URL revives the original row (same id).
    */
-  create(input: CreateBookmark): { bookmark: Bookmark; created: boolean } {
+  create(
+    input: CreateBookmark & ImportFields,
+    opts: { priority?: Priority } = {},
+  ): { bookmark: Bookmark; created: boolean } {
+    const priority = opts.priority ?? Priority.interactive;
     const urlKey = normalizeUrl(input.url);
     const now = Date.now();
     const createdAt = input.createdAt ? Date.parse(input.createdAt) : now;
@@ -118,9 +128,9 @@ export class BookmarkStore {
         const id = input.id ?? Bun.randomUUIDv7();
         this.db
           .query(
-            `INSERT INTO bookmarks (id, url, url_key, title, title_locked, note, domain, tags,
-               collection_id, favorite, archived, created_at, updated_at, seq)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO bookmarks (id, url, url_key, title, title_locked, note, excerpt, cover_url,
+               domain, tags, collection_id, favorite, archived, created_at, updated_at, seq)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             id,
@@ -129,6 +139,8 @@ export class BookmarkStore {
             input.title ?? "",
             input.title ? 1 : 0,
             input.note ?? null,
+            input.excerpt ?? null,
+            input.coverUrl ?? null,
             domainOf(input.url),
             JSON.stringify(dedupeTags(input.tags ?? [])),
             input.collectionId ?? null,
@@ -138,7 +150,7 @@ export class BookmarkStore {
             now,
             seq,
           );
-        this.jobs.enqueue("extract", id, input.html ?? null);
+        this.jobs.enqueue("extract", id, input.html ?? null, priority);
         return { id, created: true };
       }
 
@@ -151,6 +163,7 @@ export class BookmarkStore {
           `UPDATE bookmarks SET
              title = coalesce(?, title), title_locked = max(title_locked, ?),
              note = coalesce(?, note), tags = ?,
+             excerpt = coalesce(excerpt, ?), cover_url = coalesce(cover_url, ?),
              collection_id = CASE WHEN ? THEN ? ELSE collection_id END,
              favorite = coalesce(?, favorite), archived = coalesce(?, archived),
              deleted_at = NULL, updated_at = ?, seq = ?
@@ -161,6 +174,8 @@ export class BookmarkStore {
           input.title ? 1 : 0,
           input.note ?? null,
           JSON.stringify(tags),
+          input.excerpt ?? null,
+          input.coverUrl ?? null,
           input.collectionId !== undefined ? 1 : 0,
           input.collectionId ?? null,
           sqlBool(input.favorite) ?? (revived ? 0 : null),
@@ -170,7 +185,7 @@ export class BookmarkStore {
           existing.id,
         );
       if (revived || input.html || existing.content_status === "failed") {
-        this.jobs.enqueue("extract", existing.id, input.html ?? null);
+        this.jobs.enqueue("extract", existing.id, input.html ?? null, priority);
       }
       return { id: existing.id, created: revived };
     })();
@@ -291,7 +306,11 @@ export class BookmarkStore {
   }
 
   /** Called by the extract job with results computed off-thread. */
-  saveExtraction(id: string, c: ExtractedContent): boolean {
+  saveExtraction(
+    id: string,
+    c: ExtractedContent,
+    outcome: { status: "ok" } | { status: "failed"; error: string } = { status: "ok" },
+  ): boolean {
     const now = Date.now();
     const saved = this.db.transaction(() => {
       // The bookmark may have been deleted while the page was being fetched.
@@ -316,7 +335,7 @@ export class BookmarkStore {
              title = CASE WHEN title_locked = 1 OR ? IS NULL THEN title ELSE ? END,
              excerpt = coalesce(excerpt, ?), cover_url = coalesce(cover_url, ?),
              favicon_url = coalesce(?, favicon_url), type = ?, word_count = ?, lang = ?,
-             author = ?, published_at = ?, content_status = 'ok', content_error = NULL,
+             author = ?, published_at = ?, content_status = ?, content_error = ?,
              updated_at = ?, seq = ?
            WHERE id = ? AND deleted_at IS NULL`,
         )
@@ -331,6 +350,8 @@ export class BookmarkStore {
           c.lang,
           c.author,
           c.publishedAt,
+          outcome.status,
+          outcome.status === "failed" ? outcome.error : null,
           now,
           this.db.nextSeq(),
           id,

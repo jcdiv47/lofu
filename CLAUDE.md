@@ -10,5 +10,6 @@ Invariants that the code relies on:
 - **Prepared statements must keep a bounded number of SQL shapes.** Pass variable-length lists as one JSON parameter through `json_each(?)` instead of generating `IN (?, ?, …)`.
 - **Schema changes are append-only** entries in `apps/server/src/db/migrations.ts`.
 - **API shapes live in `packages/shared/src/schemas.ts`** (zod). The OpenAPI document is generated from them. The Rust CLI passes JSON through rather than mirroring the types.
+- **Extraction must never store junk as `ok`.** Captcha/challenge pages, empty JS shells and error JSON are detected (`extract/blocked.ts`; the browser's own `ready` verdict). Add a signature when you find a new one. Detection only runs on short pages, so long articles that mention "captcha" aren't affected.
 
 Performance claims in README.md are measured. Re-measure before you change one.

@@ -1,7 +1,9 @@
 import type { Config } from "./config.ts";
 import type { AppContext } from "./context.ts";
 import { openDb } from "./db/index.ts";
+import { Browser, findChromium } from "./extract/browser.ts";
 import { Fetcher } from "./extract/fetch.ts";
+import { PdfExtractor } from "./extract/pdf.ts";
 import { ExtractPool } from "./extract/pool.ts";
 import { extractHandler } from "./jobs/extract.ts";
 import { JobRunner } from "./jobs/runner.ts";
@@ -34,19 +36,39 @@ export function wire(config: Config) {
   const tokens = new TokenStore(db);
 
   const pool = new ExtractPool(config.extractWorkers);
+  const pdf = new PdfExtractor(config.extractWorkers);
+  if (!pdf.available)
+    console.warn("poppler (pdftotext/pdfinfo) not found: PDFs will be saved without text");
   const fetcher = new Fetcher({
     concurrency: config.fetchConcurrency,
     perHost: config.fetchPerHost,
     timeoutMs: config.fetchTimeoutMs,
     maxBytes: config.fetchMaxBytes,
     http2: config.fetchHttp2,
+    hostIntervalMs: config.fetchHostIntervalMs,
   });
+  let browser: Browser | null = null;
+  const browserOpts = {
+    concurrency: config.browserConcurrency,
+    timeoutMs: config.browserTimeoutMs,
+    idleMs: config.browserIdleMs,
+  };
+  if (/^https?:\/\//.test(config.browser)) {
+    browser = new Browser({ kind: "connect", endpoint: config.browser }, browserOpts);
+  } else if (config.browser === "auto") {
+    const executable = findChromium(config.chromePath || undefined);
+    if (executable) {
+      browser = new Browser({ kind: "launch", executable, args: config.chromeArgs }, browserOpts);
+    }
+  }
+  if (!browser && config.browser !== "off") {
+    console.warn("no Chromium found: JavaScript-only pages won't get a browser fallback");
+  }
   runner = new JobRunner(
     jobs,
-    { extract: extractHandler({ bookmarks, fetcher, pool }) },
+    { extract: extractHandler({ bookmarks, fetcher, pool, pdf, browser }) },
     {
-      // Fetching is I/O-bound, so allow more jobs in flight than extract workers.
-      concurrency: config.fetchConcurrency + config.extractWorkers,
+      concurrency: config.jobConcurrency,
       leaseMs: 5 * 60_000,
     },
   );
@@ -70,6 +92,7 @@ export function wire(config: Config) {
 
   return {
     ctx,
+    browser,
     runner,
     indexer,
     pool,
@@ -85,6 +108,7 @@ export function wire(config: Config) {
       // stop the runner first.
       await Promise.all([runner?.stop(), indexer?.stop()]);
       await pool.close();
+      browser?.shutdown();
       db.run("PRAGMA optimize");
       db.close();
     },
