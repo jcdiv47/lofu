@@ -1,6 +1,6 @@
 # lofu — notes for coding agents
 
-See README.md for layout and commands. Before finishing a change, run `bun test`, `bun run typecheck` (server and extension), `bun run lint`, `cargo clippy -p lofu-cli`, and for extension changes `bun run ext:e2e`. Look at the screenshots it writes, because UI regressions don't fail assertions.
+See README.md for layout and commands. Before finishing a change, run `bun test`, `bun run typecheck` (server and extension), `bun run lint`, `cargo clippy -p lofu-cli`, for extension changes `bun run ext:e2e`, and for reader changes `bun run reader:test` (plus `apps/reader/e2e/web.ts`; see apps/reader/README.md). Look at the screenshots it writes, because UI regressions don't fail assertions.
 
 Invariants that the code relies on:
 

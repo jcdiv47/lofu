@@ -34,13 +34,15 @@ export function createApp(ctx: AppContext) {
     return c.json({ error: "internal error" }, 500);
   });
 
-  // Browser extensions call the API from their own origin. Allowing them is
-  // safe: every /v1 request still needs a bearer token (no cookies are used).
+  // Browser extensions (and LOFU_CORS_ORIGINS, e.g. the web reader's dev
+  // server) call the API from their own origin. Allowing them is safe: every
+  // /v1 request still needs a bearer token (no cookies are used).
   const EXTENSION_ORIGIN = /^(chrome|moz|safari-web)-extension:\/\/[\w.-]+$/;
   app.use(
     "*",
     cors({
-      origin: (origin) => (EXTENSION_ORIGIN.test(origin) ? origin : null),
+      origin: (origin) =>
+        EXTENSION_ORIGIN.test(origin) || ctx.config.corsOrigins.includes(origin) ? origin : null,
       allowHeaders: ["authorization", "content-type", "content-encoding"],
       allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
       maxAge: 86_400,

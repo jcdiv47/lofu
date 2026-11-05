@@ -1,0 +1,3 @@
+[test]
+# apps/reader holds nsh tests (run with `nsh test`), not Bun tests.
+pathIgnorePatterns = ["apps/reader/**"]

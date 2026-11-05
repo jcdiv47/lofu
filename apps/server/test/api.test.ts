@@ -286,5 +286,9 @@ describe("cors", () => {
     expect(
       (await pre("https://evil.example")).headers.get("access-control-allow-origin"),
     ).toBeNull();
+    sys.ctx.config.corsOrigins.push("http://127.0.0.1:8790");
+    expect((await pre("http://127.0.0.1:8790")).headers.get("access-control-allow-origin")).toBe(
+      "http://127.0.0.1:8790",
+    );
   });
 });

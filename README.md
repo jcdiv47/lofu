@@ -7,11 +7,12 @@ apps/server       Bun + Hono API, SQLite, job queue, extraction workers, search 
 packages/shared   zod schemas (API contract → OpenAPI) and URL normalization
 crates/lofu-cli   `lofu` CLI in Rust
 apps/extension    Browser extension (WXT; Chrome/Edge/Brave and Firefox)
+apps/reader       Reader prototype on nsh (TSX): library, reading, highlights; see its README
 skills/lofu       Agent skill describing the CLI
 docker/           compose stack (server + Meilisearch) and Dockerfile
 ```
 
-Clients still to come: the nsh app and the iOS share extension. See the roadmap below.
+Clients still to come: the full nsh app (`apps/reader` is its prototype) and the iOS share extension. See the roadmap below.
 
 ## Quick start (development)
 
@@ -99,5 +100,5 @@ The OpenAPI 3.1 document is served at `/openapi.json`, generated from the zod sc
 1. More importers as needed: Netscape bookmark HTML (browsers), Pocket export.
 2. Per-site cookies for the browser fallback (Zhihu and other login walls); screenshot thumbnails.
 3. **Permanent copies**: single-file archives via `monolith`; periodic broken-link checks.
-4. **Clients**: an nsh prototype of the reader view with highlights (the riskiest part), then a web app, then iOS/macOS with a Swift share extension and keychain. The extension's Safari build comes along with the Apple apps.
+4. **Clients**: the nsh reader prototype works on the web (findings in `apps/reader/README.md`). Next: verify iOS (long-press selection and the bubble menu), then the full apps with a Swift share extension and keychain. The extension's Safari build comes along with the Apple apps.
 5. Semantic search (a Meilisearch embedder, e.g. Ollama → `MEILI_EMBEDDER`), suggested tags, text-to-speech.

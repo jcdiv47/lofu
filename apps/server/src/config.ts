@@ -47,6 +47,14 @@ export const config = {
   meiliIndex: process.env.MEILI_INDEX ?? "bookmarks",
   /** Name of a Meilisearch embedder to enable hybrid search (configured in Meilisearch). */
   meiliEmbedder: process.env.MEILI_EMBEDDER ?? "",
+  /**
+   * Extra origins allowed to call the API from a browser (comma-separated),
+   * e.g. the nsh web app's dev server. Extension origins are always allowed.
+   */
+  corsOrigins: (process.env.LOFU_CORS_ORIGINS ?? "")
+    .split(",")
+    .map((s) => s.trim().replace(/\/$/, ""))
+    .filter(Boolean),
   /** Disable auth entirely. Only for tests and local experiments. */
   authDisabled: process.env.LOFU_AUTH_DISABLED === "1",
 };

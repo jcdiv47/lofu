@@ -12,7 +12,8 @@
       "!skills-lock.json",
       "!**/*.md",
       "!**/.output",
-      "!**/.wxt"
+      "!**/.wxt",
+      "!**/.nsh"
     ]
   },
   "formatter": {
