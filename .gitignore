@@ -1,0 +1,8 @@
+node_modules/
+target/
+data/
+*.db
+*.db-*
+.env
+.env.local
+*.tsbuildinfo

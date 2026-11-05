@@ -1,0 +1,27 @@
+{
+  "name": "lofu",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "bun --watch apps/server/src/main.ts",
+    "start": "bun apps/server/src/main.ts",
+    "test": "bun test",
+    "typecheck": "tsc -b",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "cli:build": "cargo build --release -p lofu-cli",
+    "services:up": "docker compose -f docker/compose.yaml up -d meilisearch",
+    "stack:up": "mkdir -p data/server data/meili && docker compose -f docker/compose.yaml up -d --build",
+    "stack:down": "docker compose -f docker/compose.yaml down",
+    "stack:token": "docker compose -f docker/compose.yaml exec server bun src/admin.ts token"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.5",
+    "@types/bun": "^1.4.4",
+    "typescript": "^7.0.2"
+  }
+}

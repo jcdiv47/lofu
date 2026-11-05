@@ -1,0 +1,19 @@
+{
+  "name": "@lofu/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/main.ts",
+    "start": "bun src/main.ts",
+    "token": "bun src/admin.ts token"
+  },
+  "dependencies": {
+    "@lofu/shared": "workspace:*",
+    "@hono/zod-openapi": "^1.6.3",
+    "defuddle": "^0.19.6",
+    "hono": "^4.13.16",
+    "linkedom": "^0.18.15",
+    "zod": "^4.6.7"
+  }
+}
