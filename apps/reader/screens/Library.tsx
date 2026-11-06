@@ -16,9 +16,11 @@ import { GlassGroup, IconButton, TopEdge } from "../components/ui";
 import { api, type Bookmark, type SearchHit } from "../lib/api";
 import { look } from "../lib/look";
 import {
+  bookmark,
   bookmarksIn,
   countFor,
   loaded,
+  matches,
   type Source,
   sourceTitle,
   sync,
@@ -130,7 +132,13 @@ export function Library(props: {
   type Item = { b: Bookmark; snippet: string | null };
   const items = (): Item[] => {
     const h = hits();
-    if (searching() && h) return h.map((x) => ({ b: x.bookmark, snippet: x.snippet }));
+    // The hits as the store has them now: a hit deleted, put back or moved
+    // out of this source since the search leaves it.
+    if (searching() && h)
+      return h.flatMap((x) => {
+        const b = bookmark(x.bookmark.id);
+        return b && !b.deletedAt && matches(props.source, b) ? [{ b, snippet: x.snippet }] : [];
+      });
     if (searching()) return [];
     return bookmarksIn(props.source).map((b) => ({ b, snippet: null }));
   };

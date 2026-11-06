@@ -68,7 +68,8 @@ export const highlightCount = (id: string) => highlightCounts().get(id) ?? 0;
  */
 export const inTrash = (b: Bookmark) => b.archived;
 
-const matches = (s: Source, b: Bookmark): boolean => {
+/** Whether a bookmark belongs to a source (it's still in the Trash, say). */
+export const matches = (s: Source, b: Bookmark): boolean => {
   switch (s.kind) {
     case "all":
       return !b.archived;

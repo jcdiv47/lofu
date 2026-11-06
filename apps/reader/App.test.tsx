@@ -351,6 +351,28 @@ test("phone: swiping a row left deletes it into the Trash", async () => {
   expect(log.deletes).toEqual([]);
 });
 
+test("phone: a search result that is deleted leaves the results", async () => {
+  const log = { patches: [] as [string, unknown][], deletes: [] as string[] };
+  const bb = library.bookmarks.find((x) => x.id === "bb");
+  const app = await open("./App.tsx", {
+    ...saved,
+    network: {
+      ...editable(log),
+      [`GET ${S}/v1/search*`]: { body: { hits: [{ bookmark: bb, snippet: null }] } },
+    },
+  });
+  await app.waitFor("id:home-search");
+  await app.type("id:home-search", "bb");
+  await app.press("id:search-bookmarks");
+  await app.waitFor("id:row-bb");
+  await app.drag("id:row-bb", { x: -200, y: 0 });
+  await app.waitFor("id:swipe-delete");
+  await app.press("id:swipe-delete");
+  await app.waitUntil(() => log.patches.length > 0);
+  await app.waitUntil(() => !app.shows("id:row-bb"));
+  expect(log.patches).toEqual([["bb", { archived: true }]]);
+});
+
 test("phone: swiping a row right moves it to a collection", async () => {
   const log = { patches: [] as [string, unknown][], deletes: [] as string[] };
   const app = await open("./App.tsx", { ...saved, network: editable(log) });
