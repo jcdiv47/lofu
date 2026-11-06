@@ -12,7 +12,14 @@ import {
 } from "nsh/base";
 import { findQuote, quoteAt } from "../../../packages/shared/src/anchor";
 import { BookmarkDropdown } from "../components/BookmarkMenu";
-import { GlassButton, GlassGroup, GlassTint, IconButton, TopEdge } from "../components/ui";
+import {
+  GlassButton,
+  GlassGroup,
+  GlassTint,
+  IconButton,
+  RoundGlassButton,
+  TopEdge,
+} from "../components/ui";
 import {
   canShare,
   deleteBookmark,
@@ -425,14 +432,12 @@ export function Reader(props: {
             paddingLeft: (props.toolbarInset ?? 0) + 16,
           }}
         >
-          <GlassGroup round>
-            <IconButton
-              name="back"
-              label="Back to the library"
-              testID="back"
-              onPress={props.onBack}
-            />
-          </GlassGroup>
+          <RoundGlassButton
+            name="back"
+            label="Back to the library"
+            testID="back"
+            onPress={props.onBack}
+          />
           <Text class="flex-1 truncate" style={{ color: look().inkSoft, fontSize: 12.5 }}>
             {meta()}
           </Text>

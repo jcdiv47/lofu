@@ -1,9 +1,14 @@
 import { View } from "nsh";
 import { Input } from "nsh/base";
 import { glass, look } from "../lib/look";
+import { NativeSearchField, nativeSearchField } from "./native";
 import { GlassTint, Icon } from "./ui";
 
-/** A search field on a capsule of glass, as iOS 26 and macOS 26 draw theirs. */
+/**
+ * A search field on a capsule of glass, as iOS 26 and macOS 26 draw theirs:
+ * the system's own on iOS (`UISearchTextField` on interactive glass), and
+ * the app's look-alike elsewhere (see `nativeSearchField`).
+ */
 export function SearchField(props: {
   value: () => string;
   onChange: (v: string) => void;
@@ -15,6 +20,25 @@ export function SearchField(props: {
   onSubmit?: (v: string) => void;
 }) {
   const big = (props.height ?? 0) > 40;
+  if (nativeSearchField) {
+    return (
+      <NativeSearchField
+        testID={props.testID ?? "search"}
+        accessibilityLabel={props.placeholder}
+        value={props.value()}
+        placeholder={props.placeholder}
+        fontSize={big ? 17 : 14}
+        tint={look().stamp}
+        textColor={look().ink}
+        glassTint={look().glassTint}
+        label={props.placeholder}
+        autoFocus={props.autoFocus ?? false}
+        onChange={(e) => props.onChange(e.value)}
+        onSubmit={(e) => props.onSubmit?.(e.value)}
+        style={{ height: props.height ?? 40 }}
+      />
+    );
+  }
   return (
     <View
       class={`flex-row items-center rounded-full ${big ? "gap-2.5 px-4" : "gap-2 px-3.5"}`}

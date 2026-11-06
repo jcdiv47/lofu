@@ -45,6 +45,7 @@ import starFillIcon from "../assets/icons/star-fill.svg";
 import trashIcon from "../assets/icons/trash.svg";
 import videoIcon from "../assets/icons/video.svg";
 import { glass, hasGlass, look } from "../lib/look";
+import { nativeControls, type SymbolIcon, SystemGlassButton } from "./native";
 
 export const icons = {
   article: articleIcon,
@@ -149,7 +150,10 @@ export function GlassTint(props: { radius?: number }) {
  * page blurs out under the bar's glass buttons so its title stays legible.
  * Place it last in a page whose `NavPage` has `headerTransparent`.
  */
-export function TopEdge() {
+export function TopEdge(props: {
+  /** The page has a large title: blur only under the bar, not over the title. */
+  largeTitle?: boolean;
+}) {
   // A transparent header leaves the page's inset at the status bar: add the
   // bar's own height (54 points on iOS 26) and room for the fade.
   const insets = safeAreaInsets();
@@ -157,7 +161,9 @@ export function TopEdge() {
     <View
       class="absolute top-0 right-0 left-0"
       style={{
-        height: Math.max(insets().top, safeArea().top + 54) + 26,
+        height:
+          (props.largeTitle ? safeArea().top + 54 : Math.max(insets().top, safeArea().top + 54)) +
+          26,
         // A progressive blur, as the system's scroll edge effect: the page
         // under the bar is blurred and washed with paper, easing off below it.
         backgroundColor: `${look().paper}b3`,
@@ -196,6 +202,60 @@ export function GlassGroup(props: {
   );
 }
 
+/**
+ * A round button of glass on its own (+ beside the search, Back): the
+ * system's glass button where there is one (`native.tsx`), whose glass
+ * answers the touch; elsewhere the app's capsule with its icon.
+ */
+export function RoundGlassButton(props: {
+  name: SymbolIcon & IconName;
+  label: string;
+  onPress?: (e?: PressEvent) => void;
+  /** The button's width and height (40 by default). */
+  diameter?: number;
+  /** The icon's size. */
+  size?: number;
+  color?: string;
+  /** The primary action: glass filled with `color`, the symbol in white. */
+  prominent?: boolean;
+  disabled?: boolean;
+  testID?: string;
+}) {
+  const d = props.diameter ?? 40;
+  return (
+    <If
+      when={nativeControls}
+      else={
+        <GlassGroup round testID={undefined} style={{ width: d, height: d }}>
+          <IconButton
+            name={props.name}
+            label={props.label}
+            testID={props.testID}
+            size={props.size}
+            color={props.color}
+            disabled={props.disabled}
+            onPress={props.onPress}
+          />
+        </GlassGroup>
+      }
+    >
+      <SystemGlassButton
+        icon={props.name}
+        label={props.label}
+        testID={props.testID}
+        tint={props.color}
+        prominent={props.prominent}
+        // SF Symbols draw larger than the app's icons at the same size.
+        size={Math.round((props.size ?? 17) * 0.85)}
+        weight="medium"
+        disabled={props.disabled}
+        onPress={props.onPress}
+        style={{ width: d, height: d }}
+      />
+    </If>
+  );
+}
+
 /** A labelled button on glass ("Open in browser"), or filled with the accent when `prominent`. */
 export function GlassButton(props: {
   label: string;
@@ -203,6 +263,18 @@ export function GlassButton(props: {
   prominent?: boolean;
   testID?: string;
 }) {
+  if (nativeControls) {
+    return (
+      <SystemGlassButton
+        title={props.label}
+        label={props.label}
+        prominent={props.prominent}
+        tint={props.prominent ? look().stamp : look().ink}
+        testID={props.testID}
+        onPress={props.onPress}
+      />
+    );
+  }
   return (
     <View
       role="button"

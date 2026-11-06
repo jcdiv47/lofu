@@ -1,5 +1,5 @@
 import { safeAreaInsets, signal, Text, View, WebView, type WebViewRef } from "nsh";
-import { GlassButton, GlassGroup, GlassTint, IconButton } from "../components/ui";
+import { GlassButton, GlassGroup, GlassTint, IconButton, RoundGlassButton } from "../components/ui";
 import { openInBrowser } from "../lib/actions";
 import { glass, look } from "../lib/look";
 
@@ -84,14 +84,12 @@ export function Browser(props: {
           class="flex-row items-center gap-2.5 pr-4"
           style={{ height: 60, paddingTop: 8, paddingLeft: (props.toolbarInset ?? 0) + 16 }}
         >
-          <GlassGroup round>
-            <IconButton
-              name="close"
-              label="Close page"
-              testID="web-close"
-              onPress={props.onClose}
-            />
-          </GlassGroup>
+          <RoundGlassButton
+            name="close"
+            label="Close page"
+            testID="web-close"
+            onPress={props.onClose}
+          />
           <GlassGroup>
             {back()}
             {forward()}
@@ -109,7 +107,12 @@ export function Browser(props: {
               {host(at().url)}
             </Text>
           </View>
-          <GlassGroup round>{external()}</GlassGroup>
+          <RoundGlassButton
+            name="external"
+            label="Open in browser"
+            testID="web-external"
+            onPress={() => openInBrowser(at().url)}
+          />
         </View>
       </If>
       <View class="flex-1">

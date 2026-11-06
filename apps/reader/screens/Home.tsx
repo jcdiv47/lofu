@@ -14,11 +14,10 @@ import type { JSX } from "nsh/jsx-runtime";
 import { SearchField } from "../components/SearchField";
 import {
   GlassButton,
-  GlassGroup,
   GlassTint,
   Icon,
-  IconButton,
   type IconName,
+  RoundGlassButton,
   TopEdge,
 } from "../components/ui";
 import { glass, look } from "../lib/look";
@@ -442,30 +441,37 @@ export function Home(props: {
           class="absolute right-0 left-0 flex-row justify-between px-4"
           style={{ top: top() + 6, pointerEvents: "box-none" }}
         >
-          <GlassGroup round style={{ width: BUTTON, height: BUTTON }}>
-            <IconButton
-              name="settings"
-              label="Settings"
-              testID="settings"
-              size={22}
-              color={look().ink}
-              onPress={props.onSettings}
-            />
-          </GlassGroup>
-          <GlassGroup round style={{ width: BUTTON, height: BUTTON }}>
-            <IconButton
-              name="more"
-              label="More"
-              testID="home-menu"
-              size={22}
-              color={look().ink}
-              onPress={() => menu.set(true)}
-            />
-          </GlassGroup>
+          <RoundGlassButton
+            name="settings"
+            label="Settings"
+            testID="settings"
+            diameter={BUTTON}
+            size={22}
+            color={look().ink}
+            onPress={props.onSettings}
+          />
+          <RoundGlassButton
+            name="more"
+            label="More"
+            testID="home-menu"
+            diameter={BUTTON}
+            size={22}
+            color={look().ink}
+            onPress={() => menu.set(true)}
+          />
         </View>
       </If>
 
       {/* Search and add, on glass at the bottom, in reach of the thumb. */}
+      {/* The bottom scroll edge: the rows fade out under the glass. */}
+      <View
+        class="absolute right-0 bottom-0 left-0"
+        style={{
+          height: bottom() + 48 + 24,
+          backgroundImage: look().edgeFadeUp,
+          pointerEvents: "none",
+        }}
+      />
       <View
         class="absolute right-0 left-0 flex-row items-center gap-3 px-4"
         style={{ bottom: bottom(), pointerEvents: "box-none" }}
@@ -480,16 +486,16 @@ export function Home(props: {
             testID="home-search"
           />
         </View>
-        <GlassGroup round style={{ width: 48, height: 48 }}>
-          <IconButton
-            name="plus"
-            label="Add bookmark"
-            testID="add"
-            size={24}
-            color={look().stamp}
-            onPress={props.onAdd}
-          />
-        </GlassGroup>
+        <RoundGlassButton
+          name="plus"
+          label="Add bookmark"
+          testID="add"
+          diameter={48}
+          size={24}
+          color={look().stamp}
+          prominent
+          onPress={props.onAdd}
+        />
       </View>
 
       <If when={menu()}>

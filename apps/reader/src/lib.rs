@@ -1,15 +1,49 @@
 //! What the app needs from the platform that nsh doesn't offer: the system's
 //! share sheet (`UIActivityViewController` on iOS, `NSSharingServicePicker`
-//! on macOS). TSX imports it from `lofu/native` (`lib/share.ts`); its
-//! TypeScript declarations are generated into `.nsh/types/lofu/native.d.ts`.
+//! on macOS), and the system's own glass buttons (and, on iOS, search field) as native
+//! components (`controls`, used through `components/native.tsx`). TSX
+//! imports the modules from `lofu/native` (`lib/share.ts`); their TypeScript
+//! declarations are generated into `.nsh/types/lofu/native.d.ts`.
 
 use nsh_core::prelude::*;
+
+#[cfg(any(target_os = "ios", target_os = "macos"))]
+mod controls;
+
+/// UIKit's controls (`controls::ios`), registered on every view.
+#[cfg(target_os = "ios")]
+#[native_components(ios)]
+fn ios_components(components: &nsh_platform_ios::Components) {
+    controls::ios::register(components);
+}
+
+/// AppKit's controls (`controls::macos`), registered on every view.
+#[cfg(target_os = "macos")]
+#[native_components(macos)]
+fn macos_components(components: &nsh_platform_macos::Components) {
+    controls::macos::register(components);
+}
 
 /// The crate's UI set (`nsh.json` `"rust"`).
 #[native_module("lofu/native")]
 fn native(registry: &mut Registry) {
     registry.module::<Share>();
     registry.module::<Sheet>();
+    registry.module::<Controls>();
+}
+
+/// The native controls (`controls`).
+#[module]
+pub struct Controls;
+
+#[module]
+impl Controls {
+    /// Whether the native controls are registered here: `lofu.glassButton`
+    /// on iOS and macOS, `lofu.searchField` on iOS. They draw Liquid Glass
+    /// from iOS 26 and macOS 26.
+    pub fn available() -> bool {
+        cfg!(any(target_os = "ios", target_os = "macos"))
+    }
 }
 
 /// An action sheet that opens from a point: nsh's `AlertDialog` opens at the

@@ -12,7 +12,7 @@ import {
 import { BookmarkCard, BookmarkRow, CARD_COVER } from "../components/BookmarkCard";
 import { SearchField } from "../components/SearchField";
 import { SwipeRow, swipeable } from "../components/SwipeRow";
-import { GlassGroup, IconButton, TopEdge } from "../components/ui";
+import { RoundGlassButton, TopEdge } from "../components/ui";
 import { api, type Bookmark, type SearchHit } from "../lib/api";
 import { look } from "../lib/look";
 import {
@@ -179,21 +179,21 @@ export function Library(props: {
             placeholder="Search titles and text"
           />
         </View>
-        <GlassGroup>
-          <IconButton
-            name="plus"
-            label="Add bookmark"
-            testID="add"
-            onPress={() => props.onAdd?.()}
-          />
-          <IconButton
-            name="refresh"
-            label="Sync now"
-            testID="sync"
-            onPress={() => void sync()}
-            color={syncing() ? look().inkFaint : look().inkSoft}
-          />
-        </GlassGroup>
+        <RoundGlassButton
+          name="refresh"
+          label="Sync now"
+          testID="sync"
+          onPress={() => void sync()}
+          color={syncing() ? look().inkFaint : look().inkSoft}
+        />
+        <RoundGlassButton
+          name="plus"
+          label="Add bookmark"
+          testID="add"
+          color={look().stamp}
+          prominent
+          onPress={() => props.onAdd?.()}
+        />
       </View>
     </>
   );
@@ -224,16 +224,16 @@ export function Library(props: {
         />
       </View>
       <If when={props.onAdd}>
-        <GlassGroup round style={{ width: SEARCH_H, height: SEARCH_H }}>
-          <IconButton
-            name="plus"
-            label="Add bookmark"
-            testID="add"
-            size={24}
-            color={look().stamp}
-            onPress={() => props.onAdd?.()}
-          />
-        </GlassGroup>
+        <RoundGlassButton
+          name="plus"
+          label="Add bookmark"
+          testID="add"
+          diameter={SEARCH_H}
+          size={24}
+          color={look().stamp}
+          prominent
+          onPress={() => props.onAdd?.()}
+        />
       </If>
     </View>
   );
@@ -285,7 +285,7 @@ export function Library(props: {
             />
             {phoneSearch()}
             <If when={platform.os === "ios"}>
-              <TopEdge />
+              <TopEdge largeTitle />
             </If>
           </>
         }
