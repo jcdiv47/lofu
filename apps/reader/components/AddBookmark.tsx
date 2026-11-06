@@ -95,7 +95,7 @@ export function AddBookmark(props: {
             fromClipboard.set(false);
           }}
           onSubmit={() => void save()}
-          class="rounded-lg px-3"
+          class="rounded-xl px-3.5"
           style={{
             height: 40,
             color: look().ink,
@@ -125,7 +125,7 @@ export function AddBookmark(props: {
           <View
             role="button"
             onPress={() => props.onCancel?.()}
-            class="rounded-lg px-4 py-2.5 active:opacity-60"
+            class="rounded-full px-4 py-2.5 active:opacity-60"
           >
             <Text style={{ color: look().inkSoft, fontSize: 14.5, fontWeight: "500" }}>Cancel</Text>
           </View>
@@ -135,7 +135,7 @@ export function AddBookmark(props: {
           testID="add-save"
           accessibilityState={{ disabled: busy() }}
           onPress={() => void save()}
-          class="rounded-lg px-5 py-2.5 active:opacity-70"
+          class="rounded-full px-5 py-2.5 active:opacity-70"
           style={{ backgroundColor: look().ink, opacity: busy() ? 0.6 : 1 }}
         >
           <Text style={{ color: look().paper, fontSize: 14.5, fontWeight: "600" }}>

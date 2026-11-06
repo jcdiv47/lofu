@@ -1,7 +1,7 @@
 import { safeAreaInsets, signal, Text, View, WebView, type WebViewRef } from "nsh";
-import { IconButton } from "../components/ui";
+import { GlassButton, GlassGroup, GlassTint, IconButton } from "../components/ui";
 import { openInBrowser } from "../lib/actions";
-import { look } from "../lib/look";
+import { glass, look } from "../lib/look";
 
 const host = (url: string) => {
   try {
@@ -81,19 +81,23 @@ export function Browser(props: {
       <If when={props.wide}>
         <View
           desktop={{ windowDrag: true }}
-          class="flex-row items-center gap-1 pr-3"
-          style={{
-            height: 52,
-            paddingLeft: (props.toolbarInset ?? 0) + 14,
-            borderBottomWidth: 1,
-            borderColor: look().ruleSoft,
-          }}
+          class="flex-row items-center gap-2.5 pr-4"
+          style={{ height: 60, paddingTop: 8, paddingLeft: (props.toolbarInset ?? 0) + 16 }}
         >
-          <IconButton name="close" label="Close page" testID="web-close" onPress={props.onClose} />
-          {back()}
-          {forward()}
-          {reload()}
-          <View class="flex-1 px-2">
+          <GlassGroup round>
+            <IconButton
+              name="close"
+              label="Close page"
+              testID="web-close"
+              onPress={props.onClose}
+            />
+          </GlassGroup>
+          <GlassGroup>
+            {back()}
+            {forward()}
+            {reload()}
+          </GlassGroup>
+          <View class="flex-1 px-1">
             <Text
               testID="web-title"
               class="truncate"
@@ -105,7 +109,7 @@ export function Browser(props: {
               {host(at().url)}
             </Text>
           </View>
-          {external()}
+          <GlassGroup round>{external()}</GlassGroup>
         </View>
       </If>
       <View class="flex-1">
@@ -134,34 +138,33 @@ export function Browser(props: {
               >
                 {`This page didn't load: ${message()}`}
               </Text>
-              <View
-                role="button"
-                onPress={() => openInBrowser(at().url)}
-                class="mt-2 rounded-lg px-4 py-2 active:opacity-70"
-                style={{ backgroundColor: look().ink }}
-              >
-                <Text style={{ color: look().paper, fontSize: 14, fontWeight: "600" }}>
-                  Open in browser
-                </Text>
+              <View class="mt-2">
+                <GlassButton
+                  label="Open in browser"
+                  prominent
+                  onPress={() => openInBrowser(at().url)}
+                />
               </View>
             </View>
           )}
         </If>
       </View>
       <If when={!props.wide}>
+        {/* A capsule of glass floating over the page, as Safari's on iOS 26. */}
         <View
-          class="flex-row items-center justify-around px-6 pt-2"
-          style={{
-            paddingBottom: Math.max(insets().bottom, 8),
-            borderTopWidth: 1,
-            borderColor: look().ruleSoft,
-            backgroundColor: look().paper,
-          }}
+          class="absolute right-0 left-0 items-center"
+          style={{ bottom: Math.max(insets().bottom, 12) + 4, pointerEvents: "box-none" }}
         >
-          {back()}
-          {forward()}
-          {reload()}
-          {external()}
+          <View
+            class="h-14 flex-row items-center gap-5 rounded-full px-4"
+            style={{ ...glass(), borderCurve: "continuous" }}
+          >
+            <GlassTint />
+            {back()}
+            {forward()}
+            {reload()}
+            {external()}
+          </View>
         </View>
       </If>
     </View>

@@ -1,7 +1,17 @@
-import { cleanup, effect, List, platform, signal, Text, View } from "nsh";
-import { Input } from "nsh/base";
+import {
+  cleanup,
+  effect,
+  keyboardFrame,
+  List,
+  platform,
+  safeAreaInsets,
+  signal,
+  Text,
+  View,
+} from "nsh";
 import { BookmarkCard, BookmarkRow, CARD_COVER } from "../components/BookmarkCard";
-import { Icon, IconButton } from "../components/ui";
+import { SearchField } from "../components/SearchField";
+import { GlassGroup, IconButton, TopEdge } from "../components/ui";
 import { api, type Bookmark, type SearchHit } from "../lib/api";
 import { look } from "../lib/look";
 import {
@@ -18,6 +28,10 @@ import {
 const CARD_MIN = 236;
 const GAP = 18;
 const PAD = 24;
+/** The desktop's toolbar, floating over the grid. */
+const TOOLBAR = 52;
+/** The phone's search capsule, floating over the list. */
+const SEARCH_H = 48;
 
 /** Search filters that the server's search understands, for a source. */
 const searchFilter = (s: Source) =>
@@ -29,50 +43,9 @@ const searchFilter = (s: Source) =>
         ? { tags: s.name }
         : s.kind === "favorites"
           ? { favorite: true }
-          : {};
-
-/** A search field in the app's colors. */
-function SearchField(props: {
-  value: () => string;
-  onChange: (v: string) => void;
-  placeholder: string;
-  height?: number;
-}) {
-  return (
-    <View
-      class="flex-row items-center gap-2 rounded-lg px-2.5"
-      style={{ backgroundColor: look().field, height: props.height ?? 30 }}
-    >
-      <Icon name="search" size={14} color={look().inkFaint} />
-      <Input
-        testID="search"
-        value={props.value()}
-        placeholder={props.placeholder}
-        autoCapitalize="none"
-        autoCorrect={false}
-        returnKeyType="search"
-        onChange={({ value }) => props.onChange(value)}
-        class="flex-1"
-        style={{
-          color: look().ink,
-          fontSize: props.height && props.height > 32 ? 16 : 13.5,
-          placeholderColor: look().inkFaint,
-        }}
-      />
-      <If when={props.value()}>
-        <View
-          role="button"
-          accessibilityLabel="Clear search"
-          onPress={() => props.onChange("")}
-          class="h-5 w-5 items-center justify-center rounded-full active:opacity-60"
-          style={{ backgroundColor: look().inkFaint }}
-        >
-          <Icon name="close" size={11} color={look().field} />
-        </View>
-      </If>
-    </View>
-  );
-}
+          : s.kind === "type"
+            ? { type: s.type }
+            : {};
 
 function Empty(props: { searching: boolean; source: Source }) {
   const text = () => {
@@ -115,10 +88,12 @@ export function Library(props: {
   /** The "+" that opens the add form: the desktop's toolbar, and beside the
    * phone's search field on the web, which draws no navigation header. */
   onAdd?: () => void;
+  /** A search to start with (typed on the phone's Library page). */
+  initialQuery?: string;
   /** Desktops draw their own toolbar; leading room for the sidebar toggle or traffic lights. */
   toolbarInset?: number;
 }) {
-  const query = signal("");
+  const query = signal(props.initialQuery ?? "");
   const hits = signal<SearchHit[] | null>(null);
   const searching = () => query().trim().length > 0;
 
@@ -156,38 +131,91 @@ export function Library(props: {
   const width = signal(0);
   const columns = () => Math.max(1, Math.floor((width() - PAD * 2 + GAP) / (CARD_MIN + GAP)));
 
+  // The toolbar floats over the grid: the cards scroll under its glass, and
+  // the page fades out beneath it (the scroll edge) so the title stays legible.
   const toolbar = () => (
-    <View
-      desktop={{ windowDrag: true }}
-      class="flex-row items-center gap-3 pr-4"
-      style={{ height: 52, paddingLeft: (props.toolbarInset ?? 0) + PAD }}
-    >
-      <View class="min-w-0 flex-1 flex-row items-baseline gap-2">
-        <Text
-          class="truncate"
-          style={{ color: look().ink, fontSize: 17, fontWeight: "700", flexShrink: 1 }}
-        >
-          {sourceTitle(props.source)}
-        </Text>
-        <Text style={{ color: look().inkFaint, fontSize: 13, fontVariant: ["tabular-nums"] }}>
-          {searching() ? (hits() ? `${hits()?.length} found` : "") : countFor(props.source) || ""}
-        </Text>
+    <>
+      <View
+        class="absolute top-0 right-0 left-0"
+        style={{ height: TOOLBAR + 28, backgroundImage: look().edgeFade, pointerEvents: "none" }}
+      />
+      <View
+        desktop={{ windowDrag: true }}
+        class="absolute top-0 right-0 left-0 flex-row items-center gap-2.5 pr-4"
+        style={{ height: TOOLBAR + 8, paddingTop: 8, paddingLeft: (props.toolbarInset ?? 0) + PAD }}
+      >
+        <View class="min-w-0 flex-1 flex-row items-baseline gap-2">
+          <Text
+            class="truncate"
+            style={{ color: look().ink, fontSize: 20, fontWeight: "700", flexShrink: 1 }}
+          >
+            {sourceTitle(props.source)}
+          </Text>
+          <Text style={{ color: look().inkFaint, fontSize: 13, fontVariant: ["tabular-nums"] }}>
+            {searching() ? (hits() ? `${hits()?.length} found` : "") : countFor(props.source) || ""}
+          </Text>
+        </View>
+        <View style={{ width: 280 }}>
+          <SearchField
+            value={query}
+            onChange={(v) => query.set(v)}
+            placeholder="Search titles and text"
+          />
+        </View>
+        <GlassGroup>
+          <IconButton
+            name="plus"
+            label="Add bookmark"
+            testID="add"
+            onPress={() => props.onAdd?.()}
+          />
+          <IconButton
+            name="refresh"
+            label="Sync now"
+            testID="sync"
+            onPress={() => void sync()}
+            color={syncing() ? look().inkFaint : look().inkSoft}
+          />
+        </GlassGroup>
       </View>
-      <View style={{ width: 260 }}>
+    </>
+  );
+
+  // Phones: search sits at the bottom, in reach of the thumb, as in iOS 26,
+  // and rides up with the keyboard.
+  const insets = safeAreaInsets();
+  const searchBottom = () => {
+    const kb = keyboardFrame().height;
+    return kb > 0 ? kb - insets().bottom + 10 : Math.max(insets().bottom, 12) + 4;
+  };
+  const phoneSearch = () => (
+    <View
+      class="absolute right-0 left-0 flex-row items-center gap-2 px-4"
+      style={{
+        bottom: searchBottom(),
+        pointerEvents: "box-none",
+      }}
+    >
+      <View class="flex-1">
         <SearchField
           value={query}
           onChange={(v) => query.set(v)}
-          placeholder="Search titles and text"
+          placeholder="Search"
+          height={SEARCH_H}
         />
       </View>
-      <IconButton name="plus" label="Add bookmark" testID="add" onPress={() => props.onAdd?.()} />
-      <IconButton
-        name="refresh"
-        label="Sync now"
-        testID="sync"
-        onPress={() => void sync()}
-        color={syncing() ? look().inkFaint : look().inkSoft}
-      />
+      <If when={props.onAdd}>
+        <GlassGroup round style={{ width: SEARCH_H, height: SEARCH_H }}>
+          <IconButton
+            name="plus"
+            label="Add bookmark"
+            testID="add"
+            size={24}
+            color={look().stamp}
+            onPress={() => props.onAdd?.()}
+          />
+        </GlassGroup>
+      </If>
     </View>
   );
 
@@ -196,48 +224,44 @@ export function Library(props: {
       <If
         when={props.wide}
         else={
-          <List
-            each={items()}
-            keyExtractor={(i) => i.b.id}
-            estimatedItemSize={110}
-            class="flex-1"
-            refreshing={syncing()}
-            onRefresh={() => void sync()}
-            keyboardDismissMode="on-drag"
-            header={
-              <View class="flex-row items-center gap-2 px-4 pt-1 pb-2">
-                <View class="flex-1">
-                  <SearchField
-                    value={query}
-                    onChange={(v) => query.set(v)}
-                    placeholder="Search"
-                    height={36}
-                  />
-                </View>
-                <If when={platform.os === "web" && props.onAdd}>
-                  <IconButton
-                    name="plus"
-                    label="Add bookmark"
-                    size={20}
-                    onPress={() => props.onAdd?.()}
-                  />
-                </If>
-              </View>
-            }
-            empty={<Empty searching={searching()} source={props.source} />}
-          >
-            {(i) => (
-              <BookmarkRow
-                b={i().b}
-                snippet={i().snippet}
-                showCollection={showCollection}
-                onOpen={() => props.onOpen(i().b)}
-              />
-            )}
-          </List>
+          <>
+            <List
+              each={items()}
+              keyExtractor={(i) => i.b.id}
+              estimatedItemSize={110}
+              testID="library-list"
+              class="flex-1"
+              refreshing={syncing()}
+              onRefresh={() => void sync()}
+              keyboardDismissMode="on-drag"
+              keyboardShouldPersistTaps="handled"
+              contentStyle={{ paddingTop: 4, paddingBottom: SEARCH_H + 40 }}
+              empty={<Empty searching={searching()} source={props.source} />}
+            >
+              {(i) => (
+                <BookmarkRow
+                  b={i().b}
+                  snippet={i().snippet}
+                  showCollection={showCollection}
+                  onOpen={() => props.onOpen(i().b)}
+                />
+              )}
+            </List>
+            <View
+              class="absolute right-0 bottom-0 left-0"
+              style={{
+                height: SEARCH_H + searchBottom() + 24,
+                backgroundImage: look().edgeFadeUp,
+                pointerEvents: "none",
+              }}
+            />
+            {phoneSearch()}
+            <If when={platform.os === "ios"}>
+              <TopEdge />
+            </If>
+          </>
         }
       >
-        {toolbar()}
         <View class="flex-1" onLayout={(e) => width.set(e.bounds.size.width)}>
           {() => {
             const n = columns();
@@ -248,10 +272,11 @@ export function Library(props: {
                 keyExtractor={(i) => i.b.id}
                 numColumns={n}
                 estimatedItemSize={CARD_COVER + 112 + GAP}
+                testID="library-list"
                 class="flex-1"
                 contentStyle={{
                   paddingHorizontal: PAD,
-                  paddingTop: 4,
+                  paddingTop: TOOLBAR + 18,
                   paddingBottom: PAD,
                   rowGap: GAP,
                   columnGap: GAP,
@@ -269,6 +294,7 @@ export function Library(props: {
               </List>
             );
           }}
+          {toolbar()}
         </View>
       </If>
     </View>

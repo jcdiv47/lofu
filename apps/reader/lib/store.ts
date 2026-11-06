@@ -16,12 +16,16 @@ export type Source =
   | { kind: "highlights" }
   | { kind: "archive" }
   | { kind: "collection"; id: string }
-  | { kind: "tag"; name: string };
+  | { kind: "tag"; name: string }
+  | { kind: "type"; type: BookmarkType };
+
+export type BookmarkType = Bookmark["type"];
 
 export const sameSource = (a: Source, b: Source) =>
   a.kind === b.kind &&
   (a.kind !== "collection" || a.id === (b as { id: string }).id) &&
-  (a.kind !== "tag" || a.name === (b as { name: string }).name);
+  (a.kind !== "tag" || a.name === (b as { name: string }).name) &&
+  (a.kind !== "type" || a.type === (b as { type: BookmarkType }).type);
 
 const SNAPSHOT_KEY = "library.v1";
 
@@ -73,6 +77,8 @@ const matches = (s: Source, b: Bookmark): boolean => {
       return !b.archived && b.collectionId === s.id;
     case "tag":
       return !b.archived && b.tags.includes(s.name);
+    case "type":
+      return !b.archived && b.type === s.type;
   }
 };
 
@@ -88,6 +94,7 @@ export const counts = computed(() => {
     archive: 0,
     collections: new Map<string, number>(),
     tags: new Map<string, number>(),
+    types: new Map<BookmarkType, number>(),
   };
   const hl = highlightCounts();
   for (const b of bookmarks()) {
@@ -101,6 +108,7 @@ export const counts = computed(() => {
     if (!b.collectionId) c.unsorted++;
     else c.collections.set(b.collectionId, (c.collections.get(b.collectionId) ?? 0) + 1);
     for (const t of b.tags) c.tags.set(t, (c.tags.get(t) ?? 0) + 1);
+    c.types.set(b.type, (c.types.get(b.type) ?? 0) + 1);
   }
   return c;
 });
@@ -119,6 +127,8 @@ export const countFor = (s: Source): number => {
       return c.collections.get(s.id) ?? 0;
     case "tag":
       return c.tags.get(s.name) ?? 0;
+    case "type":
+      return c.types.get(s.type) ?? 0;
     default:
       return c[s.kind];
   }
@@ -140,7 +150,19 @@ export const sourceTitle = (s: Source): string => {
       return collectionName(s.id) || "Collection";
     case "tag":
       return `#${s.name}`;
+    case "type":
+      return typeTitles[s.type];
   }
+};
+
+/** The kinds of page the server tells apart, as the library names them. */
+export const typeTitles: Record<BookmarkType, string> = {
+  article: "Articles",
+  video: "Videos",
+  image: "Images",
+  audio: "Audio",
+  document: "Documents",
+  link: "Links",
 };
 
 /**
@@ -306,6 +328,14 @@ export async function addBookmark(url: string, into: Source): Promise<Bookmark> 
     setTimeout(() => void sync(), 12000);
   }
   return b;
+}
+
+/** Makes a collection on the server, then brings it (and its `seq`) in with a sync. */
+export async function createCollection(name: string): Promise<Collection> {
+  const c = await api.createCollection(name.trim());
+  collectionsById.update((m) => m.set(c.id, c));
+  void sync();
+  return c;
 }
 
 /** Highlights changed in the reader: keep the sidebar's count current without a sync. */

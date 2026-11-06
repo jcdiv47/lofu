@@ -74,11 +74,14 @@ test("connecting checks the server before saving", async () => {
   expect(app.storage().token).toBeUndefined();
 });
 
-test("phone: opens on all bookmarks, newest first, from a sync", async () => {
+test("phone: opens on the Library page; all bookmarks are newest first, from a sync", async () => {
   const app = await open("./App.tsx", {
     ...saved,
     network: { [`GET ${S}/v1/sync*`]: { body: library } },
   });
+  await app.waitFor("id:source-all");
+  await app.waitFor("text:Homelab");
+  await app.press("id:source-all");
   await app.waitFor("text:Article a");
   const texts = app.texts();
   // Archived bookmarks stay out of "All bookmarks"; a page with no title shows its URL.
@@ -235,9 +238,26 @@ test("desktop: + saves a page into the collection being shown", async () => {
   expect(app.shows("id:add-url")).toBe(false);
 });
 
-test("phone: + in the header opens a page that saves", async () => {
+test("phone: the Library page's search narrows it to the names that match", async () => {
+  const app = await open("./App.tsx", {
+    ...saved,
+    network: { [`GET ${S}/v1/sync*`]: { body: library } },
+  });
+  await app.waitFor("text:Homelab");
+  await app.type("id:home-search", "home");
+  await app.waitFor("id:search-bookmarks");
+  expect(app.shows("text:Homelab")).toBe(true);
+  expect(app.shows("text:rust")).toBe(false);
+  expect(app.shows("text:Favorites")).toBe(false);
+  await app.clear("id:home-search");
+  await app.waitFor("text:rust");
+});
+
+test("phone: + beside the search opens a page that saves", async () => {
   const posts: unknown[] = [];
   const app = await open("./App.tsx", { ...saved, network: saveStub(posts) });
+  await app.waitFor("id:source-all");
+  await app.press("id:source-all");
   await app.waitFor("text:Article a");
   await app.press("label:Add bookmark");
   await app.waitFor("id:add-url");

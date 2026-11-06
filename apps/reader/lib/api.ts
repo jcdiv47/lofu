@@ -133,8 +133,12 @@ export const api = {
   /** Checks a server address and token before they're saved. */
   check: (s: Settings) => request<SyncPage>("GET", "/v1/sync?since=0&limit=1", undefined, s),
   sync: (since: number) => request<SyncPage>("GET", `/v1/sync?since=${since}&limit=1000`),
-  search: (query: string, filter: { collectionId?: string; tags?: string; favorite?: boolean }) => {
+  search: (
+    query: string,
+    filter: { collectionId?: string; tags?: string; favorite?: boolean; type?: Bookmark["type"] },
+  ) => {
     const params = [`q=${q(query)}`, "limit=60"];
+    if (filter.type) params.push(`type=${q(filter.type)}`);
     if (filter.collectionId) params.push(`collectionId=${q(filter.collectionId)}`);
     if (filter.tags) params.push(`tags=${q(filter.tags)}`);
     if (filter.favorite) params.push("favorite=true");
@@ -147,6 +151,7 @@ export const api = {
   ) => request<Bookmark>("POST", "/v1/bookmarks", { url, ...fields }),
   update: (id: string, patch: BookmarkPatch) =>
     request<Bookmark>("PATCH", `/v1/bookmarks/${id}`, patch),
+  createCollection: (name: string) => request<Collection>("POST", "/v1/collections", { name }),
   refetch: (id: string) => request<Bookmark>("POST", `/v1/bookmarks/${id}/refetch`),
   /** The saved text as Markdown, and its images (sizes, and where to load them from). */
   article: async (id: string): Promise<Article> => {
