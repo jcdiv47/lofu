@@ -1,4 +1,4 @@
-import { signal, Text, View } from "nsh";
+import { openUrl, signal, Text, View } from "nsh";
 import {
   createRichEditor,
   RichEditor,
@@ -9,9 +9,13 @@ import {
   starterKit,
 } from "nsh/base";
 import { findQuote, quoteAt } from "../../../packages/shared/src/anchor";
+import { IconButton } from "../components/ui";
+import { showBookmarkMenu } from "../lib/actions";
 import { api, type Bookmark, type Highlight } from "../lib/api";
 import { type DocIndex, indexDoc, toDocRange, toTextRange } from "../lib/docIndex";
-import { look } from "../lib/look";
+import { readingTime } from "../lib/format";
+import { fonts, look } from "../lib/look";
+import { bookmark as current, setHighlightCount, updateBookmark } from "../lib/store";
 
 /**
  * Raw HTML embeds (iframes, scripts) can't be shown by the editor and would
@@ -22,6 +26,23 @@ const readable = (markdown: string) =>
   markdown
     .replace(/<(iframe|script|style|video|audio|object|embed)\b[\s\S]*?(<\/\1>|\/>)/gi, "")
     .replace(/^<(iframe|embed)\b[^\n]*$/gim, "");
+
+/** The article starts with its title, unless the extracted text already does. */
+const withTitle = (markdown: string, title: string) => {
+  const t = title.trim();
+  if (!t) return markdown;
+  const first =
+    markdown
+      .trimStart()
+      .split("\n", 1)[0]
+      ?.replace(/^#+\s*/, "")
+      .trim() ?? "";
+  if (first && (first === t || t.startsWith(first) || first.startsWith(t))) return markdown;
+  return `# ${t.replace(/\n/g, " ")}\n\n${markdown}`;
+};
+
+/** The widest the text gets, for a comfortable line length. */
+const MEASURE = 680;
 
 interface Placed {
   highlight: Highlight;
@@ -34,7 +55,17 @@ interface Placed {
  * Highlights are inline decorations placed by their text quote; selecting
  * text offers "Highlight", and a caret inside a highlight offers "Remove".
  */
-export function Reader(props: { bookmark: Bookmark; onBack: () => void }) {
+export function Reader(props: {
+  bookmark: Bookmark;
+  onBack: () => void;
+  /** Desktops: the page draws its own toolbar. */
+  wide: boolean;
+  /** Leading room for the window's controls when the sidebar is hidden. */
+  toolbarInset?: number;
+}) {
+  /** The bookmark as it is now (favorite and archive change while it's open). */
+  const b = () => current(props.bookmark.id) ?? props.bookmark;
+  const width = signal(0);
   const editor = signal<RichEditorSession | null>(null);
   const status = signal("Loading…");
   const selection = signal<RichEditorSelection | null>(null);
@@ -82,6 +113,10 @@ export function Reader(props: { bookmark: Bookmark; onBack: () => void }) {
     }
     placed.set(out);
     orphans.set(missing);
+    setHighlightCount(
+      props.bookmark.id,
+      out.map((p) => p.highlight.id),
+    );
     decorate();
   };
 
@@ -92,11 +127,18 @@ export function Reader(props: { bookmark: Bookmark; onBack: () => void }) {
         api.highlights(props.bookmark.id),
       ]);
       if (!markdown) {
-        status.set("This page has no saved text yet.");
+        const b = props.bookmark;
+        status.set(
+          b.contentStatus === "pending"
+            ? "lofu is still fetching this page."
+            : b.contentStatus === "failed"
+              ? `lofu couldn't read this page${b.contentError ? `: ${b.contentError}` : "."}`
+              : "This page has no saved text.",
+        );
         return;
       }
       const ed = createRichEditor({
-        content: readable(markdown),
+        content: withTitle(readable(markdown), props.bookmark.title),
         format: "markdown",
         editable: false,
         plugins: [starterKit(), plugin],
@@ -171,35 +213,106 @@ export function Reader(props: { bookmark: Bookmark; onBack: () => void }) {
     return undefined;
   };
 
+  const meta = () =>
+    [props.bookmark.domain.replace(/^www\./, ""), readingTime(props.bookmark.wordCount)]
+      .filter(Boolean)
+      .join(" · ");
+  const highlights = () =>
+    (placed().length ? `${placed().length} highlight${placed().length === 1 ? "" : "s"}` : "") +
+    (orphans() ? ` · ${orphans()} not found` : "");
+  const sidePad = () => Math.max(props.wide ? 40 : 20, Math.round((width() - MEASURE) / 2));
+
   return (
-    <View class="flex-1" style={{ backgroundColor: look().paper }}>
-      <View
-        class="flex-row items-center gap-3 px-4 py-3"
-        style={{ borderBottomWidth: 1, borderColor: look().rule }}
-      >
-        <View onPress={props.onBack} role="button" class="py-1 pr-2 active:opacity-60">
-          <Text style={{ color: look().inkSoft, fontSize: 15 }}>‹ Library</Text>
-        </View>
-        <Text
-          class="flex-1 truncate"
-          style={{ color: look().inkFaint, fontSize: 12, fontFamily: "monospace" }}
+    <View
+      class="flex-1"
+      style={{ backgroundColor: look().paper }}
+      onLayout={(e) => width.set(e.bounds.size.width)}
+    >
+      <If when={props.wide}>
+        <View
+          desktop={{ windowDrag: true }}
+          class="flex-row items-center gap-1 pr-3"
+          style={{
+            height: 52,
+            paddingLeft: (props.toolbarInset ?? 0) + 14,
+            borderBottomWidth: 1,
+            borderColor: look().ruleSoft,
+          }}
         >
-          {props.bookmark.domain}
-        </Text>
+          <IconButton
+            name="back"
+            label="Back to the library"
+            testID="back"
+            onPress={props.onBack}
+          />
+          <Text
+            class="flex-1 truncate"
+            style={{ color: look().inkFaint, fontSize: 12.5, marginLeft: 6 }}
+          >
+            {meta()}
+          </Text>
+          <Text
+            testID="highlight-count"
+            style={{ color: look().stamp, fontSize: 12, marginRight: 8 }}
+          >
+            {highlights()}
+          </Text>
+          <IconButton
+            name={b().favorite ? "starFill" : "star"}
+            label={b().favorite ? "Remove from favorites" : "Add to favorites"}
+            color={b().favorite ? look().favorite : undefined}
+            onPress={() => void updateBookmark(b().id, { favorite: !b().favorite }).catch(() => {})}
+          />
+          <IconButton
+            name="archive"
+            label={b().archived ? "Move out of archive" : "Archive"}
+            active={b().archived}
+            onPress={() => void updateBookmark(b().id, { archived: !b().archived }).catch(() => {})}
+          />
+          <IconButton
+            name="external"
+            label="Open original"
+            onPress={() => void openUrl(b().url).catch(() => {})}
+          />
+          <IconButton
+            name="more"
+            label="More"
+            onPress={() => void showBookmarkMenu(b(), undefined)}
+          />
+        </View>
+      </If>
+      <If when={!props.wide && (placed().length || orphans())}>
         <Text
           testID="highlight-count"
-          style={{ color: look().stamp, fontSize: 12, fontFamily: "monospace" }}
+          class="px-5 pt-2"
+          style={{ color: look().stamp, fontSize: 12 }}
         >
-          {placed().length ? `${placed().length} highlight${placed().length === 1 ? "" : "s"}` : ""}
-          {orphans() ? ` · ${orphans()} not found` : ""}
+          {highlights()}
         </Text>
-      </View>
+      </If>
       <If
         when={editor()}
         else={
-          <Text class="p-6" style={{ color: look().inkSoft }}>
-            {status()}
-          </Text>
+          <View class="items-center gap-2 px-8 pt-24">
+            <Text
+              class="text-center"
+              style={{ color: look().inkSoft, fontSize: 15, lineHeight: 21 }}
+            >
+              {status()}
+            </Text>
+            <If when={props.bookmark.contentStatus !== "ok"}>
+              <View
+                role="button"
+                onPress={() => void openUrl(props.bookmark.url).catch(() => {})}
+                class="mt-2 rounded-lg px-4 py-2 active:opacity-70"
+                style={{ backgroundColor: look().ink }}
+              >
+                <Text style={{ color: look().paper, fontSize: 14, fontWeight: "600" }}>
+                  Open original
+                </Text>
+              </View>
+            </If>
+          </View>
         }
       >
         {(ed) => (
@@ -209,24 +322,26 @@ export function Reader(props: { bookmark: Bookmark; onBack: () => void }) {
               view = r;
             }}
             editable={false}
+            testID="article"
+            accessibilityLabel="Article"
             class="flex-1"
             onSelectionChange={({ selection: s }) => selection.set(s)}
             bubbleMenu={bubble()}
             classes={{
-              content: "px-6 pt-6 pb-24",
+              content: `px-[${sidePad()}px] pt-8 pb-32`,
               nodes: {
-                paragraph: "text-[18px] leading-[30px] mb-4",
-                heading: "font-semibold mt-6 mb-3",
-                "heading[level=1]": "text-[30px] leading-[36px]",
-                "heading[level=2]": "text-[24px] leading-[30px]",
-                "heading[level=3]": "text-[20px] leading-[26px]",
+                paragraph: "text-[18px] leading-[30px] mb-5",
+                heading: "font-semibold mt-8 mb-3",
+                "heading[level=1]": "text-[32px] leading-[39px] mt-0 mb-6",
+                "heading[level=2]": "text-[24px] leading-[31px]",
+                "heading[level=3]": "text-[20px] leading-[27px]",
                 blockquote: "pl-4 border-l-2",
                 codeBlock: "rounded-md p-3 font-mono text-[13px] leading-[20px]",
               },
               marks: { code: "font-mono text-[15px]" },
             }}
             styles={{
-              root: { color: look().ink, fontFamily: "serif" },
+              root: { color: look().ink, fontFamily: fonts.serif },
               selection: { backgroundColor: look().highlight },
             }}
           />

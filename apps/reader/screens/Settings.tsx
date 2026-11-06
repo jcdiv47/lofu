@@ -1,58 +1,156 @@
 import { signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
-import { loadSettings, saveSettings } from "../lib/api";
-import { look } from "../lib/look";
+import { api, loadSettings, normalizeServer, saveSettings } from "../lib/api";
+import { fonts, look } from "../lib/look";
+import { Wordmark } from "./Sidebar";
 
-export function Settings(props: { onDone: () => void }) {
+/**
+ * The server address and token. Shown on first launch (full screen), as a
+ * dialog on desktops and as a page on phones. Connecting checks both before
+ * they're saved, so a typo is caught here rather than as an empty library.
+ */
+export function Settings(props: { onDone: () => void; onCancel?: () => void; first?: boolean }) {
   const server = signal("");
   const token = signal("");
+  const error = signal("");
+  const busy = signal(false);
   void loadSettings().then((s) => {
     server.set(s.server);
     token.set(s.token);
   });
+
+  const connect = async () => {
+    if (busy()) return;
+    const s = { server: normalizeServer(server()), token: token().trim() };
+    if (!/^https?:\/\//.test(s.server)) {
+      error.set("The address starts with https:// (or http:// on your own network).");
+      return;
+    }
+    if (!s.token) {
+      error.set("Paste a token from `bun run stack:token create <name>`.");
+      return;
+    }
+    busy.set(true);
+    error.set("");
+    try {
+      await api.check(s);
+      await saveSettings(s);
+      props.onDone();
+    } catch (e) {
+      error.set((e as Error).message);
+    } finally {
+      busy.set(false);
+    }
+  };
+
   const field = (
     label: string,
     id: string,
     value: () => string,
     set: (v: string) => void,
     placeholder: string,
+    masked = false,
   ) => (
-    <View class="gap-1">
-      <Text style={{ color: look().inkFaint, fontSize: 11, fontFamily: "monospace" }}>{label}</Text>
+    <View class="gap-1.5">
+      <Text style={{ color: look().inkSoft, fontSize: 12.5, fontWeight: "600" }}>{label}</Text>
       <Input
         testID={id}
         value={value()}
         placeholder={placeholder}
         autoCapitalize="none"
         autoCorrect={false}
-        onChange={({ value: v }) => set(v)}
-        class="py-2 text-[16px]"
-        style={{ color: look().ink, borderBottomWidth: 1, borderColor: look().rule }}
+        keyboardType={id === "server" ? "url" : "default"}
+        masked={masked}
+        onChange={({ value: v }) => {
+          set(v);
+          error.set("");
+        }}
+        onSubmit={() => void connect()}
+        class="rounded-lg px-3"
+        style={{
+          height: 40,
+          color: look().ink,
+          fontSize: 15,
+          fontFamily: id === "token" ? fonts.mono : undefined,
+          backgroundColor: look().card,
+          borderWidth: 1,
+          borderColor: look().rule,
+          placeholderColor: look().inkFaint,
+        }}
       />
     </View>
   );
-  return (
-    <View class="flex-1 gap-6 px-6 pt-6" style={{ backgroundColor: look().paper }}>
-      <Text style={{ color: look().ink, fontSize: 26, fontFamily: "serif" }}>Your server</Text>
+
+  const form = (
+    <View class="gap-5">
       {field(
-        "SERVER ADDRESS",
+        "Server address",
         "server",
         server,
         (v) => server.set(v),
         "https://homebox.tail1234.ts.net",
       )}
-      {field("API TOKEN", "token", token, (v) => token.set(v), "lofu_…")}
-      <View
-        onPress={async () => {
-          await saveSettings({ server: server(), token: token() });
-          props.onDone();
-        }}
-        role="button"
-        class="self-start rounded-md px-5 py-3 active:opacity-70"
-        style={{ backgroundColor: look().ink }}
-      >
-        <Text style={{ color: look().paper, fontSize: 15, fontWeight: "600" }}>Save</Text>
+      {field("API token", "token", token, (v) => token.set(v), "lofu_…", !props.first)}
+      <If when={error()}>
+        <Text
+          testID="settings-error"
+          style={{ color: look().stamp, fontSize: 13.5, lineHeight: 19 }}
+        >
+          {error()}
+        </Text>
+      </If>
+      <View class="flex-row items-center justify-end gap-2">
+        <If when={props.onCancel}>
+          <View
+            role="button"
+            onPress={() => props.onCancel?.()}
+            class="rounded-lg px-4 py-2.5 active:opacity-60"
+          >
+            <Text style={{ color: look().inkSoft, fontSize: 14.5, fontWeight: "500" }}>Cancel</Text>
+          </View>
+        </If>
+        <View
+          role="button"
+          testID="connect"
+          accessibilityState={{ disabled: busy() }}
+          onPress={() => void connect()}
+          class="rounded-lg px-5 py-2.5 active:opacity-70"
+          style={{ backgroundColor: look().ink, opacity: busy() ? 0.6 : 1 }}
+        >
+          <Text style={{ color: look().paper, fontSize: 14.5, fontWeight: "600" }}>
+            {busy() ? "Connecting…" : "Connect"}
+          </Text>
+        </View>
       </View>
     </View>
+  );
+
+  return (
+    <If
+      when={props.first}
+      else={
+        <View class="gap-5 p-6" style={{ backgroundColor: look().paper }}>
+          <Text style={{ color: look().ink, fontSize: 19, fontWeight: "700" }}>Your server</Text>
+          {form}
+        </View>
+      }
+    >
+      <View
+        desktop={{ windowDrag: true }}
+        class="flex-1 items-center justify-center px-6"
+        style={{ backgroundColor: look().paper }}
+      >
+        <View class="w-full gap-8" style={{ maxWidth: 400 }}>
+          <View class="gap-2">
+            <Wordmark size={44} />
+            <Text style={{ color: look().inkSoft, fontSize: 15.5, lineHeight: 22 }}>
+              Your bookmarks and reading, from your own server: the lofu server on your network or
+              tailnet.
+            </Text>
+          </View>
+          {form}
+        </View>
+      </View>
+    </If>
   );
 }

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Semaphore } from "../util/semaphore.ts";
@@ -119,20 +119,37 @@ export type BrowserSource =
   | { kind: "launch"; executable: string; args: string[] }
   | { kind: "connect"; endpoint: string };
 
-/** Finds a Chromium build: explicit path, PATH, then Playwright's download cache. */
+/**
+ * Finds a Chromium build: explicit path, PATH, the macOS app bundles, then
+ * Playwright's download cache (~/.cache on Linux, ~/Library/Caches on macOS).
+ */
 export function findChromium(explicit?: string): string | null {
   if (explicit) return explicit;
   for (const name of ["chromium", "chromium-browser", "google-chrome-stable", "google-chrome"]) {
     const p = Bun.which(name);
     if (p) return p;
   }
+  if (process.platform === "darwin") {
+    for (const app of ["Chromium", "Google Chrome"]) {
+      const p = `/Applications/${app}.app/Contents/MacOS/${app}`;
+      if (existsSync(p)) return p;
+    }
+  }
   const home = process.env.HOME;
   if (home) {
-    const glob = new Bun.Glob("chromium-*/chrome-linux*/chrome");
-    const found = [...glob.scanSync({ cwd: join(home, ".cache/ms-playwright"), absolute: true })]
-      .sort()
-      .pop();
-    if (found) return found;
+    const caches = [
+      { dir: ".cache/ms-playwright", glob: "chromium-*/chrome-linux*/chrome" },
+      {
+        dir: "Library/Caches/ms-playwright",
+        glob: "chromium-*/chrome-mac*/Chromium.app/Contents/MacOS/Chromium",
+      },
+    ];
+    for (const c of caches) {
+      const cwd = join(home, c.dir);
+      if (!existsSync(cwd)) continue;
+      const found = [...new Bun.Glob(c.glob).scanSync({ cwd, absolute: true })].sort().pop();
+      if (found) return found;
+    }
   }
   return null;
 }

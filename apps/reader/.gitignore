@@ -1,2 +1,4 @@
 .nsh/
 target/
+e2e/apps/target.ts
+e2e/apps/library.test.tsx

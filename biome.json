@@ -13,7 +13,9 @@
       "!**/*.md",
       "!**/.output",
       "!**/.wxt",
-      "!**/.nsh"
+      "!**/.nsh",
+      "!apps/reader/e2e/apps/target.ts",
+      "!apps/reader/e2e/apps/library.test.tsx"
     ]
   },
   "formatter": {

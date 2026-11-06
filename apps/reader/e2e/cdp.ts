@@ -201,20 +201,25 @@ export async function launch(opts: {
 }
 
 /** Center of the first element whose own text contains `text` (the web target renders text as DOM). */
-export const locate = (text: string) => `(() => {
+/** A text's box: the first text containing `text`, or with `=text` the first that is exactly it. */
+export const locate = (text: string) => {
+  const exact = text.startsWith("=");
+  const t = exact ? text.slice(1) : text;
+  return `(() => {
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-    const i = n.textContent.indexOf(${JSON.stringify(text)});
+    const i = ${exact} ? (n.textContent.trim() === ${JSON.stringify(t)} ? n.textContent.indexOf(${JSON.stringify(t)}) : -1) : n.textContent.indexOf(${JSON.stringify(t)});
     if (i < 0) continue;
     const r = document.createRange();
     r.setStart(n, i);
-    r.setEnd(n, i + ${text.length});
+    r.setEnd(n, i + ${t.length});
     const b = r.getBoundingClientRect();
     if (b.width === 0) continue;
     return { x: b.left, y: b.top, w: b.width, h: b.height };
   }
   return null;
 })()`;
+};
 
 /** Fills the reader's settings screen if it is showing (each test run starts from a fresh state). */
 export async function connect(
@@ -223,7 +228,7 @@ export async function connect(
   token: string,
 ) {
   await page.waitForText("lofu", 10_000).catch(() => null);
-  if (!(await page.eval<string>("document.body.innerText")).includes("SERVER ADDRESS")) return;
+  if (!(await page.eval<string>("document.body.innerText")).includes("Server address")) return;
   const inputs = await page.eval<{ x: number; y: number }[]>(
     `[...document.querySelectorAll("input,textarea")].map(e => { const b = e.getBoundingClientRect(); return { x: b.left + 20, y: b.top + b.height / 2 }; })`,
   );
@@ -231,5 +236,24 @@ export async function connect(
   await page.type(server);
   await page.click(inputs[1]!.x, inputs[1]!.y);
   await page.type(token);
-  await page.clickText("Save");
+  await Bun.sleep(300);
+  await page.clickText("Connect");
+  // The first click can land while the field still has the focus.
+  if (!(await page.waitForText("All bookmarks", 4000).catch(() => null))) {
+    await page.clickText("Connect");
+    await page.waitForText("All bookmarks");
+  }
+}
+
+/** Finds a bookmark with the library's search field and opens it. */
+export async function openByTitle(page: Awaited<ReturnType<typeof launch>>, title: string) {
+  await page.waitForText("All bookmarks");
+  const field = await page.eval<{ x: number; y: number }>(
+    `(() => { const b = document.querySelector("input").getBoundingClientRect(); return { x: b.left + 20, y: b.top + b.height / 2 }; })()`,
+  );
+  await page.click(field.x, field.y);
+  await page.type(title);
+  await page.waitForText("found");
+  await Bun.sleep(500); // the hits render
+  await page.clickText(title);
 }

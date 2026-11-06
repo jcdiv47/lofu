@@ -4,14 +4,18 @@
  * menu's "Highlight" saves a text-quote anchor to the server, a reload puts
  * it back in place, a press inside it offers "Remove".
  *
- * Needs: a lofu server with the test articles (LOFU_URL, LOFU_TOKEN; see
- * e2e/README in the commit message) and `nsh run App.tsx --target web`.
+ * Needs `nsh run App.tsx --target web` and a lofu server (LOFU_URL,
+ * LOFU_TOKEN; LOFU_CORS_ORIGINS=http://127.0.0.1:8790) with the test articles:
+ *   lofu add https://www.paulgraham.com/greatwork.html
+ *   lofu add https://www.ruanyifeng.com/blog/2019/09/react-hooks.html
+ * The first needs a highlight saved without context, as Raindrop imports
+ * them: POST /v1/bookmarks/{id}/highlights {"quote":"the shape of the intersection"}.
  *
  *   bun e2e/web.ts
  */
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
-import { connect, launch } from "./cdp.ts";
+import { connect, launch, openByTitle } from "./cdp.ts";
 
 const SERVER = process.env.LOFU_URL ?? "http://127.0.0.1:8797";
 const TOKEN = process.env.LOFU_TOKEN ?? "";
@@ -44,9 +48,24 @@ const bookmarkId = async (title: string) =>
     await api<{ items: { id: string; title: string }[] }>("GET", "/v1/bookmarks?limit=100")
   ).items.find((b) => b.title.includes(title))!.id;
 
-/** Is `quote` drawn as its own run (the decoration splits the text there)? */
-const isDecorated = (quote: string) =>
-  `[...document.querySelectorAll("span.nsh-run")].some(s => s.textContent === ${JSON.stringify(quote)})`;
+/**
+ * Is `quote` drawn as its own run (the decoration splits the text there)? A
+ * quote that wraps is split again at the line break, so consecutive runs that
+ * spell it count too.
+ */
+const isDecorated = (quote: string) => `(() => {
+  // Line breaks drop the space between the runs: compare without whitespace.
+  const want = ${JSON.stringify(quote)}.replace(/\\s+/g, "");
+  const runs = [...document.querySelectorAll("span.nsh-run")].map(s => s.textContent);
+  for (let i = 0; i < runs.length; i++) {
+    let text = "";
+    for (let j = i; j < runs.length && text.length < want.length; j++) {
+      text += runs[j].replace(/\\s+/g, "");
+      if (text === want) return true;
+    }
+  }
+  return false;
+})()`;
 
 const page = await launch({ profile: "/tmp/lofu-reader-e2e", width: 800, height: 1000 });
 try {
@@ -58,11 +77,12 @@ try {
   for (const h of await api<Highlight[]>("GET", `/v1/bookmarks/${pg}/highlights`)) {
     if (h.quote !== "the shape of the intersection") await api("DELETE", `/v1/highlights/${h.id}`);
   }
-  await page.clickText("How to Do Great Work");
+  await openByTitle(page, "How to Do Great Work");
   const opened = Date.now();
-  await page.waitForText("July 2023");
+  await page.waitForText("The following recipe assumes");
   console.log(`  article shown ${Date.now() - opened} ms after the tap`);
-  await Bun.sleep(400);
+  await page.waitForText("1 highlight", 5000).catch(() => null);
+  await Bun.sleep(200);
   check(
     "a saved highlight (no context) is drawn in place",
     await page.eval<boolean>(isDecorated("the shape of the intersection")),
@@ -74,17 +94,17 @@ try {
   await page.drag(box.x + 1, box.y + box.h / 2, box.x + box.w - 1, box.y + box.h / 2);
   known(
     "a mouse drag selects text in the read-only RichEditor",
-    Boolean(await page.waitForText("Highlight", 1500).catch(() => null)),
+    Boolean(await page.waitForText("=Highlight", 1500).catch(() => null)),
     "nsh 0.4.0 web: RichEditor ignores drag-to-select, longbridge/nsh#1004 (Shift+click and Shift+arrows work)",
   );
   await page.click(box.x - 40, box.y - 30); // collapse whatever happened
 
   // Select it with click + Shift+click instead.
   await page.shiftSelect(box.x + 1, box.y + box.h / 2, box.x + box.w - 1, box.y + box.h / 2);
-  const bubble = await page.waitForText("Highlight", 3000).catch(() => null);
+  const bubble = await page.waitForText("=Highlight", 3000).catch(() => null);
   check("selecting text shows the Highlight bubble", Boolean(bubble));
   console.log(`  screenshot: ${await page.screenshot(SHOTS, "web-selection")}`);
-  if (bubble) await page.clickText("Highlight");
+  if (bubble) await page.clickText("=Highlight");
   await page.waitForText("2 highlights", 5000).catch(() => null);
   const saved = (await api<Highlight[]>("GET", `/v1/bookmarks/${pg}/highlights`)).find((h) =>
     h.quote.includes("what to work"),
@@ -99,7 +119,7 @@ try {
 
   // Reload: it must come back in the same place.
   await page.goto(APP);
-  await page.clickText("How to Do Great Work");
+  await openByTitle(page, "How to Do Great Work");
   await page.waitForText("2 highlights");
   await Bun.sleep(300);
   check(
@@ -122,12 +142,12 @@ try {
   );
 
   // ---- Chinese ----
-  await page.clickText("‹ Library");
+  await page.goto(APP);
   const zh = await bookmarkId("React Hooks");
   for (const h of await api<Highlight[]>("GET", `/v1/bookmarks/${zh}/highlights`)) {
     await api("DELETE", `/v1/highlights/${h.id}`);
   }
-  await page.clickText("React Hooks 入门教程");
+  await openByTitle(page, "React Hooks 入门教程");
   const zhText = "组件尽量写成纯函数";
   const zhBox = await page.scrollTo(zhText);
   await page.shiftSelect(
@@ -136,8 +156,8 @@ try {
     zhBox.x + zhBox.w - 1,
     zhBox.y + zhBox.h / 2,
   );
-  if (await page.waitForText("Highlight", 3000).catch(() => null))
-    await page.clickText("Highlight");
+  if (await page.waitForText("=Highlight", 3000).catch(() => null))
+    await page.clickText("=Highlight");
   await page.waitForText("1 highlight", 5000).catch(() => null);
   const zhSaved = (await api<Highlight[]>("GET", `/v1/bookmarks/${zh}/highlights`))[0];
   check(

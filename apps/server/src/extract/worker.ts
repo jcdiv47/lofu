@@ -6,6 +6,7 @@
  * (zero-copy).
  */
 import { Defuddle } from "defuddle/node";
+import { assetUrl } from "./assetUrl.ts";
 import { detectBlockPage } from "./blocked.ts";
 import type { ExtractRequest, ExtractResponse } from "./protocol.ts";
 import { markdownToText } from "./text.ts";
@@ -33,8 +34,8 @@ self.onmessage = async (ev: MessageEvent<ExtractRequest>) => {
       text: zstd(text),
       title: nonEmpty(r.title),
       excerpt: nonEmpty(r.description) ?? (text ? `${text.slice(0, 280).trim()}…` : null),
-      coverUrl: nonEmpty(r.image),
-      faviconUrl: nonEmpty(r.favicon),
+      coverUrl: assetUrl(r.image, url),
+      faviconUrl: assetUrl(r.favicon, url),
       wordCount: r.wordCount || null,
       lang: nonEmpty(r.language),
       author: nonEmpty(r.author),

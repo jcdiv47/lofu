@@ -7,12 +7,12 @@ apps/server       Bun + Hono API, SQLite, job queue, extraction workers, search 
 packages/shared   zod schemas (API contract → OpenAPI) and URL normalization
 crates/lofu-cli   `lofu` CLI in Rust
 apps/extension    Browser extension (WXT; Chrome/Edge/Brave and Firefox)
-apps/reader       Reader prototype on nsh (TSX): library, reading, highlights; see its README
+apps/reader       The app on nsh (TSX) for macOS, iOS and the web: library, search, reading, highlights; see its README
 skills/lofu       Agent skill describing the CLI
 docker/           compose stack (server + Meilisearch) and Dockerfile
 ```
 
-Clients still to come: the full nsh app (`apps/reader` is its prototype) and the iOS share extension. See the roadmap below.
+Still to come: the iOS share extension and the Safari extension. See the roadmap below.
 
 ## Quick start (development)
 
@@ -100,5 +100,5 @@ The OpenAPI 3.1 document is served at `/openapi.json`, generated from the zod sc
 1. More importers as needed: Netscape bookmark HTML (browsers), Pocket export.
 2. Per-site cookies for the browser fallback (Zhihu and other login walls); screenshot thumbnails.
 3. **Permanent copies**: single-file archives via `monolith`; periodic broken-link checks.
-4. **Clients**: the nsh reader prototype works on the web (findings in `apps/reader/README.md`; drag-to-select on the web is [longbridge/nsh#1004](https://github.com/longbridge/nsh/issues/1004); a Linux desktop app is deferred). Next: verify iOS (long-press selection and the bubble menu), then the full apps with a Swift share extension and keychain. The extension's Safari build comes along with the Apple apps.
+4. **Clients**: the nsh app (`apps/reader`) runs on macOS, iOS and the web: a sidebar and card grid on the Mac, a native navigation stack on the phone, both over a `/v1/sync` mirror (findings in `apps/reader/README.md`; drag-to-select on the web is [longbridge/nsh#1004](https://github.com/longbridge/nsh/issues/1004); a Linux desktop app is deferred). Next: verify long-press selection and highlighting on an iPhone by hand, then the Swift share extension and keychain. The extension's Safari build comes along with the Apple apps.
 5. Semantic search (a Meilisearch embedder, e.g. Ollama → `MEILI_EMBEDDER`), suggested tags, text-to-speech.
