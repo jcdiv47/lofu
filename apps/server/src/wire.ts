@@ -66,7 +66,16 @@ export function wire(config: Config) {
   }
   runner = new JobRunner(
     jobs,
-    { extract: extractHandler({ bookmarks, fetcher, pool, pdf, browser }) },
+    {
+      extract: extractHandler({
+        bookmarks,
+        fetcher,
+        pool,
+        pdf,
+        browser,
+        githubToken: config.githubToken,
+      }),
+    },
     {
       concurrency: config.jobConcurrency,
       leaseMs: 5 * 60_000,

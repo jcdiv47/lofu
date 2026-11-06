@@ -28,6 +28,29 @@ const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
 
 /**
+ * A user agent that says what it is. Cloudflare challenges a Chrome user agent
+ * that lacks Chrome's TLS fingerprint, yet lets many sites (V2EX, personal
+ * blogs) serve an honest client.
+ */
+export const HONEST_USER_AGENT = "lofu/1.0 (bookmark reader)";
+
+export interface RequestOptions {
+  /** Replaces the default Chrome user agent. */
+  userAgent?: string;
+  /** Extra headers; `accept` overrides the HTML default. */
+  headers?: Record<string, string>;
+}
+
+/** Response of `fetchText`: any status, body read as text. */
+export interface TextResponse {
+  status: number;
+  text: string;
+  contentType: string;
+  finalUrl: string;
+  headers: Headers;
+}
+
+/**
  * Page fetcher with a global concurrency cap and a per-host cap (politeness:
  * a bulk import of 2,000 links from one site must not hammer it).
  */
@@ -49,7 +72,30 @@ export class Fetcher {
     this.global = new Semaphore(opts.concurrency);
   }
 
-  async fetch(url: string): Promise<FetchResult> {
+  fetch(url: string, req: RequestOptions = {}): Promise<FetchResult> {
+    return this.polite(url, () => this.doFetch(url, req));
+  }
+
+  /**
+   * A request for an API rather than a page: returns any status and any
+   * content type as text, under the same concurrency caps and host pacing.
+   */
+  fetchText(url: string, req: RequestOptions = {}): Promise<TextResponse> {
+    return this.polite(url, async () => {
+      const res = await this.request(url, req);
+      const contentType = res.headers.get("content-type") ?? "";
+      const bytes = await readCapped(res, this.opts.maxBytes);
+      return {
+        status: res.status,
+        text: decodeHtml(bytes, contentType),
+        contentType,
+        finalUrl: res.url || url,
+        headers: res.headers,
+      };
+    });
+  }
+
+  private async polite<T>(url: string, run: () => Promise<T>): Promise<T> {
     const host = new URL(url).host;
     let h = this.hosts.get(host);
     if (!h) {
@@ -61,7 +107,7 @@ export class Fetcher {
     await this.pace(host);
     const releaseGlobal = await this.global.acquire();
     try {
-      return await this.doFetch(url);
+      return await run();
     } finally {
       releaseGlobal();
       releaseHost();
@@ -118,14 +164,15 @@ export class Fetcher {
    * don't speak h2 at all; those fail fast and are retried over HTTP/1.1.
    * Uses Bun's experimental `protocol` fetch option.
    */
-  private async request(url: string): Promise<Response> {
+  private async request(url: string, req: RequestOptions = {}): Promise<Response> {
     const init: RequestInit = {
       redirect: "follow",
       signal: AbortSignal.timeout(this.opts.timeoutMs),
       headers: {
-        "user-agent": USER_AGENT,
+        "user-agent": req.userAgent ?? USER_AGENT,
         accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
         "accept-language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
+        ...req.headers,
       },
     };
     const host = new URL(url).host;
@@ -142,10 +189,10 @@ export class Fetcher {
     return fetch(url, init);
   }
 
-  private async doFetch(url: string): Promise<FetchResult> {
+  private async doFetch(url: string, req: RequestOptions): Promise<FetchResult> {
     let res: Response;
     try {
-      res = await this.request(url);
+      res = await this.request(url, req);
     } catch (e) {
       throw new FetchError(`fetch failed: ${(e as Error).message}`, false);
     }

@@ -1,9 +1,10 @@
 import type { BookmarkType } from "@lofu/shared";
 import type { Browser } from "../extract/browser.ts";
-import { FetchError, type Fetcher } from "../extract/fetch.ts";
+import { FetchError, type Fetcher, type FetchResult, HONEST_USER_AGENT } from "../extract/fetch.ts";
 import type { PdfExtractor } from "../extract/pdf.ts";
 import type { ExtractPool } from "../extract/pool.ts";
 import type { ExtractOutput } from "../extract/protocol.ts";
+import { siteFor } from "../extract/sites/index.ts";
 import type { BookmarkStore, ExtractedContent } from "../store/bookmarks.ts";
 import type { Job } from "../store/jobs.ts";
 import type { BookmarkRow } from "../store/rows.ts";
@@ -117,8 +118,11 @@ export function extractHandler(deps: {
   pdf: PdfExtractor;
   /** Optional headless-Chromium fallback. */
   browser: Browser | null;
+  /** For GitHub's API (READMEs); null means the 60-an-hour anonymous limit. */
+  githubToken?: string | null;
 }): JobHandler {
   const { bookmarks, fetcher, pool, pdf, browser } = deps;
+  const siteCtx = { fetcher, githubToken: deps.githubToken ?? null };
 
   function save(
     row: BookmarkRow,
@@ -151,6 +155,9 @@ export function extractHandler(deps: {
 
   /** Renders in headless Chromium. Returns null on success, else why it failed. */
   async function viaBrowser(row: BookmarkRow): Promise<string | null> {
+    // Sites whose wall a headless browser never passes say what works instead.
+    const noBrowser = siteFor(row.url)?.noBrowser;
+    if (noBrowser) return noBrowser;
     if (!browser) return "no browser configured";
     let page: Awaited<ReturnType<Browser["render"]>>;
     try {
@@ -179,6 +186,8 @@ export function extractHandler(deps: {
   ) {
     const out = await pool.run(html, url);
     if (out.blocked) {
+      const noBrowser = siteFor(url)?.noBrowser;
+      if (noBrowser) throw new PermanentError(`blocked by site: ${out.blocked}; ${noBrowser}`);
       if (RATE_LIMIT_PAGES.has(out.blocked) || !allowBrowser || !browser) {
         // Captcha/challenge served with HTTP 200: slow down on this host and retry later.
         fetcher.penalize(url);
@@ -198,6 +207,19 @@ export function extractHandler(deps: {
     save(row, out, rawBytes, { status: "ok" });
   }
 
+  /**
+   * Cloudflare challenges a Chrome user agent without Chrome's TLS
+   * fingerprint, yet serves many sites to a client that says what it is.
+   * One request is cheaper than a browser render.
+   */
+  async function honestRetry(url: string): Promise<FetchResult | null> {
+    try {
+      return await fetcher.fetch(url, { userAgent: HONEST_USER_AGENT });
+    } catch {
+      return null;
+    }
+  }
+
   return {
     async run(job: Job) {
       const row = bookmarks.row(job.bookmark_id);
@@ -208,17 +230,21 @@ export function extractHandler(deps: {
         return fromHtml(row, job.payload, row.url, Buffer.byteLength(job.payload), false);
       }
 
-      let fetched: Awaited<ReturnType<Fetcher["fetch"]>>;
+      const site = siteFor(row.url);
+      let fetched: FetchResult;
       try {
-        fetched = await fetcher.fetch(row.url);
+        fetched =
+          (await site?.fetch?.(new URL(row.url), siteCtx)) ??
+          (await fetcher.fetch(row.url, site?.request));
       } catch (e) {
         if (!(e instanceof FetchError) || !e.permanent) throw e;
-        if (e.blocked && browser) {
+        const retry = e.blocked && !site?.request?.userAgent ? await honestRetry(row.url) : null;
+        if (retry) fetched = retry;
+        else if (e.blocked && (browser || site?.noBrowser)) {
           const failure = await viaBrowser(row);
           if (!failure) return;
           throw new PermanentError(`${e.message}; ${failure}`);
-        }
-        throw new PermanentError(e.message);
+        } else throw new PermanentError(e.message);
       }
 
       switch (fetched.kind) {

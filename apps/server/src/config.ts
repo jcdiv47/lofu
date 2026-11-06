@@ -42,6 +42,8 @@ export const config = {
   browserTimeoutMs: int("LOFU_BROWSER_TIMEOUT_MS", 25_000),
   /** Shut the launched browser down after this long without renders. */
   browserIdleMs: int("LOFU_BROWSER_IDLE_MS", 5 * 60_000),
+  /** GitHub API token for README fetches; raises the limit from 60 to 5,000 an hour. */
+  githubToken: process.env.LOFU_GITHUB_TOKEN || null,
   meiliUrl: process.env.MEILI_URL ?? "",
   meiliKey: process.env.MEILI_MASTER_KEY ?? "",
   meiliIndex: process.env.MEILI_INDEX ?? "bookmarks",

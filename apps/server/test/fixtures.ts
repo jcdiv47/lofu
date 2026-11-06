@@ -100,6 +100,12 @@ export function startFixtureServer() {
         );
       }
       if (path === "/forbidden") return html("<h1>Forbidden</h1>", 403);
+      if (path === "/cf-wall") {
+        // Like Cloudflare: challenges a Chrome user agent, serves an honest client.
+        if (req.headers.get("user-agent")?.includes("Chrome"))
+          return html("<h1>Just a moment...</h1>", 403);
+        return html(ARTICLE_HTML);
+      }
       if (path === "/spa") {
         // Client-rendered: the text only exists after JavaScript runs.
         const text =
