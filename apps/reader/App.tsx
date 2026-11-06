@@ -1,11 +1,12 @@
-import { effect, lifecycle, mount, platform, signal, View, windowSize } from "nsh";
+import { cleanup, effect, lifecycle, mount, platform, signal, View, windowSize } from "nsh";
 import { createNavStack, Dialog, NavPage, NavStack } from "nsh/base";
 import { isAvailable, titleBar, Window } from "nsh/desktop";
-import { showBookmarkMenu } from "./lib/actions";
+import { setBrowser, showBookmarkMenu } from "./lib/actions";
 import type { Bookmark } from "./lib/api";
 import { loadSettings } from "./lib/api";
 import { look } from "./lib/look";
 import { bookmark as current, reset, type Source, sourceTitle, start, sync } from "./lib/store";
+import { Browser } from "./screens/Browser";
 import { Library } from "./screens/Library";
 import { Reader } from "./screens/Reader";
 import { Settings } from "./screens/Settings";
@@ -14,7 +15,14 @@ import { Sources, Wordmark } from "./screens/Sidebar";
 type Route =
   | { name: "sources" }
   | { name: "library"; source: Source }
-  | { name: "reader"; bookmark: Bookmark };
+  | { name: "reader"; bookmark: Bookmark }
+  | { name: "browser"; url: string; domain: string };
+
+/** "Open original" pushes the page onto this stack while it's mounted. */
+function useBrowser(push: (r: Route) => void) {
+  setBrowser((b) => push({ name: "browser", url: b.url, domain: b.domain }));
+  cleanup(() => setBrowser(null));
+}
 
 const SIDEBAR = 232;
 const TOOLBAR = 52;
@@ -65,6 +73,7 @@ function Desktop(props: { onReconnect: () => void }) {
   const source = signal<Source>({ kind: "all" });
   const nav = createNavStack<Route>([{ name: "library", source: source() }]);
   const settingsOpen = signal(false);
+  useBrowser((r) => nav.push(r));
   const select = (s: Source) => {
     source.set(s);
     nav.setRoutes([{ name: "library", source: s }]);
@@ -95,6 +104,13 @@ function Desktop(props: { onReconnect: () => void }) {
       <View class="flex-1">
         <NavStack state={nav} class="flex-1">
           {(route) => {
+            if (route.name === "browser") {
+              return (
+                <NavPage header={<View />} title="">
+                  <Browser url={route.url} wide onClose={() => nav.pop()} />
+                </NavPage>
+              );
+            }
             if (route.name === "reader") {
               return (
                 <NavPage header={<View />} title="">
@@ -141,6 +157,7 @@ function Phone(props: { onReconnect: () => void }) {
     { name: "sources" },
     { name: "library", source: { kind: "all" } },
   ]);
+  useBrowser((r) => nav.push(r));
   const headerClass = () => `bg-[${look().paper}] text-[${look().ink}] tint-[${look().stamp}]`;
   return (
     <NavStack state={nav} class="flex-1" style={{ backgroundColor: look().paper }}>
@@ -200,6 +217,16 @@ function Phone(props: { onReconnect: () => void }) {
               </NavPage>
             );
           }
+          case "browser":
+            return (
+              <NavPage
+                title={route.domain.replace(/^www\./, "")}
+                headerClass={headerClass()}
+                style={{ backgroundColor: look().paper }}
+              >
+                <Browser url={route.url} wide={false} onClose={() => nav.pop()} />
+              </NavPage>
+            );
           case "settings":
             return (
               <NavPage

@@ -1,14 +1,38 @@
-import { Clipboard, openUrl } from "nsh";
+import { Clipboard, openUrl, platform } from "nsh";
 import { AlertDialog } from "nsh/base";
 import { isAvailable, Menu } from "nsh/desktop";
 import { api, type Bookmark } from "./api";
 import { sync, updateBookmark } from "./store";
 
+/**
+ * Where the app can show a page itself (`WebView` is WKWebView on Apple
+ * platforms and Android's WebView). The web build would have to frame the
+ * page, which most sites refuse, and the Linux app is deferred.
+ */
+export const hasBrowser =
+  platform.os === "ios" || platform.os === "macos" || platform.os === "android";
+
+let browse: ((b: Bookmark) => void) | null = null;
+
+/** The app's stack registers how it shows a page in the app. */
+export function setBrowser(show: ((b: Bookmark) => void) | null) {
+  browse = show;
+}
+
+/** Outside the app: the system's browser. */
+export const openInBrowser = (url: string) => void openUrl(url).catch(() => {});
+
+/** The bookmark's page: in the app where it can, else in the system's browser. */
+export function openOriginal(b: Bookmark) {
+  if (hasBrowser && browse) browse(b);
+  else openInBrowser(b.url);
+}
+
 /** What can be done to a bookmark from its card, its row or the reader's toolbar. */
 export function bookmarkActions(b: Bookmark, open?: () => void) {
   return [
     open && { id: "open", label: "Open", run: open },
-    { id: "original", label: "Open original", run: () => void openUrl(b.url).catch(() => {}) },
+    { id: "original", label: "Open original", run: () => openOriginal(b) },
     { id: "copy", label: "Copy link", run: () => void Clipboard.writeText(b.url) },
     {
       id: "favorite",

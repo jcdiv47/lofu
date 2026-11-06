@@ -8,6 +8,7 @@ import clockIcon from "../assets/icons/clock.svg";
 import closeIcon from "../assets/icons/close.svg";
 import externalIcon from "../assets/icons/external.svg";
 import folderIcon from "../assets/icons/folder.svg";
+import forwardIcon from "../assets/icons/forward.svg";
 import gridIcon from "../assets/icons/grid.svg";
 import hashIcon from "../assets/icons/hash.svg";
 import highlighterIcon from "../assets/icons/highlighter.svg";
@@ -32,6 +33,7 @@ export const icons = {
   close: closeIcon,
   external: externalIcon,
   folder: folderIcon,
+  forward: forwardIcon,
   grid: gridIcon,
   hash: hashIcon,
   highlighter: highlighterIcon,
@@ -67,6 +69,7 @@ export function IconButton(props: {
   size?: number;
   testID?: string;
   active?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <View
@@ -74,8 +77,12 @@ export function IconButton(props: {
       accessibilityLabel={props.label}
       testID={props.testID}
       onPress={props.onPress}
+      disabled={props.disabled}
       class="h-8 w-8 items-center justify-center rounded-md active:opacity-60"
-      style={{ backgroundColor: props.active ? look().selected : undefined }}
+      style={{
+        backgroundColor: props.active ? look().selected : undefined,
+        opacity: props.disabled ? 0.35 : 1,
+      }}
       hoverStyle={{ backgroundColor: look().selected }}
     >
       <Icon name={props.name} size={props.size ?? 17} color={props.color} />

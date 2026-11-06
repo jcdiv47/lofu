@@ -1,4 +1,4 @@
-import { openUrl, signal, Text, View } from "nsh";
+import { signal, Text, View } from "nsh";
 import {
   createRichEditor,
   RichEditor,
@@ -10,7 +10,7 @@ import {
 } from "nsh/base";
 import { findQuote, quoteAt } from "../../../packages/shared/src/anchor";
 import { IconButton } from "../components/ui";
-import { showBookmarkMenu } from "../lib/actions";
+import { openOriginal, showBookmarkMenu } from "../lib/actions";
 import { api, type Bookmark, type Highlight } from "../lib/api";
 import { type DocIndex, indexDoc, toDocRange, toTextRange } from "../lib/docIndex";
 import { readingTime } from "../lib/format";
@@ -269,11 +269,7 @@ export function Reader(props: {
             active={b().archived}
             onPress={() => void updateBookmark(b().id, { archived: !b().archived }).catch(() => {})}
           />
-          <IconButton
-            name="external"
-            label="Open original"
-            onPress={() => void openUrl(b().url).catch(() => {})}
-          />
+          <IconButton name="external" label="Open original" onPress={() => openOriginal(b())} />
           <IconButton
             name="more"
             label="More"
@@ -303,7 +299,7 @@ export function Reader(props: {
             <If when={props.bookmark.contentStatus !== "ok"}>
               <View
                 role="button"
-                onPress={() => void openUrl(props.bookmark.url).catch(() => {})}
+                onPress={() => openOriginal(b())}
                 class="mt-2 rounded-lg px-4 py-2 active:opacity-70"
                 style={{ backgroundColor: look().ink }}
               >

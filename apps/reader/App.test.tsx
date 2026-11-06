@@ -142,3 +142,48 @@ test("favoriting from the reader updates at once and on the server", async () =>
   await app.press("label:Favorites");
   await app.waitFor("text:Article a");
 });
+
+const readable = {
+  [`GET ${S}/v1/sync*`]: { body: library },
+  [`GET ${S}/v1/bookmarks/a?content=markdown`]: {
+    body: { ...library.bookmarks[0], content: "Some text to read here." },
+  },
+  [`GET ${S}/v1/bookmarks/a/highlights`]: { body: [] },
+};
+
+test("desktop: the original opens in the app, and leaves for the browser on request", async () => {
+  const app = await open("./App.tsx", {
+    ...saved,
+    platform: "macos",
+    width: 1200,
+    height: 800,
+    network: readable,
+  });
+  await app.press("text:Article a");
+  await app.waitFor("label:Open original");
+  await app.press("label:Open original");
+  await app.waitFor("id:web");
+  expect(app.openedUrls()).toEqual([]);
+  expect(app.texts()).toContain("example.com");
+
+  await app.press("label:Open in browser");
+  expect(app.openedUrls()).toEqual(["https://example.com/a"]);
+
+  await app.press("label:Close page");
+  await app.waitFor("id:article");
+});
+
+test("web: the original opens in the browser", async () => {
+  const app = await open("./App.tsx", {
+    ...saved,
+    platform: "web",
+    width: 1200,
+    height: 800,
+    network: readable,
+  });
+  await app.press("text:Article a");
+  await app.waitFor("label:Open original");
+  await app.press("label:Open original");
+  expect(app.openedUrls()).toEqual(["https://example.com/a"]);
+  expect(app.shows("id:web")).toBe(false);
+});
