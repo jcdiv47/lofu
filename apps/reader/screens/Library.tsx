@@ -182,11 +182,13 @@ export function Library(props: {
   );
 
   // Phones: search sits at the bottom, in reach of the thumb, as in iOS 26,
-  // and rides up with the keyboard.
+  // and rides up with the keyboard. The keyboard's height already covers the
+  // home-indicator inset, and this view runs to the screen's bottom edge, so
+  // nothing is subtracted (that put the field on the keyboard's top edge).
   const insets = safeAreaInsets();
   const searchBottom = () => {
     const kb = keyboardFrame().height;
-    return kb > 0 ? kb - insets().bottom + 10 : Math.max(insets().bottom, 12) + 4;
+    return kb > 0 ? kb + 10 : Math.max(insets().bottom, 12) + 4;
   };
   const phoneSearch = () => (
     <View
