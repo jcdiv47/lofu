@@ -288,9 +288,8 @@ function fixTable(doc: Doc, table: El) {
     [...tr.children].filter((c) => c.localName === "td" || c.localName === "th");
   const cells = rows.flatMap(cellsOf);
   if (!cells.some((c) => spanAttr(c, "colspan") || spanAttr(c, "rowspan"))) return;
-  // A nested table or a single column is flattened by Defuddle already.
+  // A nested table is flattened by Defuddle already.
   if ([...table.querySelectorAll("table")].some((t) => t !== table)) return;
-  if (rows.every((tr) => cellsOf(tr).length <= 1)) return;
 
   const isLayout = cells.some(
     (c) =>

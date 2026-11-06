@@ -82,6 +82,12 @@ describe("articleMarkdown: what Markdown can't express doesn't come out as raw H
     );
   });
 
+  test("a single-column table with merged cells is no raw HTML either", () => {
+    expect(
+      md(`<table><tr><th colspan="2">Group</th></tr><tr><td colspan="2">Value</td></tr></table>`),
+    ).toBe("| Group |  |\n| --- | --- |\n| Value |  |");
+  });
+
   test("a layout table (a forum post) becomes its content", () => {
     const post = `<table><tbody><tr><td rowspan="2"></td><td><p><strong>#301</strong> posted 2024-10-30</p></td></tr>
       <tr><td><blockquote>Quoted question</blockquote><p>The answer.</p></td></tr></tbody></table>`;
