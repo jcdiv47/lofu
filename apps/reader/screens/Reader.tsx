@@ -7,7 +7,8 @@ import {
   type RichEditorSelection,
   type RichEditorSession,
   type RichNodeJSON,
-  starterKit,
+  StarterKit,
+  TableKit,
 } from "nsh/base";
 import { findQuote, quoteAt } from "../../../packages/shared/src/anchor";
 import { BookmarkDropdown } from "../components/BookmarkMenu";
@@ -15,6 +16,7 @@ import { IconButton } from "../components/ui";
 import { nativeMenus, openOriginal, showBookmarkMenu } from "../lib/actions";
 import { type ArticleImage, api, type Bookmark, type Highlight } from "../lib/api";
 import { type DocIndex, indexDoc, toDocRange, toTextRange } from "../lib/docIndex";
+import { isFootnoteNumber, numberFootnotes, raiseFootnotes } from "../lib/footnotes";
 import { readingTime } from "../lib/format";
 import { fonts, look } from "../lib/look";
 import { bookmark as current, setHighlightCount, updateBookmark } from "../lib/store";
@@ -79,6 +81,22 @@ export function placeImages(
   return out;
 }
 
+/**
+ * Marks the paragraphs in table cells (`textAlign: "left"`, which is how they
+ * look anyway) so they can be styled apart from the article's: the editor's
+ * classes select a node by type and attributes, not by where it is.
+ */
+export function compactCells(doc: RichNodeJSON): RichNodeJSON {
+  const walk = (n: RichNodeJSON, inCell: boolean): RichNodeJSON => {
+    const cell = inCell || n.type === "tableCell" || n.type === "tableHeader";
+    const out = n.content ? { ...n, content: n.content.map((c) => walk(c, cell)) } : n;
+    return inCell && n.type === "paragraph" && !n.attrs?.textAlign
+      ? { ...out, attrs: { ...n.attrs, textAlign: "left" } }
+      : out;
+  };
+  return walk(doc, false);
+}
+
 /** The widest the text gets, for a comfortable line length. */
 const MEASURE = 680;
 
@@ -112,6 +130,7 @@ export function Reader(props: {
   const plugin = new RichEditorPlugin("highlights");
   let view: RichEditorRef | null = null;
   let index: DocIndex = { text: "", pos: [] };
+  let hasFootnotes = false;
   /** The document as parsed and the text width its images are sized for. */
   let sized: { doc: RichNodeJSON; images: ArticleImage[]; width: number } | null = null;
   const sidePad = () => Math.max(props.wide ? 40 : 20, Math.round((width() - MEASURE) / 2));
@@ -143,11 +162,10 @@ export function Reader(props: {
       }
       const range = toDocRange(index, hit.start, hit.end);
       // Dev check that the text index and the editor agree on positions.
-      const shown = editor()?.textBetween(range.from, range.to, " ");
-      if (
-        shown !== undefined &&
-        shown.replace(/\s+/g, " ").trim() !== h.quote.replace(/\s+/g, " ").trim()
-      ) {
+      // (Skipped with footnotes: their numbers are shown but not quoted.)
+      const shown = hasFootnotes ? undefined : editor()?.textBetween(range.from, range.to, " ");
+      const norm = (t: string) => t.replace(/\s+/g, " ").trim();
+      if (shown !== undefined && norm(shown) !== norm(h.quote)) {
         console.warn(
           `highlight misplaced: wanted "${h.quote}", got "${shown}" at ${range.from}..${range.to}`,
         );
@@ -180,17 +198,25 @@ export function Reader(props: {
         );
         return;
       }
+      const content = numberFootnotes(withTitle(readable(markdown), props.bookmark.title));
       const ed = createRichEditor({
-        content: withTitle(readable(markdown), props.bookmark.title),
+        content,
         format: "markdown",
         editable: false,
-        plugins: [starterKit(), plugin],
+        extensions: [StarterKit, TableKit.configure({ table: { resizable: false } })],
+        plugins: [plugin],
       });
-      if (images.length > 0) {
-        sized = { doc: ed.getJSON(), images, width: textWidth() };
-        ed.setContent(placeImages(sized.doc, images, sized.width), "json");
+      hasFootnotes = content.includes("\uE000");
+      if (images.length > 0 || hasFootnotes || content.includes("|")) {
+        const doc = compactCells(raiseFootnotes(ed.getJSON()));
+        if (images.length > 0) {
+          sized = { doc, images, width: textWidth() };
+          ed.setContent(placeImages(doc, images, sized.width), "json");
+        } else {
+          ed.setContent(doc, "json");
+        }
       }
-      index = indexDoc(ed.getJSON());
+      index = indexDoc(ed.getJSON(), isFootnoteNumber);
       editor.set(ed);
       status.set("");
       place(highlights);
@@ -399,8 +425,19 @@ export function Reader(props: {
                 "heading[level=3]": "text-[20px] leading-[27px]",
                 blockquote: "pl-4 border-l-2",
                 codeBlock: "rounded-md p-3 font-mono text-[13px] leading-[20px]",
+                table: "my-6",
+                tableCell: `px-3 py-2 border-b border-[${look().rule}]`,
+                tableHeader: `px-3 py-2 border-b-2 border-[${look().rule}] font-semibold`,
+                horizontalRule: `my-8 border-t border-[${look().rule}]`,
+                // Paragraphs in cells (compactCells).
+                "paragraph[textAlign=left]": "text-[15px] leading-[22px] mb-0",
               },
-              marks: { code: "font-mono text-[15px]" },
+              marks: {
+                code: "font-mono text-[15px]",
+                bold: "font-bold",
+                // Footnote numbers: the editor can't raise text, so small and in the accent.
+                superscript: `text-[12px] font-semibold text-[${look().stamp}]`,
+              },
             }}
             styles={{
               root: { color: look().ink, fontFamily: fonts.serif },

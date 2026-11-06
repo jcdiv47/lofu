@@ -9,7 +9,8 @@ import type { RichNodeJSON } from "nsh/base";
  * with content takes one position to open and one to close; text takes one
  * per character (UTF-16 unit); a leaf node (image, hard break, rule) takes one.
  * Blocks are separated by "\n" in the text; a separator carries the
- * position of the content that follows it.
+ * position of the content that follows it. Text `skip` picks (footnote
+ * numbers) keeps its positions but is left out of the text.
  */
 export interface DocIndex {
   text: string;
@@ -18,7 +19,7 @@ export interface DocIndex {
 
 const LEAVES = new Set(["image", "hardBreak", "hard_break", "horizontalRule", "horizontal_rule"]);
 
-export function indexDoc(doc: RichNodeJSON): DocIndex {
+export function indexDoc(doc: RichNodeJSON, skip?: (n: RichNodeJSON) => boolean): DocIndex {
   const chars: string[] = [];
   const pos: number[] = [];
   const separate = (p: number) => {
@@ -32,6 +33,7 @@ export function indexDoc(doc: RichNodeJSON): DocIndex {
   const walk = (node: RichNodeJSON, start: number): number => {
     if (node.type === "text") {
       const t = node.text ?? "";
+      if (skip?.(node)) return t.length;
       for (let i = 0; i < t.length; i++) {
         chars.push(t[i]!);
         pos.push(start + i);
