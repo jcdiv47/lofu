@@ -1,4 +1,4 @@
-import { cleanup, effect, List, signal, Text, View } from "nsh";
+import { cleanup, effect, List, platform, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
 import { BookmarkCard, BookmarkRow, CARD_COVER } from "../components/BookmarkCard";
 import { Icon, IconButton } from "../components/ui";
@@ -88,7 +88,10 @@ function Empty(props: { searching: boolean; source: Source }) {
       case "archive":
         return { title: "Nothing archived", body: "Archive what you've finished reading." };
       default:
-        return { title: "Nothing here yet", body: "Save pages with the extension or `lofu add`." };
+        return {
+          title: "Nothing here yet",
+          body: "Save a page with +, the browser extension or `lofu add`.",
+        };
     }
   };
   return (
@@ -109,6 +112,9 @@ export function Library(props: {
   source: Source;
   wide: boolean;
   onOpen: (b: Bookmark) => void;
+  /** The "+" that opens the add form: the desktop's toolbar, and beside the
+   * phone's search field on the web, which draws no navigation header. */
+  onAdd?: () => void;
   /** Desktops draw their own toolbar; leading room for the sidebar toggle or traffic lights. */
   toolbarInset?: number;
 }) {
@@ -174,6 +180,7 @@ export function Library(props: {
           placeholder="Search titles and text"
         />
       </View>
+      <IconButton name="plus" label="Add bookmark" testID="add" onPress={() => props.onAdd?.()} />
       <IconButton
         name="refresh"
         label="Sync now"
@@ -198,13 +205,23 @@ export function Library(props: {
             onRefresh={() => void sync()}
             keyboardDismissMode="on-drag"
             header={
-              <View class="px-4 pt-1 pb-2">
-                <SearchField
-                  value={query}
-                  onChange={(v) => query.set(v)}
-                  placeholder="Search"
-                  height={36}
-                />
+              <View class="flex-row items-center gap-2 px-4 pt-1 pb-2">
+                <View class="flex-1">
+                  <SearchField
+                    value={query}
+                    onChange={(v) => query.set(v)}
+                    placeholder="Search"
+                    height={36}
+                  />
+                </View>
+                <If when={platform.os === "web" && props.onAdd}>
+                  <IconButton
+                    name="plus"
+                    label="Add bookmark"
+                    size={20}
+                    onPress={() => props.onAdd?.()}
+                  />
+                </If>
               </View>
             }
             empty={<Empty searching={searching()} source={props.source} />}

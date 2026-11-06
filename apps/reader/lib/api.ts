@@ -126,6 +126,11 @@ export const api = {
     if (filter.favorite) params.push("favorite=true");
     return request<{ hits: SearchHit[] }>("GET", `/v1/search?${params.join("&")}`);
   },
+  /** Saves a URL; the server fetches and reads the page afterwards. Saving one again merges `fields`. */
+  create: (
+    url: string,
+    fields: Partial<Pick<Bookmark, "tags" | "collectionId" | "favorite">> = {},
+  ) => request<Bookmark>("POST", "/v1/bookmarks", { url, ...fields }),
   update: (id: string, patch: BookmarkPatch) =>
     request<Bookmark>("PATCH", `/v1/bookmarks/${id}`, patch),
   refetch: (id: string) => request<Bookmark>("POST", `/v1/bookmarks/${id}/refetch`),

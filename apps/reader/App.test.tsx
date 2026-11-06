@@ -187,3 +187,98 @@ test("web: the original opens in the browser", async () => {
   expect(app.openedUrls()).toEqual(["https://example.com/a"]);
   expect(app.shows("id:web")).toBe(false);
 });
+
+const saveStub = (posts: unknown[]) => ({
+  [`GET ${S}/v1/sync*`]: { body: library },
+  [`POST ${S}/v1/bookmarks`]: (r: { body?: string | null }) => {
+    const input = JSON.parse(r.body ?? "{}");
+    posts.push(input);
+    return {
+      status: 201,
+      body: bookmark("new", {
+        url: input.url,
+        title: "",
+        domain: "new.example",
+        contentStatus: "pending",
+        collectionId: input.collectionId ?? null,
+        createdAt: "2026-11-06T10:00:00.000Z",
+      }),
+    };
+  },
+});
+
+test("desktop: + saves a page into the collection being shown", async () => {
+  const posts: unknown[] = [];
+  const app = await open("./App.tsx", {
+    ...saved,
+    platform: "macos",
+    width: 1200,
+    height: 800,
+    network: saveStub(posts),
+  });
+  await app.waitFor("text:Article a");
+  await app.press("label:Homelab");
+  await app.press("label:Add bookmark");
+  await app.waitFor("id:add-url");
+  expect(app.texts().join(" ")).toContain("Into Homelab.");
+
+  await app.type("id:add-url", "not a url");
+  await app.press("id:add-save");
+  await app.waitFor("id:add-error");
+  expect(posts).toEqual([]);
+
+  await app.clear("id:add-url");
+  await app.type("id:add-url", "new.example/post");
+  await app.press("id:add-save");
+  await app.waitFor("text:new.example/post");
+  expect(posts).toEqual([{ url: "https://new.example/post", collectionId: "c1" }]);
+  expect(app.shows("id:add-url")).toBe(false);
+});
+
+test("phone: + in the header opens a page that saves", async () => {
+  const posts: unknown[] = [];
+  const app = await open("./App.tsx", { ...saved, network: saveStub(posts) });
+  await app.waitFor("text:Article a");
+  await app.press("label:Add bookmark");
+  await app.waitFor("id:add-url");
+  await app.type("id:add-url", "https://new.example/x");
+  await app.press("id:add-save");
+  await app.waitFor("text:new.example/x");
+  expect(posts).toEqual([{ url: "https://new.example/x" }]);
+});
+
+test("share text pastes as its link, and short links say they'll be followed", async () => {
+  const posts: { url: string }[] = [];
+  const app = await open("./App.tsx", {
+    ...saved,
+    platform: "macos",
+    width: 1200,
+    height: 800,
+    network: saveStub(posts),
+  });
+  await app.waitFor("text:Article a");
+  await app.press("label:Add bookmark");
+  await app.waitFor("id:add-url");
+  await app.paste("id:add-url", {
+    text: "【好物分享】 http://xhslink.com/a/AbC123 复制本条信息，打开【小红书】App查看精彩内容！",
+  });
+  await app.waitFor("text:A short link: the page it leads to is saved.");
+  await app.press("id:add-save");
+  await app.waitFor("text:xhslink.com/a/AbC123");
+  expect(posts.map((p) => p.url)).toEqual(["http://xhslink.com/a/AbC123"]);
+});
+
+test("the form starts from a link on the clipboard", async () => {
+  const app = await open("./App.tsx", {
+    ...saved,
+    platform: "macos",
+    width: 1200,
+    height: 800,
+    clipboard: "look at this https://example.org/post!",
+    network: saveStub([]),
+  });
+  await app.waitFor("text:Article a");
+  await app.press("label:Add bookmark");
+  await app.waitFor("text:From the clipboard.");
+  expect(app.texts().join(" ")).toContain("From the clipboard.");
+});

@@ -284,6 +284,30 @@ export async function updateBookmark(id: string, patch: BookmarkPatch) {
   }
 }
 
+/**
+ * Saves a URL into a source (its collection, tag or favorites). The bookmark
+ * shows at once; the server reads the page in the background, so a sync a
+ * little later brings its title, excerpt and cover.
+ */
+export async function addBookmark(url: string, into: Source): Promise<Bookmark> {
+  const fields =
+    into.kind === "collection"
+      ? { collectionId: into.id }
+      : into.kind === "tag"
+        ? { tags: [into.name] }
+        : into.kind === "favorites"
+          ? { favorite: true }
+          : {};
+  const b = normalize(await api.create(url, fields));
+  byId.update((m) => m.set(b.id, b));
+  persist();
+  if (b.contentStatus === "pending") {
+    setTimeout(() => void sync(), 3000);
+    setTimeout(() => void sync(), 12000);
+  }
+  return b;
+}
+
 /** Highlights changed in the reader: keep the sidebar's count current without a sync. */
 export function setHighlightCount(bookmarkId: string, ids: string[]) {
   for (const [hid, owner] of highlightOwner) {

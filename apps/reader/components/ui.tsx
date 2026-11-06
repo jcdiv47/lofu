@@ -16,6 +16,7 @@ import inboxIcon from "../assets/icons/inbox.svg";
 import linkIcon from "../assets/icons/link.svg";
 import listIcon from "../assets/icons/list.svg";
 import moreIcon from "../assets/icons/more.svg";
+import plusIcon from "../assets/icons/plus.svg";
 import refreshIcon from "../assets/icons/refresh.svg";
 import searchIcon from "../assets/icons/search.svg";
 import settingsIcon from "../assets/icons/settings.svg";
@@ -41,6 +42,7 @@ export const icons = {
   link: linkIcon,
   list: listIcon,
   more: moreIcon,
+  plus: plusIcon,
   refresh: refreshIcon,
   search: searchIcon,
   settings: settingsIcon,

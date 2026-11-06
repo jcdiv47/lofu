@@ -1,6 +1,8 @@
-import { cleanup, effect, lifecycle, mount, platform, signal, View, windowSize } from "nsh";
+import { cleanup, effect, lifecycle, mount, platform, signal, Text, View, windowSize } from "nsh";
 import { createNavStack, Dialog, NavPage, NavStack } from "nsh/base";
 import { isAvailable, titleBar, Window } from "nsh/desktop";
+import { AddBookmark } from "./components/AddBookmark";
+import { Icon } from "./components/ui";
 import { setBrowser, showBookmarkMenu } from "./lib/actions";
 import type { Bookmark } from "./lib/api";
 import { loadSettings } from "./lib/api";
@@ -16,7 +18,8 @@ type Route =
   | { name: "sources" }
   | { name: "library"; source: Source }
   | { name: "reader"; bookmark: Bookmark }
-  | { name: "browser"; url: string; domain: string };
+  | { name: "browser"; url: string; domain: string }
+  | { name: "add"; source: Source };
 
 /** "Open original" pushes the page onto this stack while it's mounted. */
 function useBrowser(push: (r: Route) => void) {
@@ -76,6 +79,7 @@ function Desktop(props: { onReconnect: () => void }) {
   const source = signal<Source>({ kind: "all" });
   const nav = createNavStack<Route>([{ name: "library", source: source() }]);
   const settingsOpen = signal(false);
+  const adding = signal(false);
   useBrowser((r) => nav.push(r));
   const select = (s: Source) => {
     source.set(s);
@@ -128,6 +132,7 @@ function Desktop(props: { onReconnect: () => void }) {
                   source={s}
                   wide
                   onOpen={(b) => nav.push({ name: "reader", bookmark: b })}
+                  onAdd={() => adding.set(true)}
                 />
               </NavPage>
             );
@@ -149,6 +154,25 @@ function Desktop(props: { onReconnect: () => void }) {
             props.onReconnect();
           }}
         />
+      </Dialog>
+      <Dialog
+        open={adding()}
+        animation="fade"
+        onOpenChange={(e) => adding.set(e.open)}
+        backdropClass="bg-black/40"
+        class="m-auto w-[440px] overflow-hidden rounded-2xl"
+        style={{ backgroundColor: look().paper }}
+      >
+        <If when={adding()}>
+          <View class="gap-5 p-6" style={{ backgroundColor: look().paper }}>
+            <Text style={{ color: look().ink, fontSize: 19, fontWeight: "700" }}>Add bookmark</Text>
+            <AddBookmark
+              source={source()}
+              onCancel={() => adding.set(false)}
+              onDone={() => adding.set(false)}
+            />
+          </View>
+        </If>
       </Dialog>
     </View>
   );
@@ -194,11 +218,24 @@ function Phone(props: { onReconnect: () => void }) {
                 headerLargeTitle
                 headerClass={headerClass()}
                 style={{ backgroundColor: look().paper }}
+                ios={{ headerRightSystemItem: "add" }}
+                headerRight={
+                  <View
+                    role="button"
+                    accessibilityLabel="Add bookmark"
+                    testID="add"
+                    onPress={() => nav.push({ name: "add", source: route.source })}
+                    class="h-8 w-8 items-center justify-center active:opacity-60"
+                  >
+                    <Icon name="plus" size={20} color={look().stamp} />
+                  </View>
+                }
               >
                 <Library
                   source={route.source}
                   wide={false}
                   onOpen={(b) => nav.push({ name: "reader", bookmark: b })}
+                  onAdd={() => nav.push({ name: "add", source: route.source })}
                 />
               </NavPage>
             );
@@ -232,6 +269,24 @@ function Phone(props: { onReconnect: () => void }) {
                 style={{ backgroundColor: look().paper }}
               >
                 <Browser url={route.url} wide={false} onClose={() => nav.pop()} />
+              </NavPage>
+            );
+          case "add":
+            return (
+              <NavPage
+                animation={pageAnimation}
+                title="Add bookmark"
+                headerClass={headerClass()}
+                style={{ backgroundColor: look().paper }}
+              >
+                <View class="flex-1 p-5" style={{ backgroundColor: look().paper }}>
+                  <AddBookmark
+                    source={route.source}
+                    onDone={() => nav.pop()}
+                    // The web draws no header, so no back button: offer Cancel.
+                    onCancel={platform.os === "web" ? () => nav.pop() : undefined}
+                  />
+                </View>
               </NavPage>
             );
           case "settings":

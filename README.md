@@ -77,6 +77,17 @@ Chrome/Edge/Brave: open `chrome://extensions`, turn on developer mode, and use *
 
 `bun run ext:e2e` builds the extension and drives it in Chrome for Testing against a real server: popup save of a 403 bot wall, autosave, the "on shelf" state, auto-repair. Screenshots go to `apps/extension/e2e/screens/`.
 
+## Saving from the iOS share sheet
+
+Until the share extension exists, a Shortcut puts lofu in the share sheet, and it saves without opening the app. In the Shortcuts app, make a shortcut and, under its ⓘ, turn on *Show in Share Sheet* and let it receive URLs, Safari web pages and Text. Then add these actions:
+
+1. **Get URLs from Input** (Shortcut Input). Share text from apps like Xiaohongshu or Douyin ("【Title】 http://xhslink.com/a/… 复制本条信息…") gives its link.
+2. **Get Item from List**: First Item.
+3. **Get Contents of URL**: `https://<your server>/v1/bookmarks`. Set Method to POST, add the header `Authorization` = `Bearer lofu_…`, and set Request Body to JSON with one field, `url` = *Item from List*.
+4. **Show Notification**: "Saved to lofu".
+
+For a share sheet that hands over nothing, or for Back Tap or the Action button, put **Get Clipboard** in front of step 1 when Shortcut Input has no value. Short links are followed by the server, so a t.co or t.cn link saves the article it points to.
+
 ## Importing from Raindrop.io
 
 ```sh
@@ -89,7 +100,7 @@ The import takes the CSV export from Raindrop (Settings → Export, or the `rain
 
 The OpenAPI 3.1 document is served at `/openapi.json`, generated from the zod schemas in `packages/shared`. Main endpoints:
 
-- `POST /v1/bookmarks`: idempotent on the normalized URL (tracking params, `www.`, fragments and scheme are ignored). Pass `html` to skip fetching (for pages behind a login).
+- `POST /v1/bookmarks`: idempotent on the normalized URL (tracking params, `www.`, fragments and scheme are ignored). Pass `html` to skip fetching (for pages behind a login). Without `html`, short links (t.co, t.cn, xhslink.com, b23.tv, bit.ly…) are followed and wrapper pages (`weibo.cn/sinaurl?u=`, `link.zhihu.com/?target=`) unwrapped first, so the bookmark is the page they lead to. A short link that dies or ends on a login wall or its site's home page is saved as given.
 - `GET /v1/bookmarks` (keyset pagination; filters `collectionId`, `tags`, `archived`, `favorite`, `type`), `GET|PATCH|DELETE /v1/bookmarks/{id}`, `POST /v1/bookmarks/{id}/refetch`, `GET /v1/bookmarks/{id}/content?format=markdown|html|text`
 - `GET /v1/search`, `GET /v1/tags`, `/v1/collections`, `/v1/bookmarks/{id}/highlights`, `/v1/highlights/{id}`
 - `GET /v1/sync?since=<cursor>`: everything changed since the cursor, deletions included
