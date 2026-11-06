@@ -1,7 +1,7 @@
 import type { Db } from "../db/index.ts";
 import type { Hooks } from "./hooks.ts";
 
-export type JobKind = "extract" | "images";
+export type JobKind = "extract" | "images" | "markdown";
 
 /** Interactive work (a link the user just saved) always runs before bulk imports. */
 export const Priority = { interactive: 0, bulk: 1 } as const;

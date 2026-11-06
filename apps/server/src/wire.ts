@@ -4,10 +4,12 @@ import { openDb } from "./db/index.ts";
 import { Browser, findChromium } from "./extract/browser.ts";
 import { Fetcher } from "./extract/fetch.ts";
 import { ImageProxy } from "./extract/images.ts";
+import { MARKDOWN_VERSION, PLAIN_EXTRACTORS } from "./extract/markdown.ts";
 import { PdfExtractor } from "./extract/pdf.ts";
 import { ExtractPool } from "./extract/pool.ts";
 import { extractHandler } from "./jobs/extract.ts";
 import { imagesHandler } from "./jobs/images.ts";
+import { markdownHandler } from "./jobs/markdown.ts";
 import { JobRunner } from "./jobs/runner.ts";
 import { Indexer } from "./search/indexer.ts";
 import { Meili } from "./search/meili.ts";
@@ -78,6 +80,7 @@ export function wire(config: Config) {
         githubToken: config.githubToken,
       }),
       images: imagesHandler({ bookmarks }),
+      markdown: markdownHandler({ bookmarks, pool }),
     },
     {
       concurrency: config.jobConcurrency,
@@ -116,6 +119,8 @@ export function wire(config: Config) {
       }
       // Content saved before images were measured gets measured in the background.
       jobs.enqueueMissing("images", bookmarks.unmeasuredImages());
+      // Articles converted by an older Markdown conversion are converted again.
+      bookmarks.queueMarkdownUpgrade(MARKDOWN_VERSION, PLAIN_EXTRACTORS);
       runner?.start();
     },
     async stop() {

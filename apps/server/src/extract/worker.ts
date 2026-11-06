@@ -9,7 +9,8 @@ import { Defuddle } from "defuddle/node";
 import { parseHTML } from "linkedom";
 import { assetUrl } from "./assetUrl.ts";
 import { detectBlockPage } from "./blocked.ts";
-import type { ExtractRequest, ExtractResponse } from "./protocol.ts";
+import { articleMarkdown } from "./markdown.ts";
+import type { ExtractRequest, ExtractResponse, MarkdownOutput } from "./protocol.ts";
 import { type SiteDocument, type SiteTransform, siteFor } from "./sites/index.ts";
 import { markdownToText } from "./text.ts";
 
@@ -24,6 +25,16 @@ const nonEmpty = (s: string | undefined | null) => s?.trim() || null;
 self.onmessage = async (ev: MessageEvent<ExtractRequest>) => {
   const { id, html, url } = ev.data;
   try {
+    if (ev.data.kind === "markdown") {
+      const markdown = articleMarkdown(html, url);
+      const out: MarkdownOutput = {
+        markdown: zstd(markdown),
+        text: zstd(markdownToText(markdown)),
+      };
+      const msg: ExtractResponse = { id, ok: true, out };
+      self.postMessage(msg, [out.markdown.buffer, out.text.buffer]);
+      return;
+    }
     const t0 = performance.now();
     // A site adapter may rewrite the page first (see sites/types.ts).
     const site = siteFor(url);
@@ -34,8 +45,8 @@ self.onmessage = async (ev: MessageEvent<ExtractRequest>) => {
       fix = site.transform(document as unknown as SiteDocument, new URL(url));
       input = document;
     }
-    const r = await Defuddle(input, url, { separateMarkdown: true });
-    const markdown = r.contentMarkdown ?? "";
+    const r = await Defuddle(input, url);
+    const markdown = articleMarkdown(r.content, url);
     const text = markdownToText(markdown);
     const meta = fix?.meta;
     const ogType =

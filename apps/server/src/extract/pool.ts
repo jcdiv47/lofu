@@ -1,8 +1,8 @@
-import type { ExtractOutput, ExtractRequest, ExtractResponse } from "./protocol.ts";
+import type { ExtractOutput, ExtractRequest, ExtractResponse, MarkdownOutput } from "./protocol.ts";
 
 interface Task {
   req: ExtractRequest;
-  resolve: (o: ExtractOutput) => void;
+  resolve: (o: ExtractOutput | MarkdownOutput) => void;
   reject: (e: Error) => void;
 }
 
@@ -31,9 +31,18 @@ export class ExtractPool {
   }
 
   run(html: string, url: string): Promise<ExtractOutput> {
+    return this.submit("extract", html, url) as Promise<ExtractOutput>;
+  }
+
+  /** Converts an extracted article's HTML to Markdown again (see extract/markdown.ts). */
+  markdown(html: string, url: string): Promise<MarkdownOutput> {
+    return this.submit("markdown", html, url) as Promise<MarkdownOutput>;
+  }
+
+  private submit(kind: ExtractRequest["kind"], html: string, url: string) {
     if (this.closed) return Promise.reject(new Error("extract pool closed"));
-    return new Promise((resolve, reject) => {
-      this.queue.push({ req: { id: this.nextId++, html, url }, resolve, reject });
+    return new Promise<ExtractOutput | MarkdownOutput>((resolve, reject) => {
+      this.queue.push({ req: { id: this.nextId++, kind, html, url }, resolve, reject });
       this.pump();
     });
   }

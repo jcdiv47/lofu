@@ -364,6 +364,69 @@ export class BookmarkStore {
       .map((r) => r.id);
   }
 
+  /**
+   * Queues every article converted from HTML for a new Markdown conversion
+   * when `version` (extract/markdown.ts) is newer than the one recorded.
+   */
+  queueMarkdownUpgrade(version: number, plainExtractors: readonly string[]): void {
+    this.db.transaction(() => {
+      const row = this.db
+        .query<{ value: string }, [string]>("SELECT value FROM meta WHERE key = ?")
+        .get("markdown_version");
+      if (Number(row?.value ?? 0) >= version) return;
+      const ids = this.db
+        .query<{ id: string }, [string]>(
+          `SELECT bookmark_id AS id FROM contents
+           WHERE coalesce(extractor, '') NOT IN (SELECT value FROM json_each(?))`,
+        )
+        .all(JSON.stringify(plainExtractors))
+        .map((r) => r.id);
+      this.jobs.enqueueMissing("markdown", ids);
+      this.db
+        .query(
+          "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        )
+        .run("markdown_version", String(version));
+    })();
+  }
+
+  /** What the markdown job converts again: the saved article HTML and current Markdown. */
+  articleForMarkdown(
+    id: string,
+  ): { url: string; html: Uint8Array; markdown: Uint8Array; extractedAt: number } | null {
+    return this.db
+      .query<
+        { url: string; html: Uint8Array; markdown: Uint8Array; extractedAt: number },
+        [string]
+      >(
+        `SELECT b.url, c.html, c.markdown, c.extracted_at AS extractedAt
+         FROM contents c JOIN bookmarks b ON b.id = c.bookmark_id
+         WHERE c.bookmark_id = ? AND b.deleted_at IS NULL`,
+      )
+      .get(id);
+  }
+
+  /**
+   * Replaces an article's Markdown and text, unless it was extracted again in
+   * the meantime. Bumps `seq`: the text is the bookmark's search document.
+   */
+  saveMarkdown(id: string, extractedAt: number, markdown: Uint8Array, text: Uint8Array): boolean {
+    const saved = this.db.transaction(() => {
+      const changes = this.db
+        .query(
+          "UPDATE contents SET markdown = ?, text = ? WHERE bookmark_id = ? AND extracted_at = ?",
+        )
+        .run(markdown, text, id, extractedAt).changes;
+      if (changes === 0) return false;
+      // Measured again for images the new Markdown gained; the old sizes serve until then.
+      this.jobs.enqueue("images", id, null, Priority.bulk);
+      this.touch(id);
+      return true;
+    })();
+    if (saved) this.hooks.changed();
+    return saved;
+  }
+
   /** Called by the extract job with results computed off-thread. */
   saveExtraction(
     id: string,

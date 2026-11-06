@@ -1,7 +1,13 @@
-export interface ExtractRequest {
-  id: number;
-  html: string;
-  url: string;
+export type ExtractRequest =
+  /** Extract an article from a fetched page. */
+  | { id: number; kind: "extract"; html: string; url: string }
+  /** Convert an already extracted article's HTML to Markdown again (extract/markdown.ts). */
+  | { id: number; kind: "markdown"; html: string; url: string };
+
+export interface MarkdownOutput {
+  /** zstd-compressed markdown / plain text. */
+  markdown: Uint8Array;
+  text: Uint8Array;
 }
 
 export interface ExtractOutput {
@@ -27,5 +33,5 @@ export interface ExtractOutput {
 }
 
 export type ExtractResponse =
-  | { id: number; ok: true; out: ExtractOutput }
+  | { id: number; ok: true; out: ExtractOutput | MarkdownOutput }
   | { id: number; ok: false; error: string };
