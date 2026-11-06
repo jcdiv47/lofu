@@ -8,6 +8,7 @@ import {
   type UpdateBookmark,
 } from "@lofu/shared";
 import type { Db } from "../db/index.ts";
+import type { ImageSizes } from "../extract/images.ts";
 import type { Hooks } from "./hooks.ts";
 import { type JobStore, Priority } from "./jobs.ts";
 import { type BookmarkRow, toBookmark } from "./rows.ts";
@@ -244,6 +245,7 @@ export class BookmarkStore {
       if (changes === 0) throw new NotFoundError(`bookmark ${id} not found`);
       this.db.query("DELETE FROM contents WHERE bookmark_id = ?").run(id);
       this.jobs.cancel("extract", id);
+      this.jobs.cancel("images", id);
     })();
     this.hooks.changed();
   }
@@ -322,6 +324,46 @@ export class BookmarkStore {
     return row?.blob ?? null;
   }
 
+  /** Image sizes kept with the content (null: not measured yet, or no content). */
+  imageSizes(id: string): ImageSizes | null {
+    const row = this.db
+      .query<{ images: string | null }, [string]>(
+        "SELECT images FROM contents WHERE bookmark_id = ?",
+      )
+      .get(id);
+    return row?.images ? (JSON.parse(row.images) as ImageSizes) : null;
+  }
+
+  /** The Markdown the images job measures, and which extraction it came from. */
+  markdownForImages(id: string): { markdown: Uint8Array; extractedAt: number } | null {
+    return this.db
+      .query<{ markdown: Uint8Array; extractedAt: number }, [string]>(
+        "SELECT markdown, extracted_at AS extractedAt FROM contents WHERE bookmark_id = ?",
+      )
+      .get(id);
+  }
+
+  /**
+   * Saves measured image sizes, unless the page was extracted again in the
+   * meantime (that extraction queued its own measuring). Sizes are layout
+   * data of the content, which clients fetch on demand and never cache, so
+   * this doesn't bump `seq`: it changes neither the synced bookmark nor its
+   * search document.
+   */
+  saveImageSizes(id: string, extractedAt: number, sizes: ImageSizes): void {
+    this.db
+      .query("UPDATE contents SET images = ? WHERE bookmark_id = ? AND extracted_at = ?")
+      .run(JSON.stringify(sizes), id, extractedAt);
+  }
+
+  /** Bookmarks whose content was saved before images were measured. */
+  unmeasuredImages(): string[] {
+    return this.db
+      .query<{ id: string }, []>("SELECT bookmark_id AS id FROM contents WHERE images IS NULL")
+      .all()
+      .map((r) => r.id);
+  }
+
   /** Called by the extract job with results computed off-thread. */
   saveExtraction(
     id: string,
@@ -343,9 +385,10 @@ export class BookmarkStore {
            VALUES (?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (bookmark_id) DO UPDATE SET html = excluded.html, markdown = excluded.markdown,
              text = excluded.text, raw_bytes = excluded.raw_bytes, extractor = excluded.extractor,
-             extracted_at = excluded.extracted_at`,
+             extracted_at = excluded.extracted_at, images = NULL`,
         )
         .run(id, c.html, c.markdown, c.text, c.rawBytes, c.extractor, now);
+      this.jobs.enqueue("images", id);
       this.db
         .query(
           `UPDATE bookmarks SET

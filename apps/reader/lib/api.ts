@@ -54,6 +54,20 @@ export interface SyncPage {
   highlights: Highlight[];
 }
 
+/** An image of an article (`ContentImage` in packages/shared/src/schemas.ts). */
+export interface ArticleImage {
+  src: string;
+  width: number | null;
+  height: number | null;
+  /** Absolute URL of the server's image proxy, or null to load `src` itself. */
+  proxy: string | null;
+}
+
+export interface Article {
+  markdown: string | null;
+  images: ArticleImage[];
+}
+
 export interface SearchHit {
   bookmark: Bookmark;
   /** Matched content with `<mark>` around hits. */
@@ -134,9 +148,19 @@ export const api = {
   update: (id: string, patch: BookmarkPatch) =>
     request<Bookmark>("PATCH", `/v1/bookmarks/${id}`, patch),
   refetch: (id: string) => request<Bookmark>("POST", `/v1/bookmarks/${id}/refetch`),
-  markdown: async (id: string) =>
-    (await request<{ content: string | null }>("GET", `/v1/bookmarks/${id}?content=markdown`))
-      .content,
+  /** The saved text as Markdown, and its images (sizes, and where to load them from). */
+  article: async (id: string): Promise<Article> => {
+    const r = await request<{ content: string | null; images?: ArticleImage[] | null }>(
+      "GET",
+      `/v1/bookmarks/${id}?content=markdown`,
+    );
+    const server = normalizeServer((await loadSettings()).server);
+    return {
+      markdown: r.content,
+      // Servers from before image sizes send none.
+      images: (r.images ?? []).map((i) => ({ ...i, proxy: i.proxy && `${server}${i.proxy}` })),
+    };
+  },
   highlights: (id: string) => request<Highlight[]>("GET", `/v1/bookmarks/${id}/highlights`),
   addHighlight: (id: string, h: { quote: string; prefix: string; suffix: string }) =>
     request<Highlight>("POST", `/v1/bookmarks/${id}/highlights`, h),

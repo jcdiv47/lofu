@@ -3,9 +3,11 @@ import type { AppContext } from "./context.ts";
 import { openDb } from "./db/index.ts";
 import { Browser, findChromium } from "./extract/browser.ts";
 import { Fetcher } from "./extract/fetch.ts";
+import { ImageProxy } from "./extract/images.ts";
 import { PdfExtractor } from "./extract/pdf.ts";
 import { ExtractPool } from "./extract/pool.ts";
 import { extractHandler } from "./jobs/extract.ts";
+import { imagesHandler } from "./jobs/images.ts";
 import { JobRunner } from "./jobs/runner.ts";
 import { Indexer } from "./search/indexer.ts";
 import { Meili } from "./search/meili.ts";
@@ -75,6 +77,7 @@ export function wire(config: Config) {
         browser,
         githubToken: config.githubToken,
       }),
+      images: imagesHandler({ bookmarks }),
     },
     {
       concurrency: config.jobConcurrency,
@@ -95,6 +98,7 @@ export function wire(config: Config) {
     collections,
     highlights,
     tokens,
+    images: ImageProxy.fromDb(db),
     searcher,
     meiliHealthy: () => meili?.health() ?? Promise.resolve(false),
   };
@@ -110,6 +114,8 @@ export function wire(config: Config) {
         await indexer.setup();
         indexer.start();
       }
+      // Content saved before images were measured gets measured in the background.
+      jobs.enqueueMissing("images", bookmarks.unmeasuredImages());
       runner?.start();
     },
     async stop() {

@@ -12,6 +12,7 @@ import {
   UpdateHighlight,
 } from "@lofu/shared";
 import type { AppContext } from "../context.ts";
+import { markdownImages } from "../extract/images.ts";
 import { resolveLink } from "../extract/links.ts";
 import { body, IdParam, json, notFound } from "./util.ts";
 
@@ -79,14 +80,18 @@ export function bookmarkRoutes(app: OpenAPIHono, ctx: AppContext) {
       const { content: format } = c.req.valid("query");
       const b = bookmarks.get(id);
       const blob = format === "none" ? null : bookmarks.contentBlob(id, format);
-      return c.json(
-        {
-          ...b,
-          content: blob ? dec.decode(Bun.zstdDecompressSync(blob)) : null,
-          contentFormat: format,
-        },
-        200,
-      );
+      const content = blob ? dec.decode(Bun.zstdDecompressSync(blob)) : null;
+      let images = null;
+      if (content !== null && format === "markdown") {
+        const sizes = bookmarks.imageSizes(id) ?? {};
+        images = markdownImages(content).map((src) => ({
+          src,
+          width: sizes[src]?.[0] ?? null,
+          height: sizes[src]?.[1] ?? null,
+          proxy: ctx.images.path(src),
+        }));
+      }
+      return c.json({ ...b, content, contentFormat: format, images }, 200);
     },
   );
 

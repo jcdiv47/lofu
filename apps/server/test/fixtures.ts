@@ -44,6 +44,24 @@ export function makePdf(title: string, lines: string[]): Uint8Array<ArrayBuffer>
   return new TextEncoder().encode(out);
 }
 
+/** The first bytes of a PNG of `width`×`height` (enough to read its size). */
+export function pngHeader(width: number, height: number): Uint8Array<ArrayBuffer> {
+  const b = new Uint8Array(33);
+  b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+  const v = new DataView(b.buffer);
+  v.setUint32(16, width);
+  v.setUint32(20, height);
+  return b;
+}
+
+/** An article with images: one measurable, one behind hotlink protection, one missing. */
+export const PICTURES_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Pangolin Pictures</title></head><body><article><h1>Pangolin Pictures</h1>
+${paragraph(1)}<p><img src="/photo.png" alt="A pangolin"></p>${paragraph(2)}
+<p><img src="/hotlinked.png" alt="Curled up"></p>${paragraph(3)}
+<p><img src="/missing.png" alt="Gone"></p>
+${paragraph(4)}</article></body></html>`;
+
 const html = (body: string, status = 200) =>
   new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8" } });
 
@@ -83,6 +101,15 @@ export function startFixtureServer() {
         return new Response("# Notes\n\nMarkdown served raw about axolotls.", {
           headers: { "content-type": "text/markdown" },
         });
+      }
+      if (path === "/pictures") return html(PICTURES_HTML);
+      if (path === "/photo.png") {
+        return new Response(pngHeader(640, 480), { headers: { "content-type": "image/png" } });
+      }
+      if (path === "/hotlinked.png") {
+        // As WeChat's image host: another site's page gets a placeholder.
+        const size = req.headers.get("referer") ? pngHeader(10, 10) : pngHeader(1200, 300);
+        return new Response(size, { headers: { "content-type": "image/png" } });
       }
       if (path === "/image.png") {
         return new Response(new Uint8Array([0x89, 0x50]), {

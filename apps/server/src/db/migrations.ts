@@ -123,4 +123,8 @@ export const migrations: string[] = [
   /* 2: job priority (0 = interactive, 1 = bulk import) */ `
   ALTER TABLE jobs ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
   `,
+
+  /* 3: image sizes, JSON {url: [width, height]}; NULL until measured (extract/images.ts) */ `
+  ALTER TABLE contents ADD COLUMN images TEXT;
+  `,
 ];

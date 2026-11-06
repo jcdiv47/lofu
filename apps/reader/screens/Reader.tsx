@@ -1,4 +1,4 @@
-import { signal, Text, View } from "nsh";
+import { effect, signal, Text, untracked, View } from "nsh";
 import {
   createRichEditor,
   RichEditor,
@@ -6,13 +6,14 @@ import {
   type RichEditorRef,
   type RichEditorSelection,
   type RichEditorSession,
+  type RichNodeJSON,
   starterKit,
 } from "nsh/base";
 import { findQuote, quoteAt } from "../../../packages/shared/src/anchor";
 import { BookmarkDropdown } from "../components/BookmarkMenu";
 import { IconButton } from "../components/ui";
 import { nativeMenus, openOriginal, showBookmarkMenu } from "../lib/actions";
-import { api, type Bookmark, type Highlight } from "../lib/api";
+import { type ArticleImage, api, type Bookmark, type Highlight } from "../lib/api";
 import { type DocIndex, indexDoc, toDocRange, toTextRange } from "../lib/docIndex";
 import { readingTime } from "../lib/format";
 import { fonts, look } from "../lib/look";
@@ -41,6 +42,42 @@ const withTitle = (markdown: string, title: string) => {
   if (first && (first === t || t.startsWith(first) || first.startsWith(t))) return markdown;
   return `# ${t.replace(/\n/g, " ")}\n\n${markdown}`;
 };
+
+/**
+ * Gives each image its size and the server's proxy as its source. The editor
+ * lays an image out only at an explicit width and height (a Markdown image,
+ * which has neither, is drawn at 0×0), and doesn't keep it within the text,
+ * so images get their measured size, scaled down to `textWidth`. Hotlink
+ * protection (WeChat, CSDN) refuses the original URL from another site's
+ * page, hence the proxy. Images are matched by URL, or by position when the
+ * parser changed a URL and the counts agree. Returns a new document.
+ */
+export function placeImages(
+  doc: RichNodeJSON,
+  images: ArticleImage[],
+  textWidth: number,
+): RichNodeJSON {
+  const out = JSON.parse(JSON.stringify(doc)) as RichNodeJSON;
+  const bySrc = new Map(images.map((i) => [i.src, i]));
+  const nodes: RichNodeJSON[] = [];
+  const walk = (n: RichNodeJSON) => {
+    if (n.type === "image") nodes.push(n);
+    n.content?.forEach(walk);
+  };
+  walk(out);
+  nodes.forEach((n, k) => {
+    const src = String(n.attrs?.src ?? "");
+    const img = bySrc.get(src) ?? (nodes.length === images.length ? images[k] : undefined);
+    if (!img) return;
+    n.attrs = { ...n.attrs, src: img.proxy ?? src };
+    if (img.width && img.height) {
+      const width = Math.max(1, Math.min(img.width, Math.floor(textWidth)));
+      n.attrs.width = width;
+      n.attrs.height = Math.max(1, Math.round((img.height * width) / img.width));
+    }
+  });
+  return out;
+}
 
 /** The widest the text gets, for a comfortable line length. */
 const MEASURE = 680;
@@ -75,6 +112,11 @@ export function Reader(props: {
   const plugin = new RichEditorPlugin("highlights");
   let view: RichEditorRef | null = null;
   let index: DocIndex = { text: "", pos: [] };
+  /** The document as parsed and the text width its images are sized for. */
+  let sized: { doc: RichNodeJSON; images: ArticleImage[]; width: number } | null = null;
+  const sidePad = () => Math.max(props.wide ? 40 : 20, Math.round((width() - MEASURE) / 2));
+  /** The text's width (before the first layout, the widest it gets). */
+  const textWidth = () => (width() > 0 ? Math.min(MEASURE, width() - 2 * sidePad()) : MEASURE);
 
   const decorate = () => {
     const ed = editor();
@@ -123,8 +165,8 @@ export function Reader(props: {
 
   (async () => {
     try {
-      const [markdown, highlights] = await Promise.all([
-        api.markdown(props.bookmark.id),
+      const [{ markdown, images }, highlights] = await Promise.all([
+        api.article(props.bookmark.id),
         api.highlights(props.bookmark.id),
       ]);
       if (!markdown) {
@@ -144,6 +186,10 @@ export function Reader(props: {
         editable: false,
         plugins: [starterKit(), plugin],
       });
+      if (images.length > 0) {
+        sized = { doc: ed.getJSON(), images, width: textWidth() };
+        ed.setContent(placeImages(sized.doc, images, sized.width), "json");
+      }
       index = indexDoc(ed.getJSON());
       editor.set(ed);
       status.set("");
@@ -221,7 +267,21 @@ export function Reader(props: {
   const highlights = () =>
     (placed().length ? `${placed().length} highlight${placed().length === 1 ? "" : "s"}` : "") +
     (orphans() ? ` · ${orphans()} not found` : "");
-  const sidePad = () => Math.max(props.wide ? 40 : 20, Math.round((width() - MEASURE) / 2));
+
+  // A narrower window or a rotated phone resizes the images (the text keeps its
+  // positions, so highlights only need drawing again). Settles first: a window
+  // being dragged narrower changes width on every frame.
+  effect(() => {
+    const w = textWidth();
+    const t = setTimeout(() => {
+      const ed = untracked(editor);
+      if (!ed || !sized || sized.width === w) return;
+      sized.width = w;
+      ed.setContent(placeImages(sized.doc, sized.images, w), "json");
+      decorate();
+    }, 150);
+    return () => clearTimeout(t);
+  });
 
   return (
     <View

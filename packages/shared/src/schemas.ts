@@ -121,9 +121,27 @@ export const BookmarkPage = z
 
 export const ContentFormat = z.enum(["none", "markdown", "html", "text"]);
 
+export const ContentImage = z
+  .object({
+    /** The image's URL as it appears in the content. */
+    src: z.string(),
+    /** Its size in pixels; null until measured, or when it couldn't be. */
+    width: z.number().int().nullable(),
+    height: z.number().int().nullable(),
+    /**
+     * Where to load it from instead, relative to the server: a signed proxy
+     * that fetches it without the Referer hotlink protection rejects. Null
+     * for `data:` URLs.
+     */
+    proxy: z.string().nullable(),
+  })
+  .meta({ id: "ContentImage" });
+
 export const BookmarkWithContent = Bookmark.extend({
   content: z.string().nullable(),
   contentFormat: ContentFormat,
+  /** The images of Markdown content, in order (null for other formats). */
+  images: z.array(ContentImage).nullable(),
 }).meta({ id: "BookmarkWithContent" });
 
 export const SearchQuery = z.object({

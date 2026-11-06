@@ -1,7 +1,7 @@
 import type { Db } from "../db/index.ts";
 import type { Hooks } from "./hooks.ts";
 
-export type JobKind = "extract";
+export type JobKind = "extract" | "images";
 
 /** Interactive work (a link the user just saved) always runs before bulk imports. */
 export const Priority = { interactive: 0, bulk: 1 } as const;
@@ -40,6 +40,19 @@ export class JobStore {
            attempts = 0, locked_until = NULL, last_error = NULL`,
       )
       .run(kind, bookmarkId, payload, runAt, priority);
+    this.hooks.jobEnqueued();
+  }
+
+  /** Queues `kind` for each of `bookmarkIds` that has no such job yet (a backfill). */
+  enqueueMissing(kind: JobKind, bookmarkIds: string[], priority: Priority = Priority.bulk) {
+    if (bookmarkIds.length === 0) return;
+    this.db
+      .query(
+        `INSERT INTO jobs (kind, bookmark_id, payload, run_at, priority)
+         SELECT ?, value, NULL, ?, ? FROM json_each(?) WHERE true
+         ON CONFLICT (kind, bookmark_id) DO NOTHING`,
+      )
+      .run(kind, Date.now(), priority, JSON.stringify(bookmarkIds));
     this.hooks.jobEnqueued();
   }
 

@@ -1,0 +1,151 @@
+import { describe, expect, test } from "bun:test";
+import { imageSize } from "../src/extract/imageSize.ts";
+import { markdownImages, measureImage } from "../src/extract/images.ts";
+import { JobStore } from "../src/store/jobs.ts";
+import { pngHeader } from "./fixtures.ts";
+import { setupServer } from "./harness.ts";
+
+const bytes = (...parts: (number[] | string)[]) =>
+  new Uint8Array(parts.flatMap((p) => (typeof p === "string" ? [...Buffer.from(p)] : p)));
+const u16be = (n: number) => [n >> 8, n & 0xff];
+const u24le = (n: number) => [n & 0xff, (n >> 8) & 0xff, n >> 16];
+
+/** SOI, an EXIF segment with an orientation, then a baseline frame header. */
+function jpeg(width: number, height: number, orientation: number) {
+  const tiff = [..."MM".split("").map((c) => c.charCodeAt(0)), 0, 42, 0, 0, 0, 8];
+  const ifd = [0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, orientation, 0, 0, 0, 0, 0, 0];
+  const exif = [...Buffer.from("Exif\0\0"), ...tiff, ...ifd];
+  const sof = [8, ...u16be(height), ...u16be(width), 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1];
+  return bytes(
+    [0xff, 0xd8],
+    [0xff, 0xe1, ...u16be(exif.length + 2), ...exif],
+    [0xff, 0xc0, ...u16be(sof.length + 2), ...sof],
+    [0xff, 0xd9],
+  );
+}
+
+describe("imageSize", () => {
+  test("reads PNG, GIF, WebP and BMP headers", () => {
+    expect(imageSize(pngHeader(640, 480))).toEqual({ width: 640, height: 480 });
+    expect(imageSize(bytes("GIF89a", [0x5e, 0x02, 0x6c, 0x00], new Array(8).fill(0)))).toEqual({
+      width: 606,
+      height: 108,
+    });
+    const vp8x = bytes(
+      "RIFF",
+      [0, 0, 0, 0],
+      "WEBPVP8X",
+      new Array(8).fill(0),
+      u24le(1919),
+      u24le(1079),
+    );
+    expect(imageSize(vp8x)).toEqual({ width: 1920, height: 1080 });
+    const bmp = bytes("BM", new Array(16).fill(0), [0x20, 0, 0, 0, 0xf0, 0xff, 0xff, 0xff]);
+    expect(imageSize(bmp)).toEqual({ width: 32, height: 16 });
+  });
+
+  test("JPEG: the frame size, turned when EXIF says the picture is on its side", () => {
+    expect(imageSize(jpeg(4032, 3024, 1))).toEqual({ width: 4032, height: 3024 });
+    expect(imageSize(jpeg(4032, 3024, 6))).toEqual({ width: 3024, height: 4032 });
+  });
+
+  test("SVG: width and height, else the viewBox", () => {
+    const svg = (attrs: string) =>
+      bytes(`<?xml version="1.0"?>\n<svg xmlns="x" ${attrs}><g/></svg>`);
+    expect(imageSize(svg('width="120" height="40px"'))).toEqual({ width: 120, height: 40 });
+    expect(imageSize(svg('viewBox="0 0 300 150"'))).toEqual({ width: 300, height: 150 });
+    expect(imageSize(svg('width="60" viewBox="0 0 300 150"'))).toEqual({ width: 60, height: 30 });
+    expect(imageSize(svg('width="100%" height="100%"'))).toBeNull();
+  });
+
+  test("unknown or truncated bytes say nothing", () => {
+    expect(imageSize(bytes("<html><body>Forbidden</body></html>"))).toBeNull();
+    expect(imageSize(pngHeader(640, 480).subarray(0, 20))).toBeNull();
+    expect(imageSize(jpeg(10, 10, 1).subarray(0, 30))).toBeNull();
+  });
+});
+
+test("data: URLs are measured in place", async () => {
+  const png = Buffer.from(pngHeader(3, 2)).toString("base64");
+  expect(await measureImage(`data:image/png;base64,${png}`)).toEqual({ width: 3, height: 2 });
+  const svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="8" height="4"/>');
+  expect(await measureImage(`data:image/svg+xml,${svg}`)).toEqual({ width: 8, height: 4 });
+  expect(await measureImage("data:text/html,<svg width='8' height='4'>")).toBeNull();
+});
+
+test("markdownImages: each image URL once, in order", () => {
+  const md = [
+    '![a](https://x.test/1.png) text ![b \\] c](<https://x.test/2.png> "title")',
+    "[![linked](https://x.test/3.png)](https://x.test/page)",
+    "![again](https://x.test/1.png) and a [link](https://x.test/not-an-image.png)",
+  ].join("\n\n");
+  expect(markdownImages(md)).toEqual([
+    "https://x.test/1.png",
+    "https://x.test/2.png",
+    "https://x.test/3.png",
+  ]);
+});
+
+describe("article images", () => {
+  const { sys, app, api, base } = setupServer();
+  let id: string;
+  type Image = { src: string; width: number | null; height: number | null; proxy: string | null };
+  const images = async () =>
+    (await api("GET", `/v1/bookmarks/${id}?content=markdown`)).data.images as Image[];
+
+  test("are measured after extraction and listed with the Markdown", async () => {
+    id = (await api("POST", "/v1/bookmarks", { url: `${base}/pictures` })).data.id;
+    await sys.runner.idle();
+    const list = await images();
+    expect(list.map((i) => [i.src.replace(base, ""), i.width, i.height])).toEqual([
+      ["/photo.png", 640, 480],
+      ["/hotlinked.png", 1200, 300], // without a Referer: the real picture
+      ["/missing.png", null, null],
+    ]);
+    expect((await api("GET", `/v1/bookmarks/${id}?content=html`)).data.images).toBeNull();
+  });
+
+  test("load through the signed proxy, without a token or a Referer", async () => {
+    const hotlinked = (await images())[1]!;
+    const res = await app.request(hotlinked.proxy!, {
+      headers: { referer: "https://reader.test/" },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    expect(res.headers.get("content-security-policy")).toContain("sandbox");
+    expect(imageSize(new Uint8Array(await res.arrayBuffer()))).toEqual({
+      width: 1200,
+      height: 300,
+    });
+
+    // The signature covers the URL: no fetching anything else through it.
+    const other = hotlinked.proxy!.replace(
+      /\?u=.*/,
+      `?u=${encodeURIComponent(`${base}/photo.png`)}`,
+    );
+    expect((await app.request(other)).status).toBe(403);
+    expect((await app.request(`/img/forged?u=${encodeURIComponent(hotlinked.src)}`)).status).toBe(
+      403,
+    );
+    // Upstream errors and non-images don't pass through as such.
+    expect((await app.request((await images())[2]!.proxy!)).status).toBe(502);
+  });
+
+  test("content saved before sizes existed is measured by a backfill", async () => {
+    sys.ctx.db.query("UPDATE contents SET images = NULL").run();
+    expect((await images())[0]!.width).toBeNull();
+    const jobs = new JobStore(sys.ctx.db, { changed() {}, jobEnqueued: () => sys.runner.kick() });
+    jobs.enqueueMissing("images", sys.ctx.bookmarks.unmeasuredImages());
+    await sys.runner.idle();
+    expect((await images())[0]!.width).toBe(640);
+  });
+
+  test("a re-extraction measures again; a stale measurement isn't saved over it", async () => {
+    const before = sys.ctx.bookmarks.markdownForImages(id)!;
+    sys.ctx.bookmarks.saveImageSizes(id, before.extractedAt - 1, {});
+    expect((await images())[0]!.width).toBe(640);
+    await api("POST", `/v1/bookmarks/${id}/refetch`);
+    await sys.runner.idle();
+    expect((await images())[0]!.width).toBe(640);
+  });
+});
