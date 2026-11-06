@@ -1,7 +1,7 @@
 import { Text } from "nsh";
 import { ContextMenu, Menu, MenuItem, MenuSeparator } from "nsh/base";
 import type { JSX } from "nsh/jsx-runtime";
-import { bookmarkActions } from "../lib/actions";
+import { bookmarkActions, separatedBefore } from "../lib/actions";
 import type { Bookmark } from "../lib/api";
 import { look } from "../lib/look";
 import { Icon, type IconName } from "./ui";
@@ -18,9 +18,12 @@ const iconFor: Record<string, (b: Bookmark) => IconName> = {
   open: () => "forward",
   original: () => "external",
   copy: () => "link",
+  share: () => "share",
   favorite: (b) => (b.favorite ? "starFill" : "star"),
-  archive: () => "archive",
+  move: () => "folder",
+  restore: () => "restore",
   refetch: () => "refresh",
+  delete: () => "trash",
 };
 
 const popup = () => ({
@@ -39,7 +42,7 @@ const popup = () => ({
 /** Made on each opening, so it reads the bookmark a recycled cell shows now. */
 function items(b: Bookmark, open?: () => void) {
   return bookmarkActions(b, open).flatMap((a, i) => [
-    ...((a.id === "original" && i > 0) || a.id === "favorite"
+    ...(separatedBefore(a, i)
       ? [<MenuSeparator class="mx-2 my-1 h-px" style={{ backgroundColor: look().rule }} />]
       : []),
     <MenuItem
@@ -51,9 +54,19 @@ function items(b: Bookmark, open?: () => void) {
       <Icon
         name={iconFor[a.id]?.(b) ?? "chevron"}
         size={15}
-        color={a.id === "favorite" && b.favorite ? look().favorite : look().inkSoft}
+        color={
+          a.destructive
+            ? look().stamp
+            : a.id === "favorite" && b.favorite
+              ? look().favorite
+              : look().inkSoft
+        }
       />
-      <Text style={{ color: look().ink, fontSize: 13.5, lineHeight: 18 }}>{a.label}</Text>
+      <Text
+        style={{ color: a.destructive ? look().stamp : look().ink, fontSize: 13.5, lineHeight: 18 }}
+      >
+        {a.label}
+      </Text>
     </MenuItem>,
   ]);
 }

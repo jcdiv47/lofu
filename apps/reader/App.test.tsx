@@ -84,7 +84,7 @@ test("phone: opens on the Library page; all bookmarks are newest first, from a s
   await app.press("id:source-all");
   await app.waitFor("text:Article a");
   const texts = app.texts();
-  // Archived bookmarks stay out of "All bookmarks"; a page with no title shows its URL.
+  // Bookmarks in the Trash stay out of "All bookmarks"; a page with no title shows its URL.
   expect(texts).not.toContain("Article ccc");
   expect(texts.indexOf("Article a")).toBeLessThan(texts.indexOf("Article bb"));
   expect(texts).toContain("example.com/dddd");
@@ -101,7 +101,7 @@ test("desktop: the sidebar counts and filters", async () => {
     network: { [`GET ${S}/v1/sync*`]: { body: library } },
   });
   await app.waitFor("text:Article a");
-  await app.press("label:Archive");
+  await app.press("label:Trash");
   await app.waitFor("text:Article ccc");
   expect(app.shows("text:Article a")).toBe(false);
   // Old excerpts lose their Markdown.
@@ -301,4 +301,120 @@ test("the form starts from a link on the clipboard", async () => {
   await app.press("label:Add bookmark");
   await app.waitFor("text:From the clipboard.");
   expect(app.texts().join(" ")).toContain("From the clipboard.");
+});
+
+/** A server that takes patches and deletions, recording them. */
+const editable = (log: { patches: [string, unknown][]; deletes: string[] }) => ({
+  [`GET ${S}/v1/sync*`]: { body: library },
+  [`PATCH ${S}/v1/bookmarks/*`]: (r: { url: string; body?: string | null }) => {
+    const id = r.url.split("/").pop() ?? "";
+    const patch = JSON.parse(r.body ?? "{}");
+    log.patches.push([id, patch]);
+    const b = library.bookmarks.find((x) => x.id === id);
+    return { body: { ...b, ...patch } };
+  },
+  [`DELETE ${S}/v1/bookmarks/*`]: (r: { url: string }) => {
+    log.deletes.push(r.url.split("/").pop() ?? "");
+    return { status: 204 };
+  },
+});
+
+test("phone: the Trash is last on the Library page, and holds what was deleted", async () => {
+  const app = await open("./App.tsx", {
+    ...saved,
+    network: { [`GET ${S}/v1/sync*`]: { body: library } },
+  });
+  await app.waitFor("id:source-trash");
+  const texts = app.texts();
+  expect(texts.lastIndexOf("Trash")).toBeGreaterThan(texts.indexOf("rust"));
+  expect(texts).not.toContain("Archive");
+  await app.press("id:source-trash");
+  await app.waitFor("text:Article ccc");
+  expect(app.shows("text:Article a")).toBe(false);
+});
+
+test("phone: swiping a row left deletes it into the Trash", async () => {
+  const log = { patches: [] as [string, unknown][], deletes: [] as string[] };
+  const app = await open("./App.tsx", { ...saved, network: editable(log) });
+  await app.waitFor("id:source-all");
+  await app.press("id:source-all");
+  await app.waitFor("text:Article bb");
+  await app.drag("id:row-bb", { x: -200, y: 0 });
+  await app.waitFor("id:swipe-delete");
+  expect(app.shows("id:swipe-share")).toBe(true);
+  expect(app.shows("id:swipe-more")).toBe(true);
+  await app.press("id:swipe-delete");
+  // It leaves the list at once, before the server answers.
+  await app.waitUntil(() => !app.shows("text:Article bb"));
+  await app.waitUntil(() => log.patches.length > 0);
+  expect(log.patches).toEqual([["bb", { archived: true }]]);
+  expect(log.deletes).toEqual([]);
+});
+
+test("phone: swiping a row right moves it to a collection", async () => {
+  const log = { patches: [] as [string, unknown][], deletes: [] as string[] };
+  const app = await open("./App.tsx", { ...saved, network: editable(log) });
+  const asked: string[][] = [];
+  app.onDialog((d) => {
+    asked.push(d.buttons);
+    return "Homelab";
+  });
+  await app.waitFor("id:source-all");
+  await app.press("id:source-all");
+  await app.waitFor("text:Article bb");
+  await app.drag("id:row-bb", { x: 160, y: 0 });
+  await app.waitFor("id:swipe-move");
+  await app.press("id:swipe-move");
+  await app.waitUntil(() => log.patches.length > 0);
+  expect(asked[0]).toEqual(["Homelab", "Cancel"]);
+  expect(log.patches).toEqual([["bb", { collectionId: "c1", archived: false }]]);
+});
+
+test("phone: deleting from the Trash asks, then deletes for good", async () => {
+  const log = { patches: [] as [string, unknown][], deletes: [] as string[] };
+  const app = await open("./App.tsx", { ...saved, network: editable(log) });
+  const titles: string[] = [];
+  app.onDialog((d) => {
+    titles.push(d.title ?? "");
+    return "Delete";
+  });
+  await app.waitFor("id:source-trash");
+  await app.press("id:source-trash");
+  await app.waitFor("text:Article ccc");
+  await app.drag("id:row-ccc", { x: -200, y: 0 });
+  await app.waitFor("id:swipe-delete");
+  await app.press("id:swipe-delete");
+  await app.waitUntil(() => !app.shows("text:Article ccc"));
+  await app.waitUntil(() => log.deletes.length > 0);
+  expect(titles).toEqual(["Delete permanently?"]);
+  expect(log.deletes).toEqual(["ccc"]);
+  expect(log.patches).toEqual([]);
+});
+
+test("desktop: the context menu moves, shares and deletes", async () => {
+  const log = { patches: [] as [string, unknown][], deletes: [] as string[] };
+  const app = await open("./App.tsx", {
+    ...saved,
+    platform: "macos",
+    width: 1200,
+    height: 800,
+    network: editable(log),
+  });
+  await app.waitFor("text:Article bb");
+  await app.rightClick("id:card-bb");
+  const labels = (app.menu() ?? []).map((m) => m.label);
+  expect(labels).toContain("Share…");
+  expect(labels).toContain("Move to > Homelab");
+  expect(labels).toContain("Delete");
+  expect(labels.some((l) => /archive/i.test(l))).toBe(false);
+  await app.chooseMenuItem("Move to > Homelab");
+  await app.waitUntil(() => log.patches.length === 1);
+  expect(log.patches[0]).toEqual(["bb", { collectionId: "c1", archived: false }]);
+
+  await app.rightClick("id:card-a");
+  await app.chooseMenuItem("Delete");
+  await app.waitUntil(() => log.patches.length === 2);
+  expect(log.patches[1]).toEqual(["a", { archived: true }]);
+  await app.press("label:Trash");
+  await app.waitFor("text:Article a");
 });

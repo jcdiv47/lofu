@@ -49,7 +49,7 @@ const tint = {
   folder: "#4f7fc9",
   favorites: "#e0a030",
   highlights: "#b8569e",
-  archive: "#8d8577",
+  trash: "#8d8577",
   tag: "#8d8577",
 } as const;
 
@@ -186,7 +186,6 @@ export function Home(props: {
           icon: t.icon,
           color: t.color,
         })),
-      { source: { kind: "archive" } as Source, icon: "archive" as IconName, color: tint.archive },
     ].map((f) => ({
       ...f,
       label:
@@ -220,6 +219,12 @@ export function Home(props: {
         label: "Unsorted",
       },
       ...filters(),
+      {
+        source: { kind: "trash" } as Source,
+        icon: "trash" as IconName,
+        color: tint.trash,
+        label: "Trash",
+      },
     ].filter((f) => matches(f.label));
   const collectionHits = () => sortedCollections().filter((c) => matches(c.name));
   const tagHits = () => sortedTags().filter((t) => matches(t.name));
@@ -421,6 +426,11 @@ export function Home(props: {
               )}
             </If>
           </If>
+
+          {/* The Trash, last: deleted bookmarks wait there until they're deleted again. */}
+          <View class="pt-7">
+            {group(row({ kind: "trash" }, "trash", tint.trash, "Trash", true, "source-trash"))}
+          </View>
         </If>
       </Scroll>
 

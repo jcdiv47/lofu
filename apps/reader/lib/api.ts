@@ -135,9 +135,16 @@ export const api = {
   sync: (since: number) => request<SyncPage>("GET", `/v1/sync?since=${since}&limit=1000`),
   search: (
     query: string,
-    filter: { collectionId?: string; tags?: string; favorite?: boolean; type?: Bookmark["type"] },
+    filter: {
+      collectionId?: string;
+      tags?: string;
+      favorite?: boolean;
+      type?: Bookmark["type"];
+      archived?: boolean;
+    },
   ) => {
     const params = [`q=${q(query)}`, "limit=60"];
+    if (filter.archived !== undefined) params.push(`archived=${filter.archived}`);
     if (filter.type) params.push(`type=${q(filter.type)}`);
     if (filter.collectionId) params.push(`collectionId=${q(filter.collectionId)}`);
     if (filter.tags) params.push(`tags=${q(filter.tags)}`);
@@ -151,6 +158,8 @@ export const api = {
   ) => request<Bookmark>("POST", "/v1/bookmarks", { url, ...fields }),
   update: (id: string, patch: BookmarkPatch) =>
     request<Bookmark>("PATCH", `/v1/bookmarks/${id}`, patch),
+  /** Deletes a bookmark for good (the server keeps a tombstone for sync). */
+  remove: (id: string) => request<null>("DELETE", `/v1/bookmarks/${id}`),
   createCollection: (name: string) => request<Collection>("POST", "/v1/collections", { name }),
   refetch: (id: string) => request<Bookmark>("POST", `/v1/bookmarks/${id}/refetch`),
   /** The saved text as Markdown, and its images (sizes, and where to load them from). */

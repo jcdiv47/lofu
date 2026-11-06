@@ -11,6 +11,7 @@ import {
 } from "nsh";
 import { BookmarkCard, BookmarkRow, CARD_COVER } from "../components/BookmarkCard";
 import { SearchField } from "../components/SearchField";
+import { SwipeRow, swipeable } from "../components/SwipeRow";
 import { GlassGroup, IconButton, TopEdge } from "../components/ui";
 import { api, type Bookmark, type SearchHit } from "../lib/api";
 import { look } from "../lib/look";
@@ -34,7 +35,12 @@ const TOOLBAR = 52;
 const SEARCH_H = 48;
 
 /** Search filters that the server's search understands, for a source. */
-const searchFilter = (s: Source) =>
+const searchFilter = (s: Source) => ({
+  // The Trash is what the server calls archived; it stays out of other searches.
+  archived: s.kind === "trash",
+  ...sourceFilter(s),
+});
+const sourceFilter = (s: Source) =>
   s.kind === "collection"
     ? { collectionId: s.id }
     : s.kind === "unsorted"
@@ -58,8 +64,11 @@ function Empty(props: { searching: boolean; source: Source }) {
         return { title: "No favorites yet", body: "Star a bookmark to keep it here." };
       case "highlights":
         return { title: "No highlights yet", body: "Select text while reading to highlight it." };
-      case "archive":
-        return { title: "Nothing archived", body: "Archive what you've finished reading." };
+      case "trash":
+        return {
+          title: "Trash is empty",
+          body: "Deleted bookmarks wait here. Delete them again to remove them for good.",
+        };
       default:
         return {
           title: "Nothing here yet",
@@ -240,14 +249,23 @@ export function Library(props: {
               contentStyle={{ paddingTop: 4, paddingBottom: SEARCH_H + 40 }}
               empty={<Empty searching={searching()} source={props.source} />}
             >
-              {(i) => (
-                <BookmarkRow
-                  b={i().b}
-                  snippet={i().snippet}
-                  showCollection={showCollection}
-                  onOpen={() => props.onOpen(i().b)}
-                />
-              )}
+              {(i) =>
+                swipeable ? (
+                  <SwipeRow
+                    b={i().b}
+                    snippet={i().snippet}
+                    showCollection={showCollection}
+                    onOpen={() => props.onOpen(i().b)}
+                  />
+                ) : (
+                  <BookmarkRow
+                    b={i().b}
+                    snippet={i().snippet}
+                    showCollection={showCollection}
+                    onOpen={() => props.onOpen(i().b)}
+                  />
+                )
+              }
             </List>
             <View
               class="absolute right-0 bottom-0 left-0"

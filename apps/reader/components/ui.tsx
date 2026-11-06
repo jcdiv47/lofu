@@ -1,7 +1,16 @@
-import { Image, type JSX, safeArea, safeAreaInsets, signal, Text, View, type ViewStyle } from "nsh";
+import {
+  Image,
+  type JSX,
+  type PressEvent,
+  safeArea,
+  safeAreaInsets,
+  signal,
+  Text,
+  View,
+  type ViewStyle,
+} from "nsh";
 import alertIcon from "../assets/icons/alert.svg";
 import allIcon from "../assets/icons/all.svg";
-import archiveIcon from "../assets/icons/archive.svg";
 import articleIcon from "../assets/icons/article.svg";
 import audioIcon from "../assets/icons/audio.svg";
 import backIcon from "../assets/icons/back.svg";
@@ -26,11 +35,14 @@ import listIcon from "../assets/icons/list.svg";
 import moreIcon from "../assets/icons/more.svg";
 import plusIcon from "../assets/icons/plus.svg";
 import refreshIcon from "../assets/icons/refresh.svg";
+import restoreIcon from "../assets/icons/restore.svg";
 import searchIcon from "../assets/icons/search.svg";
 import settingsIcon from "../assets/icons/settings.svg";
+import shareIcon from "../assets/icons/share.svg";
 import sortIcon from "../assets/icons/sort.svg";
 import starIcon from "../assets/icons/star.svg";
 import starFillIcon from "../assets/icons/star-fill.svg";
+import trashIcon from "../assets/icons/trash.svg";
 import videoIcon from "../assets/icons/video.svg";
 import { glass, hasGlass, look } from "../lib/look";
 
@@ -47,7 +59,6 @@ export const icons = {
   video: videoIcon,
   alert: alertIcon,
   all: allIcon,
-  archive: archiveIcon,
   back: backIcon,
   chevron: chevronIcon,
   clock: clockIcon,
@@ -64,10 +75,13 @@ export const icons = {
   more: moreIcon,
   plus: plusIcon,
   refresh: refreshIcon,
+  restore: restoreIcon,
   search: searchIcon,
   settings: settingsIcon,
+  share: shareIcon,
   star: starIcon,
   starFill: starFillIcon,
+  trash: trashIcon,
 };
 export type IconName = keyof typeof icons;
 
@@ -87,7 +101,7 @@ export function IconButton(props: {
   name: IconName;
   label: string;
   /** Leave it out when a `Menu` around the button opens on the press. */
-  onPress?: () => void;
+  onPress?: (e?: PressEvent) => void;
   color?: string;
   size?: number;
   testID?: string;

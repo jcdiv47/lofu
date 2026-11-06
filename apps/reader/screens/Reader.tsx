@@ -13,13 +13,20 @@ import {
 import { findQuote, quoteAt } from "../../../packages/shared/src/anchor";
 import { BookmarkDropdown } from "../components/BookmarkMenu";
 import { GlassButton, GlassGroup, GlassTint, IconButton, TopEdge } from "../components/ui";
-import { nativeMenus, openOriginal, showBookmarkMenu } from "../lib/actions";
+import {
+  canShare,
+  deleteBookmark,
+  nativeMenus,
+  openOriginal,
+  shareBookmark,
+  showBookmarkMenu,
+} from "../lib/actions";
 import { type ArticleImage, api, type Bookmark, type Highlight } from "../lib/api";
 import { type DocIndex, indexDoc, toDocRange, toTextRange } from "../lib/docIndex";
 import { isFootnoteNumber, numberFootnotes, raiseFootnotes } from "../lib/footnotes";
 import { readingTime } from "../lib/format";
 import { fonts, glass, look } from "../lib/look";
-import { bookmark as current, setHighlightCount, updateBookmark } from "../lib/store";
+import { bookmark as current, inTrash, setHighlightCount, updateBookmark } from "../lib/store";
 
 /**
  * Raw HTML embeds (iframes, scripts) can't be shown by the editor and would
@@ -121,7 +128,7 @@ export function Reader(props: {
   /** Leading room for the window's controls when the sidebar is hidden. */
   toolbarInset?: number;
 }) {
-  /** The bookmark as it is now (favorite and archive change while it's open). */
+  /** The bookmark as it is now (favorite and Trash change while it's open). */
   const b = () => current(props.bookmark.id) ?? props.bookmark;
   const width = signal(0);
   const editor = signal<RichEditorSession | null>(null);
@@ -441,12 +448,20 @@ export function Reader(props: {
                 void updateBookmark(b().id, { favorite: !b().favorite }).catch(() => {})
               }
             />
+            <If when={canShare}>
+              <IconButton
+                name="share"
+                label="Share"
+                onPress={(e) => shareBookmark(b(), e?.pagePosition)}
+              />
+            </If>
             <IconButton
-              name="archive"
-              label={b().archived ? "Move out of archive" : "Archive"}
-              active={b().archived}
+              name="trash"
+              label={inTrash(b()) ? "Delete permanently" : "Delete"}
               onPress={() =>
-                void updateBookmark(b().id, { archived: !b().archived }).catch(() => {})
+                void deleteBookmark(b()).then((gone) => {
+                  if (gone) props.onBack();
+                })
               }
             />
             <IconButton name="external" label="Open original" onPress={() => openOriginal(b())} />

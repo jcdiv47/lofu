@@ -14,7 +14,7 @@ export type Source =
   | { kind: "unsorted" }
   | { kind: "favorites" }
   | { kind: "highlights" }
-  | { kind: "archive" }
+  | { kind: "trash" }
   | { kind: "collection"; id: string }
   | { kind: "tag"; name: string }
   | { kind: "type"; type: BookmarkType };
@@ -61,6 +61,13 @@ export const bookmark = (id: string) => byId().get(id);
 
 export const highlightCount = (id: string) => highlightCounts().get(id) ?? 0;
 
+/**
+ * A bookmark in the Trash is one the server calls `archived`: deleting it from
+ * the Trash deletes it for good (a tombstone on the server). Everywhere else
+ * leaves it out.
+ */
+export const inTrash = (b: Bookmark) => b.archived;
+
 const matches = (s: Source, b: Bookmark): boolean => {
   switch (s.kind) {
     case "all":
@@ -68,10 +75,10 @@ const matches = (s: Source, b: Bookmark): boolean => {
     case "unsorted":
       return !b.archived && !b.collectionId;
     case "favorites":
-      return b.favorite;
+      return !b.archived && b.favorite;
     case "highlights":
-      return (highlightCounts().get(b.id) ?? 0) > 0;
-    case "archive":
+      return !b.archived && (highlightCounts().get(b.id) ?? 0) > 0;
+    case "trash":
       return b.archived;
     case "collection":
       return !b.archived && b.collectionId === s.id;
@@ -91,19 +98,19 @@ export const counts = computed(() => {
     unsorted: 0,
     favorites: 0,
     highlights: 0,
-    archive: 0,
+    trash: 0,
     collections: new Map<string, number>(),
     tags: new Map<string, number>(),
     types: new Map<BookmarkType, number>(),
   };
   const hl = highlightCounts();
   for (const b of bookmarks()) {
-    if (b.favorite) c.favorites++;
-    if ((hl.get(b.id) ?? 0) > 0) c.highlights++;
     if (b.archived) {
-      c.archive++;
+      c.trash++;
       continue;
     }
+    if (b.favorite) c.favorites++;
+    if ((hl.get(b.id) ?? 0) > 0) c.highlights++;
     c.all++;
     if (!b.collectionId) c.unsorted++;
     else c.collections.set(b.collectionId, (c.collections.get(b.collectionId) ?? 0) + 1);
@@ -144,8 +151,8 @@ export const sourceTitle = (s: Source): string => {
       return "Favorites";
     case "highlights":
       return "Highlights";
-    case "archive":
-      return "Archive";
+    case "trash":
+      return "Trash";
     case "collection":
       return collectionName(s.id) || "Collection";
     case "tag":
@@ -299,6 +306,36 @@ export async function updateBookmark(id: string, patch: BookmarkPatch) {
   try {
     const after = await api.update(id, patch);
     byId.update((m) => m.set(id, normalize(after)));
+    persist();
+  } catch (e) {
+    byId.update((m) => m.set(id, before));
+    throw e;
+  }
+}
+
+/** Moves a bookmark to a collection (`null`: Unsorted); out of the Trash too. */
+export const moveBookmark = (id: string, collectionId: string | null) =>
+  updateBookmark(id, { collectionId, archived: false });
+
+/** Puts a bookmark in the Trash. */
+export const trashBookmark = (id: string) => updateBookmark(id, { archived: true });
+
+/** Takes a bookmark out of the Trash, back where it was. */
+export const restoreBookmark = (id: string) => updateBookmark(id, { archived: false });
+
+/**
+ * Deletes a bookmark for good: it goes at once, and comes back if the server
+ * refuses. The server keeps a tombstone, so other devices drop it on sync.
+ */
+export async function deleteForever(id: string) {
+  const before = byId().get(id);
+  if (!before) return;
+  byId.update((m) => {
+    m.delete(id);
+    return m;
+  });
+  try {
+    await api.remove(id);
     persist();
   } catch (e) {
     byId.update((m) => m.set(id, before));

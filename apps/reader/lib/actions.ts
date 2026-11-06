@@ -1,8 +1,18 @@
+import { Share, Sheet } from "lofu/native";
 import { Clipboard, openUrl, platform } from "nsh";
 import { AlertDialog } from "nsh/base";
 import { isAvailable, Menu } from "nsh/desktop";
 import { api, type Bookmark } from "./api";
-import { sync, updateBookmark } from "./store";
+import { sortedCollections } from "./prefs";
+import {
+  deleteForever,
+  inTrash,
+  moveBookmark,
+  restoreBookmark,
+  sync,
+  trashBookmark,
+  updateBookmark,
+} from "./store";
 
 /**
  * Where the app can show a page itself (`WebView` is WKWebView on Apple
@@ -28,21 +38,146 @@ export function openOriginal(b: Bookmark) {
   else openInBrowser(b.url);
 }
 
-/** What can be done to a bookmark from its card, its row or the reader's toolbar. */
-export function bookmarkActions(b: Bookmark, open?: () => void) {
+/** A point in the window, where a menu or the share picker points from. */
+export type At = { x: number; y: number };
+
+/**
+ * The system's share sheet (`src/lib.rs`): iOS and macOS. Elsewhere there is
+ * none, and the menus offer *Copy link* only.
+ */
+export const canShare = (() => {
+  try {
+    return Share.available();
+  } catch {
+    return false;
+  }
+})();
+
+/** Shares the bookmark's link with the system's share sheet. */
+export function shareBookmark(b: Bookmark, at?: At) {
+  if (!canShare || !Share.url(b.url, at?.x ?? -1, at?.y ?? -1)) {
+    void Clipboard.writeText(b.url);
+  }
+}
+
+/** Where a bookmark can be moved: Unsorted and the collections, except where it is. */
+export function destinations(b: Bookmark) {
+  const here = inTrash(b) ? undefined : b.collectionId;
   return [
+    { id: null as string | null, label: "Unsorted" },
+    ...sortedCollections().map((c) => ({ id: c.id as string | null, label: c.name })),
+  ].filter((d) => d.id !== here);
+}
+
+/** Whether an action sheet can open from a point (`src/lib.rs`): iOS. */
+const anchoredSheets = (() => {
+  try {
+    return Sheet.available();
+  } catch {
+    return false;
+  }
+})();
+
+type SheetAction = { id: string; label: string; role?: "destructive" };
+
+/**
+ * An action sheet with a Cancel: on iOS from `at` (iOS 26 draws it from
+ * there, by what it is about), elsewhere the platform's own. Resolves with
+ * the chosen action's id, or null.
+ */
+async function actionSheet(title: string, actions: SheetAction[], at?: At): Promise<string | null> {
+  if (anchoredSheets) {
+    const i = await Sheet.show(
+      title,
+      actions.map((a) => a.label),
+      actions.map((a) => a.role ?? "default"),
+      at?.x ?? -1,
+      at?.y ?? -1,
+    );
+    return actions[i]?.id ?? null;
+  }
+  const { action } = await AlertDialog.show({
+    title,
+    presentation: platform.os === "web" ? "alert" : "actionSheet",
+    closeOnBackdropPress: true,
+    closeOnEscape: true,
+    actions: [...actions, { id: "cancel", label: "Cancel", role: "cancel" }],
+  });
+  return action == null || action === "cancel" ? null : action;
+}
+
+const move = (b: Bookmark, to: string | null) => void moveBookmark(b.id, to).catch(() => {});
+
+/**
+ * Asks where to move a bookmark: a menu at the pointer on the desktop, an
+ * action sheet on phones (from `at` on iOS), a dialog on the web.
+ */
+export async function chooseDestination(b: Bookmark, at?: At) {
+  const places = destinations(b);
+  if (isAvailable) {
+    await Menu.popup(
+      places.map((d) => ({ label: d.label, onSelect: () => move(b, d.id) })),
+      at,
+    );
+    return;
+  }
+  const action = await actionSheet(
+    "Move to",
+    places.map((d) => ({ id: d.id ?? "", label: d.label })),
+    at,
+  );
+  if (action == null) return;
+  move(b, action || null);
+}
+
+/**
+ * Deletes a bookmark: out of the library into the Trash, or, from the Trash,
+ * for good once the user confirms. Resolves with whether it went.
+ */
+export async function deleteBookmark(b: Bookmark): Promise<boolean> {
+  if (!inTrash(b)) {
+    void trashBookmark(b.id).catch(() => {});
+    return true;
+  }
+  const { action } = await AlertDialog.show({
+    title: "Delete permanently?",
+    description: `“${b.title || b.domain}” will be deleted from all your devices. This can't be undone.`,
+    actions: [
+      { id: "delete", label: "Delete", role: "destructive" },
+      { id: "cancel", label: "Cancel", role: "cancel" },
+    ],
+  });
+  if (action !== "delete") return false;
+  void deleteForever(b.id).catch(() => {});
+  return true;
+}
+
+export interface BookmarkAction {
+  id: string;
+  label: string;
+  run: () => void;
+  /** Drawn in red. */
+  destructive?: boolean;
+}
+
+/** What can be done to a bookmark from its card, its row or the reader's toolbar. */
+export function bookmarkActions(b: Bookmark, open?: () => void, at?: At): BookmarkAction[] {
+  const trashed = inTrash(b);
+  const actions: (BookmarkAction | false | undefined)[] = [
     open && { id: "open", label: "Open", run: open },
     { id: "original", label: "Open original", run: () => openOriginal(b) },
     { id: "copy", label: "Copy link", run: () => void Clipboard.writeText(b.url) },
-    {
+    canShare && { id: "share", label: "Share…", run: () => shareBookmark(b, at) },
+    !trashed && {
       id: "favorite",
       label: b.favorite ? "Remove from favorites" : "Add to favorites",
       run: () => void updateBookmark(b.id, { favorite: !b.favorite }).catch(() => {}),
     },
-    {
-      id: "archive",
-      label: b.archived ? "Move out of archive" : "Archive",
-      run: () => void updateBookmark(b.id, { archived: !b.archived }).catch(() => {}),
+    { id: "move", label: "Move to…", run: () => void chooseDestination(b, at) },
+    trashed && {
+      id: "restore",
+      label: "Put back",
+      run: () => void restoreBookmark(b.id).catch(() => {}),
     },
     b.contentStatus === "failed" && {
       id: "refetch",
@@ -52,8 +187,19 @@ export function bookmarkActions(b: Bookmark, open?: () => void) {
         setTimeout(() => void sync(), 4000);
       },
     },
-  ].filter((a): a is { id: string; label: string; run: () => void } => !!a);
+    {
+      id: "delete",
+      label: trashed ? "Delete permanently…" : "Delete",
+      destructive: true,
+      run: () => void deleteBookmark(b),
+    },
+  ];
+  return actions.filter((a): a is BookmarkAction => !!a);
 }
+
+/** Where a menu draws a line: before the bookmark's own settings, and before Delete. */
+export const separatedBefore = (a: BookmarkAction, i: number) =>
+  i > 0 && (a.id === "original" || a.id === "favorite" || a.id === "delete");
 
 /**
  * Menus the platform draws: a context menu on the desktop apps, an action
@@ -64,31 +210,34 @@ export function bookmarkActions(b: Bookmark, open?: () => void) {
 export const nativeMenus = platform.os !== "web";
 
 /** A native context menu on the desktop, an action sheet on phones. */
-export async function showBookmarkMenu(
-  b: Bookmark,
-  open: (() => void) | undefined,
-  at?: { x: number; y: number },
-) {
-  const actions = bookmarkActions(b, open);
+export async function showBookmarkMenu(b: Bookmark, open: (() => void) | undefined, at?: At) {
+  const actions = bookmarkActions(b, open, at);
   if (isAvailable) {
     await Menu.popup(
       actions.flatMap((a, i) => [
-        ...((a.id === "original" && i > 0) || a.id === "favorite"
-          ? [{ type: "separator" as const }]
-          : []),
-        { label: a.label, onSelect: a.run },
+        ...(separatedBefore(a, i) ? [{ type: "separator" as const }] : []),
+        a.id === "move"
+          ? {
+              label: "Move to",
+              submenu: destinations(b).map((d) => ({
+                label: d.label,
+                onSelect: () => move(b, d.id),
+              })),
+            }
+          : { label: a.label, onSelect: a.run },
       ]),
       at,
     );
     return;
   }
-  const { action } = await AlertDialog.show({
-    title: b.title || b.domain,
-    presentation: "actionSheet",
-    actions: [
-      ...actions.map((a) => ({ id: a.id, label: a.label })),
-      { id: "cancel", label: "Cancel", role: "cancel" as const },
-    ],
-  });
+  const action = await actionSheet(
+    b.title || b.domain,
+    actions.map((a) => ({
+      id: a.id,
+      label: a.label,
+      role: a.destructive ? ("destructive" as const) : undefined,
+    })),
+    at,
+  );
   actions.find((a) => a.id === action)?.run();
 }

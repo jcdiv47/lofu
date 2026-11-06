@@ -1,0 +1,27 @@
+[package]
+name = "lofu-reader-native"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Not a member of the repository's workspace: nsh builds it into the app's
+# runners (`nsh.json` "rust"), for each target the app is built for.
+[workspace]
+
+[dependencies]
+nsh-core = "0.4.0"
+
+[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
+objc2 = "0.6"
+block2 = "0.6"
+dispatch2 = "0.3"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+  "std",
+  "objc2-core-foundation",
+  "NSArray",
+  "NSEnumerator",
+  "NSGeometry",
+  "NSSet",
+  "NSString",
+  "NSURL",
+] }

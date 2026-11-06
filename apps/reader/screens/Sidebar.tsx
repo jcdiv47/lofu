@@ -6,7 +6,8 @@ import { countFor, type Source, sameSource, syncError, syncing } from "../lib/st
 
 /**
  * Where the library can be looked at from, in the desktop's sidebar: the
- * fixed views, collections and tags (phones have `Home`).
+ * fixed views, collections and tags, and the Trash at the foot (phones have
+ * `Home`).
  */
 export function Sources(props: {
   selected: () => Source | null;
@@ -64,7 +65,6 @@ export function Sources(props: {
           {row({ kind: "unsorted" }, "inbox", "Unsorted", "source-unsorted")}
           {row({ kind: "favorites" }, "star", "Favorites", "source-favorites")}
           {row({ kind: "highlights" }, "highlighter", "Highlights", "source-highlights")}
-          {row({ kind: "archive" }, "archive", "Archive", "source-archive")}
         </View>
         <If when={sortedCollections().length}>
           {heading("Collections")}
@@ -83,6 +83,8 @@ export function Sources(props: {
           </View>
         </If>
       </Scroll>
+      {/* The Trash, at the foot of the sources where it's always in reach. */}
+      <View class="px-2 pb-1">{row({ kind: "trash" }, "trash", "Trash", "source-trash")}</View>
       {/* Sync status and settings, at the foot of the sidebar. */}
       <View
         class="flex-row items-center gap-2 px-3 py-2.5"
