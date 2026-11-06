@@ -32,6 +32,9 @@ if (isAvailable) Window.setTitleBar({ style: "hidden", height: TOOLBAR });
 /** Sidebar beside the content: desktops and tablets with room for it. */
 const wide = () => platform.idiom !== "phone" && windowSize().width >= 640;
 
+/** Pages slide in on phones and tablets, where the stack follows the swipe back. */
+const pageAnimation = platform.os === "ios" || platform.os === "android" ? "default" : "none";
+
 function App() {
   const ready = signal<"settings" | "app" | null>(null);
   void loadSettings().then((s) => {
@@ -106,21 +109,21 @@ function Desktop(props: { onReconnect: () => void }) {
           {(route) => {
             if (route.name === "browser") {
               return (
-                <NavPage animation="none" header={<View />} title="">
+                <NavPage animation={pageAnimation} header={<View />} title="">
                   <Browser url={route.url} wide onClose={() => nav.pop()} />
                 </NavPage>
               );
             }
             if (route.name === "reader") {
               return (
-                <NavPage animation="none" header={<View />} title="">
+                <NavPage animation={pageAnimation} header={<View />} title="">
                   <Reader bookmark={route.bookmark} wide onBack={() => nav.pop()} />
                 </NavPage>
               );
             }
             const s = route.name === "library" ? route.source : { kind: "all" as const };
             return (
-              <NavPage animation="none" header={<View />} title={sourceTitle(s)}>
+              <NavPage animation={pageAnimation} header={<View />} title={sourceTitle(s)}>
                 <Library
                   source={s}
                   wide
@@ -166,7 +169,7 @@ function Phone(props: { onReconnect: () => void }) {
           case "sources":
             return (
               <NavPage
-                animation="none"
+                animation={pageAnimation}
                 title="Library"
                 headerLargeTitle
                 headerBackTitle="Library"
@@ -186,7 +189,7 @@ function Phone(props: { onReconnect: () => void }) {
           case "library":
             return (
               <NavPage
-                animation="none"
+                animation={pageAnimation}
                 title={sourceTitle(route.source)}
                 headerLargeTitle
                 headerClass={headerClass()}
@@ -203,7 +206,7 @@ function Phone(props: { onReconnect: () => void }) {
             const b = () => current(route.bookmark.id) ?? route.bookmark;
             return (
               <NavPage
-                animation="none"
+                animation={pageAnimation}
                 title={route.bookmark.domain.replace(/^www\./, "")}
                 headerClass={headerClass()}
                 style={{ backgroundColor: look().paper }}
@@ -223,7 +226,7 @@ function Phone(props: { onReconnect: () => void }) {
           case "browser":
             return (
               <NavPage
-                animation="none"
+                animation={pageAnimation}
                 title={route.domain.replace(/^www\./, "")}
                 headerClass={headerClass()}
                 style={{ backgroundColor: look().paper }}
@@ -234,7 +237,7 @@ function Phone(props: { onReconnect: () => void }) {
           case "settings":
             return (
               <NavPage
-                animation="none"
+                animation={pageAnimation}
                 title="Server"
                 headerClass={headerClass()}
                 style={{ backgroundColor: look().paper }}
