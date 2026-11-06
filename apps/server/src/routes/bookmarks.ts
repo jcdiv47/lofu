@@ -12,6 +12,7 @@ import {
   UpdateHighlight,
 } from "@lofu/shared";
 import type { AppContext } from "../context.ts";
+import { resolveLink } from "../extract/links.ts";
 import { body, IdParam, json, notFound } from "./util.ts";
 
 const dec = new TextDecoder();
@@ -23,15 +24,19 @@ export function bookmarkRoutes(app: OpenAPIHono, ctx: AppContext) {
     createRoute({
       method: "post",
       path: "/v1/bookmarks",
-      summary: "Save a URL (idempotent on the normalized URL)",
+      summary: "Save a URL (idempotent on the normalized URL; short links are followed first)",
       request: body(CreateBookmark),
       responses: {
         201: json(Bookmark, "Created (or revived from trash)"),
         200: json(Bookmark, "Already saved; provided fields merged"),
       },
     }),
-    (c) => {
-      const { bookmark, created } = bookmarks.create(c.req.valid("json"));
+    async (c) => {
+      const input = c.req.valid("json");
+      // A short link or wrapper becomes the page it leads to. Page HTML sent
+      // along (the extension) already belongs to the page the browser is on.
+      if (!input.html) input.url = await resolveLink(input.url);
+      const { bookmark, created } = bookmarks.create(input);
       return c.json(bookmark, created ? 201 : 200);
     },
   );
