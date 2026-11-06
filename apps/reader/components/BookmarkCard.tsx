@@ -1,9 +1,10 @@
 import { Image, signal, Text, View } from "nsh";
-import { showBookmarkMenu } from "../lib/actions";
+import { nativeMenus, showBookmarkMenu } from "../lib/actions";
 import type { Bookmark } from "../lib/api";
 import { markRuns, shortDate } from "../lib/format";
 import { fonts, look } from "../lib/look";
 import { collectionName, highlightCount } from "../lib/store";
+import { BookmarkContextMenu } from "./BookmarkMenu";
 import { Favicon, Icon } from "./ui";
 
 export const CARD_COVER = 132;
@@ -173,13 +174,15 @@ export function BookmarkCard(props: {
   snippet?: string | null;
 }) {
   const b = () => props.b;
-  return (
+  const card = (
     <View
       role="button"
       accessibilityLabel={displayTitle(b())}
       testID={`card-${b().id}`}
       onPress={props.onOpen}
-      onContextMenu={(e) => void showBookmarkMenu(b(), props.onOpen, e.pagePosition)}
+      onContextMenu={
+        nativeMenus ? (e) => void showBookmarkMenu(b(), props.onOpen, e.pagePosition) : undefined
+      }
       class="overflow-hidden rounded-xl active:opacity-80"
       style={{
         backgroundColor: look().card,
@@ -211,6 +214,7 @@ export function BookmarkCard(props: {
       </View>
     </View>
   );
+  return nativeMenus ? card : <BookmarkContextMenu b={b()} open={props.onOpen} trigger={card} />;
 }
 
 /** A row in the phone list: title, excerpt and meta beside a thumbnail. */
@@ -223,14 +227,16 @@ export function BookmarkRow(props: {
   const b = () => props.b;
   const thumbFailed = signal<string | null>(null);
   const excerpt = () => b().excerpt?.replace(/\s+/g, " ").trim() ?? "";
-  return (
+  const row = (
     <View
       role="button"
       accessibilityLabel={displayTitle(b())}
       testID={`row-${b().id}`}
       onPress={props.onOpen}
-      onLongPress={() => void showBookmarkMenu(b(), props.onOpen)}
-      onContextMenu={(e) => void showBookmarkMenu(b(), props.onOpen, e.pagePosition)}
+      onLongPress={nativeMenus ? () => void showBookmarkMenu(b(), props.onOpen) : undefined}
+      onContextMenu={
+        nativeMenus ? (e) => void showBookmarkMenu(b(), props.onOpen, e.pagePosition) : undefined
+      }
       class="flex-row gap-3 px-4 py-3.5"
       activeStyle={{ backgroundColor: look().selected }}
       style={{ borderBottomWidth: 1, borderColor: look().ruleSoft }}
@@ -284,4 +290,5 @@ export function BookmarkRow(props: {
       </If>
     </View>
   );
+  return nativeMenus ? row : <BookmarkContextMenu b={b()} open={props.onOpen} trigger={row} />;
 }

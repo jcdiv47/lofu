@@ -64,7 +64,8 @@ export function Icon(props: { name: IconName; size?: number; color?: string }) {
 export function IconButton(props: {
   name: IconName;
   label: string;
-  onPress: () => void;
+  /** Leave it out when a `Menu` around the button opens on the press. */
+  onPress?: () => void;
   color?: string;
   size?: number;
   testID?: string;

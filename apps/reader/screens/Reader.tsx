@@ -9,8 +9,9 @@ import {
   starterKit,
 } from "nsh/base";
 import { findQuote, quoteAt } from "../../../packages/shared/src/anchor";
+import { BookmarkDropdown } from "../components/BookmarkMenu";
 import { IconButton } from "../components/ui";
-import { openOriginal, showBookmarkMenu } from "../lib/actions";
+import { nativeMenus, openOriginal, showBookmarkMenu } from "../lib/actions";
 import { api, type Bookmark, type Highlight } from "../lib/api";
 import { type DocIndex, indexDoc, toDocRange, toTextRange } from "../lib/docIndex";
 import { readingTime } from "../lib/format";
@@ -270,11 +271,16 @@ export function Reader(props: {
             onPress={() => void updateBookmark(b().id, { archived: !b().archived }).catch(() => {})}
           />
           <IconButton name="external" label="Open original" onPress={() => openOriginal(b())} />
-          <IconButton
-            name="more"
-            label="More"
-            onPress={() => void showBookmarkMenu(b(), undefined)}
-          />
+          <If
+            when={nativeMenus}
+            else={<BookmarkDropdown b={b()} trigger={<IconButton name="more" label="More" />} />}
+          >
+            <IconButton
+              name="more"
+              label="More"
+              onPress={() => void showBookmarkMenu(b(), undefined)}
+            />
+          </If>
         </View>
       </If>
       <If when={!props.wide && (placed().length || orphans())}>

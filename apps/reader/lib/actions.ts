@@ -55,6 +55,14 @@ export function bookmarkActions(b: Bookmark, open?: () => void) {
   ].filter((a): a is { id: string; label: string; run: () => void } => !!a);
 }
 
+/**
+ * Menus the platform draws: a context menu on the desktop apps, an action
+ * sheet on phones. The web build has neither (its action sheet is pinned to
+ * the bottom of the window), so its cards use the app's `ContextMenu`
+ * (`components/BookmarkMenu.tsx`), which opens at the pointer.
+ */
+export const nativeMenus = platform.os !== "web";
+
 /** A native context menu on the desktop, an action sheet on phones. */
 export async function showBookmarkMenu(
   b: Bookmark,
