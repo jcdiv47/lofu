@@ -106,21 +106,21 @@ function Desktop(props: { onReconnect: () => void }) {
           {(route) => {
             if (route.name === "browser") {
               return (
-                <NavPage header={<View />} title="">
+                <NavPage animation="none" header={<View />} title="">
                   <Browser url={route.url} wide onClose={() => nav.pop()} />
                 </NavPage>
               );
             }
             if (route.name === "reader") {
               return (
-                <NavPage header={<View />} title="">
+                <NavPage animation="none" header={<View />} title="">
                   <Reader bookmark={route.bookmark} wide onBack={() => nav.pop()} />
                 </NavPage>
               );
             }
             const s = route.name === "library" ? route.source : { kind: "all" as const };
             return (
-              <NavPage header={<View />} title={sourceTitle(s)}>
+              <NavPage animation="none" header={<View />} title={sourceTitle(s)}>
                 <Library
                   source={s}
                   wide
@@ -166,6 +166,7 @@ function Phone(props: { onReconnect: () => void }) {
           case "sources":
             return (
               <NavPage
+                animation="none"
                 title="Library"
                 headerLargeTitle
                 headerBackTitle="Library"
@@ -185,6 +186,7 @@ function Phone(props: { onReconnect: () => void }) {
           case "library":
             return (
               <NavPage
+                animation="none"
                 title={sourceTitle(route.source)}
                 headerLargeTitle
                 headerClass={headerClass()}
@@ -201,6 +203,7 @@ function Phone(props: { onReconnect: () => void }) {
             const b = () => current(route.bookmark.id) ?? route.bookmark;
             return (
               <NavPage
+                animation="none"
                 title={route.bookmark.domain.replace(/^www\./, "")}
                 headerClass={headerClass()}
                 style={{ backgroundColor: look().paper }}
@@ -220,6 +223,7 @@ function Phone(props: { onReconnect: () => void }) {
           case "browser":
             return (
               <NavPage
+                animation="none"
                 title={route.domain.replace(/^www\./, "")}
                 headerClass={headerClass()}
                 style={{ backgroundColor: look().paper }}
@@ -230,6 +234,7 @@ function Phone(props: { onReconnect: () => void }) {
           case "settings":
             return (
               <NavPage
+                animation="none"
                 title="Server"
                 headerClass={headerClass()}
                 style={{ backgroundColor: look().paper }}
