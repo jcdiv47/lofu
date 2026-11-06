@@ -1,4 +1,4 @@
-import { effect, signal, Text, untracked, View } from "nsh";
+import { effect, platform, safeArea, signal, Text, untracked, View } from "nsh";
 import {
   createRichEditor,
   RichEditor,
@@ -12,13 +12,13 @@ import {
 } from "nsh/base";
 import { findQuote, quoteAt } from "../../../packages/shared/src/anchor";
 import { BookmarkDropdown } from "../components/BookmarkMenu";
-import { IconButton } from "../components/ui";
+import { GlassButton, GlassGroup, GlassTint, IconButton, TopEdge } from "../components/ui";
 import { nativeMenus, openOriginal, showBookmarkMenu } from "../lib/actions";
 import { type ArticleImage, api, type Bookmark, type Highlight } from "../lib/api";
 import { type DocIndex, indexDoc, toDocRange, toTextRange } from "../lib/docIndex";
 import { isFootnoteNumber, numberFootnotes, raiseFootnotes } from "../lib/footnotes";
 import { readingTime } from "../lib/format";
-import { fonts, look } from "../lib/look";
+import { fonts, glass, look } from "../lib/look";
 import { bookmark as current, setHighlightCount, updateBookmark } from "../lib/store";
 
 /**
@@ -99,6 +99,8 @@ export function compactCells(doc: RichNodeJSON): RichNodeJSON {
 
 /** The widest the text gets, for a comfortable line length. */
 const MEASURE = 680;
+/** The desktop's toolbar, floating over the article. */
+const TOOLBAR = 52;
 
 interface Placed {
   highlight: Highlight;
@@ -133,6 +135,10 @@ export function Reader(props: {
   let hasFootnotes = false;
   /** The document as parsed and the text width its images are sized for. */
   let sized: { doc: RichNodeJSON; images: ArticleImage[]; width: number } | null = null;
+  /** Room above the article: the desktop's floating toolbar, or iOS's
+   * transparent header (the editor doesn't inset itself under it). */
+  const topPad = () =>
+    props.wide ? TOOLBAR + 36 : platform.os === "ios" ? safeArea().top + 54 + 20 : 24;
   const sidePad = () => Math.max(props.wide ? 40 : 20, Math.round((width() - MEASURE) / 2));
   /** The text's width (before the first layout, the widest it gets). */
   const textWidth = () => (width() > 0 ? Math.min(MEASURE, width() - 2 * sidePad()) : MEASURE);
@@ -261,8 +267,8 @@ export function Reader(props: {
   };
 
   const menuButton = (label: string, onPress: () => void) => (
-    <View onPress={onPress} role="button" class="px-3 py-2 active:opacity-60">
-      <Text style={{ color: look().paper, fontSize: 14, fontWeight: "600" }}>{label}</Text>
+    <View onPress={onPress} role="button" class="px-3.5 py-2.5 active:opacity-60">
+      <Text style={{ color: look().ink, fontSize: 14, fontWeight: "600" }}>{label}</Text>
     </View>
   );
 
@@ -270,7 +276,8 @@ export function Reader(props: {
     const s = selection();
     if (s && !s.empty) {
       return (
-        <View class="flex-row rounded-lg" style={{ backgroundColor: look().ink }}>
+        <View class="flex-row rounded-full px-1" style={{ ...glass(), borderCurve: "continuous" }}>
+          <GlassTint />
           {menuButton("Highlight", addHighlight)}
         </View>
       );
@@ -278,7 +285,8 @@ export function Reader(props: {
     const hit = underCaret();
     if (hit) {
       return (
-        <View class="flex-row rounded-lg" style={{ backgroundColor: look().ink }}>
+        <View class="flex-row rounded-full px-1" style={{ ...glass(), borderCurve: "continuous" }}>
+          <GlassTint />
           {menuButton("Remove highlight", () => removeHighlight(hit))}
         </View>
       );
@@ -315,73 +323,10 @@ export function Reader(props: {
       style={{ backgroundColor: look().paper }}
       onLayout={(e) => width.set(e.bounds.size.width)}
     >
-      <If when={props.wide}>
-        <View
-          desktop={{ windowDrag: true }}
-          class="flex-row items-center gap-1 pr-3"
-          style={{
-            height: 52,
-            paddingLeft: (props.toolbarInset ?? 0) + 14,
-            borderBottomWidth: 1,
-            borderColor: look().ruleSoft,
-          }}
-        >
-          <IconButton
-            name="back"
-            label="Back to the library"
-            testID="back"
-            onPress={props.onBack}
-          />
-          <Text
-            class="flex-1 truncate"
-            style={{ color: look().inkFaint, fontSize: 12.5, marginLeft: 6 }}
-          >
-            {meta()}
-          </Text>
-          <Text
-            testID="highlight-count"
-            style={{ color: look().stamp, fontSize: 12, marginRight: 8 }}
-          >
-            {highlights()}
-          </Text>
-          <IconButton
-            name={b().favorite ? "starFill" : "star"}
-            label={b().favorite ? "Remove from favorites" : "Add to favorites"}
-            color={b().favorite ? look().favorite : undefined}
-            onPress={() => void updateBookmark(b().id, { favorite: !b().favorite }).catch(() => {})}
-          />
-          <IconButton
-            name="archive"
-            label={b().archived ? "Move out of archive" : "Archive"}
-            active={b().archived}
-            onPress={() => void updateBookmark(b().id, { archived: !b().archived }).catch(() => {})}
-          />
-          <IconButton name="external" label="Open original" onPress={() => openOriginal(b())} />
-          <If
-            when={nativeMenus}
-            else={<BookmarkDropdown b={b()} trigger={<IconButton name="more" label="More" />} />}
-          >
-            <IconButton
-              name="more"
-              label="More"
-              onPress={() => void showBookmarkMenu(b(), undefined)}
-            />
-          </If>
-        </View>
-      </If>
-      <If when={!props.wide && (placed().length || orphans())}>
-        <Text
-          testID="highlight-count"
-          class="px-5 pt-2"
-          style={{ color: look().stamp, fontSize: 12 }}
-        >
-          {highlights()}
-        </Text>
-      </If>
       <If
         when={editor()}
         else={
-          <View class="items-center gap-2 px-8 pt-24">
+          <View class="items-center gap-3 px-8 pt-32">
             <Text
               class="text-center"
               style={{ color: look().inkSoft, fontSize: 15, lineHeight: 21 }}
@@ -389,16 +334,7 @@ export function Reader(props: {
               {status()}
             </Text>
             <If when={props.bookmark.contentStatus !== "ok"}>
-              <View
-                role="button"
-                onPress={() => openOriginal(b())}
-                class="mt-2 rounded-lg px-4 py-2 active:opacity-70"
-                style={{ backgroundColor: look().ink }}
-              >
-                <Text style={{ color: look().paper, fontSize: 14, fontWeight: "600" }}>
-                  Open original
-                </Text>
-              </View>
+              <GlassButton label="Open original" prominent onPress={() => openOriginal(b())} />
             </If>
           </View>
         }
@@ -416,7 +352,7 @@ export function Reader(props: {
             onSelectionChange={({ selection: s }) => selection.set(s)}
             bubbleMenu={bubble()}
             classes={{
-              content: `px-[${sidePad()}px] pt-8 pb-32`,
+              content: `px-[${sidePad()}px] pt-[${topPad()}px] pb-32`,
               nodes: {
                 paragraph: "text-[18px] leading-[30px] mb-5",
                 heading: "font-semibold mt-8 mb-3",
@@ -445,6 +381,87 @@ export function Reader(props: {
             }}
           />
         )}
+      </If>
+      <If when={!props.wide && (placed().length || orphans())}>
+        {/* Phones: the count on a small capsule of glass over the article's foot. */}
+        <View
+          class="absolute right-0 left-0 items-center"
+          style={{ bottom: Math.max(safeArea().bottom, 12) + 6, pointerEvents: "none" }}
+        >
+          <View
+            class="h-8 justify-center rounded-full px-3.5"
+            style={{ ...glass(), borderCurve: "continuous" }}
+          >
+            <GlassTint />
+            <Text testID="highlight-count" style={{ color: look().stamp, fontSize: 13 }}>
+              {highlights()}
+            </Text>
+          </View>
+        </View>
+      </If>
+      <If when={!props.wide && platform.os === "ios"}>
+        <TopEdge />
+      </If>
+      <If when={props.wide}>
+        {/* Floats over the article: the text scrolls under the glass and fades
+            out beneath it (the scroll edge). */}
+        <View
+          class="absolute top-0 right-0 left-0"
+          style={{ height: TOOLBAR + 30, backgroundImage: look().edgeFade, pointerEvents: "none" }}
+        />
+        <View
+          desktop={{ windowDrag: true }}
+          class="absolute top-0 right-0 left-0 flex-row items-center gap-2.5 pr-4"
+          style={{
+            height: TOOLBAR + 8,
+            paddingTop: 8,
+            paddingLeft: (props.toolbarInset ?? 0) + 16,
+          }}
+        >
+          <GlassGroup round>
+            <IconButton
+              name="back"
+              label="Back to the library"
+              testID="back"
+              onPress={props.onBack}
+            />
+          </GlassGroup>
+          <Text class="flex-1 truncate" style={{ color: look().inkSoft, fontSize: 12.5 }}>
+            {meta()}
+          </Text>
+          <Text testID="highlight-count" style={{ color: look().stamp, fontSize: 12 }}>
+            {highlights()}
+          </Text>
+          <GlassGroup>
+            <IconButton
+              name={b().favorite ? "starFill" : "star"}
+              label={b().favorite ? "Remove from favorites" : "Add to favorites"}
+              color={b().favorite ? look().favorite : undefined}
+              onPress={() =>
+                void updateBookmark(b().id, { favorite: !b().favorite }).catch(() => {})
+              }
+            />
+            <IconButton
+              name="archive"
+              label={b().archived ? "Move out of archive" : "Archive"}
+              active={b().archived}
+              onPress={() =>
+                void updateBookmark(b().id, { archived: !b().archived }).catch(() => {})
+              }
+            />
+            <IconButton name="external" label="Open original" onPress={() => openOriginal(b())} />
+            <If
+              when={nativeMenus}
+              else={<BookmarkDropdown b={b()} trigger={<IconButton name="more" label="More" />} />}
+            >
+              <IconButton
+                name="more"
+                label="More"
+                onPress={() => void showBookmarkMenu(b(), undefined)}
+              />
+            </If>
+          </GlassGroup>
+        </View>
       </If>
     </View>
   );

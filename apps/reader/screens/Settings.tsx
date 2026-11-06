@@ -1,4 +1,4 @@
-import { signal, Text, View } from "nsh";
+import { type InputRef, keyboardFrame, Scroll, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
 import { api, loadSettings, normalizeServer, saveSettings } from "../lib/api";
 import { fonts, look } from "../lib/look";
@@ -14,6 +14,7 @@ export function Settings(props: { onDone: () => void; onCancel?: () => void; fir
   const token = signal("");
   const error = signal("");
   const busy = signal(false);
+  let tokenInput: InputRef | null = null;
   void loadSettings().then((s) => {
     server.set(s.server);
     token.set(s.token);
@@ -60,13 +61,18 @@ export function Settings(props: { onDone: () => void; onCancel?: () => void; fir
         autoCapitalize="none"
         autoCorrect={false}
         keyboardType={id === "server" ? "url" : "default"}
+        // Return moves from the address to the token, and connects from there.
+        returnKeyType={id === "server" ? "next" : "go"}
+        ref={(r) => {
+          if (id === "token") tokenInput = r;
+        }}
         masked={masked}
         onChange={({ value: v }) => {
           set(v);
           error.set("");
         }}
-        onSubmit={() => void connect()}
-        class="rounded-lg px-3"
+        onSubmit={() => (id === "server" ? tokenInput?.focus() : void connect())}
+        class="rounded-xl px-3.5"
         style={{
           height: 40,
           color: look().ink,
@@ -104,7 +110,7 @@ export function Settings(props: { onDone: () => void; onCancel?: () => void; fir
           <View
             role="button"
             onPress={() => props.onCancel?.()}
-            class="rounded-lg px-4 py-2.5 active:opacity-60"
+            class="rounded-full px-4 py-2.5 active:opacity-60"
           >
             <Text style={{ color: look().inkSoft, fontSize: 14.5, fontWeight: "500" }}>Cancel</Text>
           </View>
@@ -114,7 +120,7 @@ export function Settings(props: { onDone: () => void; onCancel?: () => void; fir
           testID="connect"
           accessibilityState={{ disabled: busy() }}
           onPress={() => void connect()}
-          class="rounded-lg px-5 py-2.5 active:opacity-70"
+          class="rounded-full px-5 py-2.5 active:opacity-70"
           style={{ backgroundColor: look().ink, opacity: busy() ? 0.6 : 1 }}
         >
           <Text style={{ color: look().paper, fontSize: 14.5, fontWeight: "600" }}>
@@ -129,27 +135,39 @@ export function Settings(props: { onDone: () => void; onCancel?: () => void; fir
     <If
       when={props.first}
       else={
-        <View class="gap-5 p-6" style={{ backgroundColor: look().paper }}>
+        <View class="gap-5 p-6">
           <Text style={{ color: look().ink, fontSize: 19, fontWeight: "700" }}>Your server</Text>
           {form}
         </View>
       }
     >
-      <View
-        desktop={{ windowDrag: true }}
-        class="flex-1 items-center justify-center px-6"
-        style={{ backgroundColor: look().paper }}
-      >
-        <View class="w-full gap-8" style={{ maxWidth: 400 }}>
-          <View class="gap-2">
-            <Wordmark size={44} />
-            <Text style={{ color: look().inkSoft, fontSize: 15.5, lineHeight: 22 }}>
-              Your bookmarks and reading, from your own server: the lofu server on your network or
-              tailnet.
-            </Text>
+      <View desktop={{ windowDrag: true }} class="flex-1" style={{ backgroundColor: look().paper }}>
+        {/* Scrolls on phones so Connect stays above the keyboard; a tap
+            outside the fields or a drag puts the keyboard away. */}
+        <Scroll
+          class="flex-1"
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="handled"
+          contentStyle={{
+            flexGrow: 1,
+            alignItems: "center",
+            justifyContent: "center",
+            paddingHorizontal: 24,
+            paddingTop: 24,
+            paddingBottom: keyboardFrame().height + 24,
+          }}
+        >
+          <View class="w-full gap-8" style={{ maxWidth: 400 }}>
+            <View class="gap-2">
+              <Wordmark size={44} />
+              <Text style={{ color: look().inkSoft, fontSize: 15.5, lineHeight: 22 }}>
+                Your bookmarks and reading, from your own server: the lofu server on your network or
+                tailnet.
+              </Text>
+            </View>
+            {form}
           </View>
-          {form}
-        </View>
+        </Scroll>
       </View>
     </If>
   );

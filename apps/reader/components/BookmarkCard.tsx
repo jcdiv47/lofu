@@ -1,4 +1,4 @@
-import { Image, signal, Text, View } from "nsh";
+import { Image, pixelRatio, signal, Text, View } from "nsh";
 import { nativeMenus, showBookmarkMenu } from "../lib/actions";
 import type { Bookmark } from "../lib/api";
 import { markRuns, shortDate } from "../lib/format";
@@ -183,16 +183,24 @@ export function BookmarkCard(props: {
       onContextMenu={
         nativeMenus ? (e) => void showBookmarkMenu(b(), props.onOpen, e.pagePosition) : undefined
       }
-      class="overflow-hidden rounded-xl active:opacity-80"
+      class="overflow-hidden rounded-[16px] active:opacity-80"
       style={{
         backgroundColor: look().card,
         borderWidth: 1,
         borderColor: look().ruleSoft,
+        borderCurve: "continuous",
         boxShadow: look().shadow,
+        transitionProperty: "box-shadow, background-color, border-color",
+        transitionDuration: 160,
+        transitionTimingFunction: "ease-out",
       }}
-      hoverStyle={{ backgroundColor: look().cardHover, borderColor: look().rule }}
+      hoverStyle={{
+        backgroundColor: look().cardHover,
+        borderColor: look().rule,
+        boxShadow: look().shadowLift,
+      }}
     >
-      <Cover b={b()} height={CARD_COVER} radius={11} />
+      <Cover b={b()} height={CARD_COVER} radius={15} />
       <View class="justify-between gap-2 px-3.5 pt-3 pb-3" style={{ height: CARD_BODY }}>
         <View class="gap-1">
           <Text
@@ -239,8 +247,12 @@ export function BookmarkRow(props: {
       }
       class="flex-row gap-3 px-4 py-3.5"
       activeStyle={{ backgroundColor: look().selected }}
-      style={{ borderBottomWidth: 1, borderColor: look().ruleSoft }}
     >
+      {/* iOS's inset hairline, from the text's leading edge. */}
+      <View
+        class="absolute right-0 bottom-0 left-4"
+        style={{ height: 1 / pixelRatio(), backgroundColor: look().rule }}
+      />
       <View class="min-w-0 flex-1 gap-1">
         <Text
           style={{
@@ -281,7 +293,8 @@ export function BookmarkRow(props: {
           style={{
             width: 76,
             height: 76,
-            borderRadius: 8,
+            borderRadius: 12,
+            borderCurve: "continuous",
             objectFit: "cover",
             backgroundColor: look().paperDeep,
             marginTop: 2,

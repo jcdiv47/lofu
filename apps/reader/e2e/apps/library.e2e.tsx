@@ -21,6 +21,11 @@ test("signs in, browses sources, searches and reads", async () => {
   await app.type("id:server", target.server);
   await app.type("id:token", target.token);
   await app.press("id:connect");
+  if (target.ios) {
+    // Phones open on the Library page.
+    await app.waitFor("id:source-all", { timeout: 15000 });
+    await app.press("id:source-all");
+  }
 
   // The library: everything, newest first.
   await app.waitFor("text:Rope & SumTree", { timeout: 15000 });

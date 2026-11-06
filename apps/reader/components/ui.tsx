@@ -1,17 +1,25 @@
-import { Image, signal, Text, View } from "nsh";
+import { Image, type JSX, safeArea, safeAreaInsets, signal, Text, View, type ViewStyle } from "nsh";
 import alertIcon from "../assets/icons/alert.svg";
 import allIcon from "../assets/icons/all.svg";
 import archiveIcon from "../assets/icons/archive.svg";
+import articleIcon from "../assets/icons/article.svg";
+import audioIcon from "../assets/icons/audio.svg";
 import backIcon from "../assets/icons/back.svg";
+import checkIcon from "../assets/icons/check.svg";
 import chevronIcon from "../assets/icons/chevron.svg";
+import chevronDownIcon from "../assets/icons/chevron-down.svg";
 import clockIcon from "../assets/icons/clock.svg";
 import closeIcon from "../assets/icons/close.svg";
+import collapseIcon from "../assets/icons/collapse.svg";
+import documentIcon from "../assets/icons/document.svg";
+import expandIcon from "../assets/icons/expand.svg";
 import externalIcon from "../assets/icons/external.svg";
 import folderIcon from "../assets/icons/folder.svg";
 import forwardIcon from "../assets/icons/forward.svg";
 import gridIcon from "../assets/icons/grid.svg";
 import hashIcon from "../assets/icons/hash.svg";
 import highlighterIcon from "../assets/icons/highlighter.svg";
+import imageIcon from "../assets/icons/image.svg";
 import inboxIcon from "../assets/icons/inbox.svg";
 import linkIcon from "../assets/icons/link.svg";
 import listIcon from "../assets/icons/list.svg";
@@ -20,11 +28,23 @@ import plusIcon from "../assets/icons/plus.svg";
 import refreshIcon from "../assets/icons/refresh.svg";
 import searchIcon from "../assets/icons/search.svg";
 import settingsIcon from "../assets/icons/settings.svg";
+import sortIcon from "../assets/icons/sort.svg";
 import starIcon from "../assets/icons/star.svg";
 import starFillIcon from "../assets/icons/star-fill.svg";
-import { look } from "../lib/look";
+import videoIcon from "../assets/icons/video.svg";
+import { glass, hasGlass, look } from "../lib/look";
 
 export const icons = {
+  article: articleIcon,
+  audio: audioIcon,
+  check: checkIcon,
+  chevronDown: chevronDownIcon,
+  collapse: collapseIcon,
+  document: documentIcon,
+  expand: expandIcon,
+  image: imageIcon,
+  sort: sortIcon,
+  video: videoIcon,
   alert: alertIcon,
   all: allIcon,
   archive: archiveIcon,
@@ -81,7 +101,7 @@ export function IconButton(props: {
       testID={props.testID}
       onPress={props.onPress}
       disabled={props.disabled}
-      class="h-8 w-8 items-center justify-center rounded-md active:opacity-60"
+      class="h-8 w-8 items-center justify-center rounded-full active:opacity-60"
       style={{
         backgroundColor: props.active ? look().selected : undefined,
         opacity: props.disabled ? 0.35 : 1,
@@ -89,6 +109,111 @@ export function IconButton(props: {
       hoverStyle={{ backgroundColor: look().selected }}
     >
       <Icon name={props.name} size={props.size ?? 17} color={props.color} />
+    </View>
+  );
+}
+
+/** The paper's tint over the system's glass, as its first child (see `glass`). */
+export function GlassTint(props: { radius?: number }) {
+  return (
+    <If when={hasGlass}>
+      <View
+        class="absolute inset-0"
+        style={{
+          borderRadius: props.radius ?? 999,
+          borderCurve: "continuous",
+          backgroundColor: look().glassTint,
+          pointerEvents: "none",
+        }}
+      />
+    </If>
+  );
+}
+
+/**
+ * The scroll edge under a transparent system header (iOS 26's look): the
+ * page blurs out under the bar's glass buttons so its title stays legible.
+ * Place it last in a page whose `NavPage` has `headerTransparent`.
+ */
+export function TopEdge() {
+  // A transparent header leaves the page's inset at the status bar: add the
+  // bar's own height (54 points on iOS 26) and room for the fade.
+  const insets = safeAreaInsets();
+  return (
+    <View
+      class="absolute top-0 right-0 left-0"
+      style={{
+        height: Math.max(insets().top, safeArea().top + 54) + 26,
+        // A progressive blur, as the system's scroll edge effect: the page
+        // under the bar is blurred and washed with paper, easing off below it.
+        backgroundColor: `${look().paper}b3`,
+        backdropFilter: "blur(10px)",
+        maskImage: "linear-gradient(to bottom, #000 0%, #000 72%, #0000 100%)",
+        pointerEvents: "none",
+      }}
+    />
+  );
+}
+
+/**
+ * Toolbar buttons that belong together, on one capsule of Liquid Glass, as
+ * macOS 26 and iOS 26 group a toolbar's items.
+ */
+export function GlassGroup(props: {
+  children: JSX.Element;
+  testID?: string;
+  /** A round button on its own: the capsule as wide as it is tall. */
+  round?: boolean;
+  style?: ViewStyle;
+}) {
+  return (
+    <View
+      testID={props.testID}
+      class={
+        props.round
+          ? "h-10 w-10 items-center justify-center rounded-full"
+          : "h-10 flex-row items-center gap-0.5 rounded-full px-1"
+      }
+      style={{ ...glass(), borderCurve: "continuous", ...props.style }}
+    >
+      <GlassTint />
+      {props.children}
+    </View>
+  );
+}
+
+/** A labelled button on glass ("Open in browser"), or filled with the accent when `prominent`. */
+export function GlassButton(props: {
+  label: string;
+  onPress: () => void;
+  prominent?: boolean;
+  testID?: string;
+}) {
+  return (
+    <View
+      role="button"
+      accessibilityLabel={props.label}
+      testID={props.testID}
+      onPress={props.onPress}
+      class="h-10 items-center justify-center rounded-full px-5 active:opacity-70"
+      style={
+        props.prominent
+          ? { backgroundColor: look().stamp, boxShadow: look().glassShadow }
+          : { ...glass(), borderCurve: "continuous" }
+      }
+    >
+      <If when={!props.prominent}>
+        <GlassTint />
+      </If>
+      <Text
+        style={{
+          color: props.prominent ? "#fff" : look().ink,
+          fontSize: 14,
+          fontWeight: "600",
+        }}
+      >
+        {props.label}
+      </Text>
     </View>
   );
 }
