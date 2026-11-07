@@ -570,11 +570,11 @@ function Phone(props: { onReconnect: () => void }) {
             return (
               <NavPage
                 animation={pageAnimation}
-                title="Server"
+                title="Settings"
                 headerClass={solidHeaderClass()}
                 style={{ backgroundColor: look().paper }}
               >
-                <WebBar title="Server" onBack={() => nav.pop()} />
+                <WebBar title="Settings" onBack={() => nav.pop()} />
                 <Settings
                   onDone={() => {
                     nav.pop();

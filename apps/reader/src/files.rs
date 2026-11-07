@@ -25,7 +25,22 @@ impl Files {
     /// Writes `text` to the file `name` (whole, through a temporary file, so
     /// a crash never leaves half of it). Resolves with whether it was written.
     pub async fn write(name: String, text: String) -> bool {
-        imp::run(move || imp::write(&name, &text)).await.unwrap_or(false)
+        imp::run(move || imp::write(&name, text.as_bytes())).await.unwrap_or(false)
+    }
+
+    /// Writes `bytes` to the file `name`, as `write` does. Resolves with
+    /// whether it was written.
+    pub async fn write_bytes(name: String, bytes: Vec<u8>) -> bool {
+        imp::run(move || imp::write(&name, &bytes)).await.unwrap_or(false)
+    }
+
+    /// The absolute path of the file `name` (whether or not it exists), for
+    /// showing a kept picture: an image's source may be a path, which the
+    /// loaders on macOS and iOS read as it is (iOS doesn't decode a `file:`
+    /// URL's escapes, and `Application Support` has a space). Null where
+    /// there are no files.
+    pub fn path(name: String) -> Option<String> {
+        imp::path(&name)?.to_str().map(str::to_owned)
     }
 
     /// Removes the file `name`. Resolves with whether it is gone.
@@ -36,6 +51,11 @@ impl Files {
     /// The names of the files whose names start with `prefix`.
     pub async fn list(prefix: String) -> Vec<String> {
         imp::run(move || imp::list(&prefix)).await.unwrap_or_default()
+    }
+
+    /// The bytes the files whose names start with `prefix` take, together.
+    pub async fn size(prefix: String) -> f64 {
+        imp::run(move || imp::size(&prefix)).await.unwrap_or(0) as f64
     }
 }
 
@@ -54,14 +74,20 @@ mod imp {
     pub fn read(_name: &str) -> Option<String> {
         None
     }
-    pub fn write(_name: &str, _text: &str) -> bool {
+    pub fn write(_name: &str, _data: &[u8]) -> bool {
         false
+    }
+    pub fn path(_name: &str) -> Option<PathBuf> {
+        None
     }
     pub fn remove(_name: &str) -> bool {
         false
     }
     pub fn list(_prefix: &str) -> Vec<String> {
         Vec::new()
+    }
+    pub fn size(_prefix: &str) -> u64 {
+        0
     }
 }
 
@@ -104,7 +130,7 @@ mod imp {
 
     /// Names are the app's own keys: letters, digits, `.`, `-` and `_` only,
     /// so a name never leaves the directory.
-    fn path(name: &str) -> Option<PathBuf> {
+    pub fn path(name: &str) -> Option<PathBuf> {
         let ok = !name.is_empty()
             && !name.starts_with('.')
             && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'));
@@ -115,13 +141,13 @@ mod imp {
         fs::read_to_string(path(name)?).ok()
     }
 
-    pub fn write(name: &str, text: &str) -> bool {
+    pub fn write(name: &str, data: impl AsRef<[u8]>) -> bool {
         let (Some(dir), Some(to)) = (dir(), path(name)) else {
             return false;
         };
         let tmp = dir.join(format!(".{name}.tmp"));
         fs::create_dir_all(&dir).is_ok()
-            && fs::write(&tmp, text).is_ok()
+            && fs::write(&tmp, data).is_ok()
             && fs::rename(&tmp, &to).is_ok()
     }
 
@@ -143,6 +169,17 @@ mod imp {
             .filter_map(|e| e.ok()?.file_name().into_string().ok())
             .filter(|n| n.starts_with(prefix) && !n.starts_with('.'))
             .collect()
+    }
+
+    pub fn size(prefix: &str) -> u64 {
+        let Some(dir) = dir() else {
+            return 0;
+        };
+        list(prefix)
+            .iter()
+            .filter_map(|n| fs::metadata(dir.join(n)).ok())
+            .map(|m| m.len())
+            .sum()
     }
 }
 

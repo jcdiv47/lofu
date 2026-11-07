@@ -1,9 +1,11 @@
 import { Image, pixelRatio, signal, Text, View } from "nsh";
 import { nativeMenus, showBookmarkMenu } from "../lib/actions";
 import type { Bookmark } from "../lib/api";
+import { isKept } from "../lib/articles";
+import { onDisk } from "../lib/files";
 import { markRuns, shortDate } from "../lib/format";
 import { fonts, look } from "../lib/look";
-import { collectionName, highlightCount } from "../lib/store";
+import { collectionName, highlightCount, offline } from "../lib/store";
 import { BookmarkContextMenu } from "./BookmarkMenu";
 import { Favicon, Icon } from "./ui";
 
@@ -101,8 +103,19 @@ function Cover(props: { b: Bookmark; height: number; radius?: number }) {
 function Marks(props: { b: Bookmark }) {
   const hl = () => highlightCount(props.b.id);
   const status = () => props.b.contentStatus;
+  // Offline, what can't be read without the server (the web keeps nothing, so says nothing).
+  const onlineOnly = () =>
+    onDisk && offline() && status() === "ok" && !props.b.archived && !isKept(props.b.id);
   return (
     <>
+      <If when={onlineOnly()}>
+        <Text
+          testID={`online-only-${props.b.id}`}
+          style={{ color: look().inkFaint, fontSize: 11.5 }}
+        >
+          Online only
+        </Text>
+      </If>
       <If when={props.b.favorite}>
         <Icon name="starFill" size={12} color={look().favorite} />
       </If>
