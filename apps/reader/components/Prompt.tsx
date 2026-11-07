@@ -19,6 +19,8 @@ interface Ask {
 }
 
 const asking = signal<Ask | null>(null);
+/** Whether a prompt is open. */
+export const prompting = () => !!asking();
 
 export function promptText(opts: Omit<Ask, "done">): Promise<boolean> {
   asking()?.done(false);

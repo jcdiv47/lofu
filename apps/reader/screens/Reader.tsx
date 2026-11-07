@@ -68,6 +68,7 @@ import {
   sync,
   updateBookmark,
 } from "../lib/store";
+import { contentLeft, nativeToolbar, useToolbar } from "../lib/toolbar";
 
 /**
  * Raw HTML embeds (iframes, scripts) can't be shown by the editor and would
@@ -182,6 +183,10 @@ export function withNote(
 const MEASURE = 680;
 /** The desktop's toolbar, floating over the article. */
 const TOOLBAR = 52;
+/** The window toolbar's Back (macOS), before the page's meta. */
+const BACK_ROOM = 48;
+/** The window toolbar's actions at the trailing end (macOS). */
+const ACTIONS_ROOM = 300;
 
 interface Placed {
   highlight: Highlight;
@@ -555,6 +560,76 @@ export function Reader(props: {
     return () => clearTimeout(t);
   });
 
+  /** The Mac's window toolbar has Back and the bookmark's actions (`lib/toolbar.ts`). */
+  const native = props.wide && nativeToolbar;
+  if (native) {
+    useToolbar(() => {
+      const bm = b();
+      return [
+        // Back starts where the article's column does, beside the sidebar.
+        { kind: "space", id: "lead", x: contentLeft() + 16 },
+        {
+          kind: "button",
+          id: "back",
+          symbol: "chevron.left",
+          label: "Back to the library",
+          onPress: () => props.onBack(),
+        },
+        { kind: "flex" },
+        {
+          kind: "button",
+          id: "favorite",
+          symbol: bm.favorite ? "star.fill" : "star",
+          label: bm.favorite ? "Remove from favorites" : "Add to favorites",
+          tint: bm.favorite ? look().favorite : undefined,
+          onPress: () => void updateBookmark(bm.id, { favorite: !bm.favorite }).catch(() => {}),
+        },
+        ...(canShare
+          ? [
+              {
+                kind: "button" as const,
+                id: "share",
+                symbol: "square.and.arrow.up",
+                label: "Share",
+                onPress: (at: { x: number; y: number }) => shareBookmark(b(), at),
+              },
+            ]
+          : []),
+        {
+          kind: "button",
+          id: "delete",
+          symbol: "trash",
+          label: inTrash(bm) ? "Delete permanently" : "Delete",
+          onPress: () =>
+            void deleteBookmark(b()).then((gone) => {
+              if (gone) props.onBack();
+            }),
+        },
+        {
+          kind: "button",
+          id: "edit",
+          symbol: "pencil",
+          label: "Edit title, tags and note",
+          onPress: () => editBookmark(b()),
+        },
+        {
+          kind: "button",
+          id: "original",
+          symbol: "safari",
+          label: "Open original",
+          onPress: () => openOriginal(b()),
+        },
+        {
+          kind: "button",
+          id: "more",
+          symbol: "ellipsis",
+          label: "More",
+          onPress: (at) => void showBookmarkMenu(b(), undefined, at),
+        },
+      ];
+    });
+  }
+
   return (
     <View
       class="flex-1"
@@ -681,20 +756,29 @@ export function Reader(props: {
         />
         <View
           desktop={{ windowDrag: true }}
-          class="absolute top-0 right-0 left-0 flex-row items-center gap-2.5 pr-4"
+          class="absolute top-0 right-0 left-0 flex-row items-center gap-2.5"
           style={{
-            height: TOOLBAR + 8,
-            paddingTop: 8,
-            paddingLeft: (props.toolbarInset ?? 0) + 16,
+            // With the window's toolbar, Back and the actions are its items:
+            // the row keeps what's said about the page, beside Back and clear
+            // of the items at the trailing end.
+            height: native ? TOOLBAR : TOOLBAR + 8,
+            paddingTop: native ? 0 : 8,
+            paddingLeft: (props.toolbarInset ?? 0) + 16 + (native ? BACK_ROOM : 0),
+            paddingRight: native ? ACTIONS_ROOM : 16,
           }}
         >
-          <RoundGlassButton
-            name="back"
-            label="Back to the library"
-            testID="back"
-            onPress={props.onBack}
-          />
-          <Text class="flex-1 truncate" style={{ color: look().inkSoft, fontSize: 12.5 }}>
+          <If when={!native}>
+            <RoundGlassButton
+              name="back"
+              label="Back to the library"
+              testID="back"
+              onPress={props.onBack}
+            />
+          </If>
+          <Text
+            class={native ? "truncate" : "flex-1 truncate"}
+            style={{ color: look().inkSoft, fontSize: 12.5, flexShrink: 1 }}
+          >
             {meta()}
           </Text>
           <View
@@ -707,48 +791,55 @@ export function Reader(props: {
               {highlights()}
             </Text>
           </View>
-          <GlassGroup>
-            <IconButton
-              name={b().favorite ? "starFill" : "star"}
-              label={b().favorite ? "Remove from favorites" : "Add to favorites"}
-              color={b().favorite ? look().favorite : undefined}
-              onPress={() =>
-                void updateBookmark(b().id, { favorite: !b().favorite }).catch(() => {})
-              }
-            />
-            <If when={canShare}>
+          <If when={native}>
+            <View class="flex-1" />
+          </If>
+          <If when={!native}>
+            <GlassGroup>
               <IconButton
-                name="share"
-                label="Share"
-                onPress={(e) => shareBookmark(b(), e?.pagePosition)}
+                name={b().favorite ? "starFill" : "star"}
+                label={b().favorite ? "Remove from favorites" : "Add to favorites"}
+                color={b().favorite ? look().favorite : undefined}
+                onPress={() =>
+                  void updateBookmark(b().id, { favorite: !b().favorite }).catch(() => {})
+                }
               />
-            </If>
-            <IconButton
-              name="trash"
-              label={inTrash(b()) ? "Delete permanently" : "Delete"}
-              onPress={() =>
-                void deleteBookmark(b()).then((gone) => {
-                  if (gone) props.onBack();
-                })
-              }
-            />
-            <IconButton
-              name="pencil"
-              label="Edit title, tags and note"
-              onPress={() => editBookmark(b())}
-            />
-            <IconButton name="external" label="Open original" onPress={() => openOriginal(b())} />
-            <If
-              when={nativeMenus}
-              else={<BookmarkDropdown b={b()} trigger={<IconButton name="more" label="More" />} />}
-            >
+              <If when={canShare}>
+                <IconButton
+                  name="share"
+                  label="Share"
+                  onPress={(e) => shareBookmark(b(), e?.pagePosition)}
+                />
+              </If>
               <IconButton
-                name="more"
-                label="More"
-                onPress={() => void showBookmarkMenu(b(), undefined)}
+                name="trash"
+                label={inTrash(b()) ? "Delete permanently" : "Delete"}
+                onPress={() =>
+                  void deleteBookmark(b()).then((gone) => {
+                    if (gone) props.onBack();
+                  })
+                }
               />
-            </If>
-          </GlassGroup>
+              <IconButton
+                name="pencil"
+                label="Edit title, tags and note"
+                onPress={() => editBookmark(b())}
+              />
+              <IconButton name="external" label="Open original" onPress={() => openOriginal(b())} />
+              <If
+                when={nativeMenus}
+                else={
+                  <BookmarkDropdown b={b()} trigger={<IconButton name="more" label="More" />} />
+                }
+              >
+                <IconButton
+                  name="more"
+                  label="More"
+                  onPress={() => void showBookmarkMenu(b(), undefined)}
+                />
+              </If>
+            </GlassGroup>
+          </If>
         </View>
       </If>
     </View>
