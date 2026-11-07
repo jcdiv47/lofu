@@ -1,7 +1,20 @@
-import { type InputRef, keyboardFrame, Scroll, signal, Text, View } from "nsh";
-import { Input } from "nsh/base";
+import { effect, type InputRef, keyboardFrame, Scroll, signal, Text, untracked, View } from "nsh";
+import { AlertDialog, Input } from "nsh/base";
+import { Icon } from "../components/ui";
 import { api, loadSettings, normalizeServer, saveSettings } from "../lib/api";
+import {
+  clearArticles,
+  downloading,
+  keepMode,
+  keepModes,
+  keptBytes,
+  keptCount,
+  prefetchArticles,
+  setKeepMode,
+} from "../lib/articles";
+import { onDisk } from "../lib/files";
 import { fonts, look } from "../lib/look";
+import { bookmarks, offline } from "../lib/store";
 import { Wordmark } from "./Sidebar";
 
 /**
@@ -138,6 +151,9 @@ export function Settings(props: { onDone: () => void; onCancel?: () => void; fir
         <View class="gap-5 p-6">
           <Text style={{ color: look().ink, fontSize: 19, fontWeight: "700" }}>Your server</Text>
           {form}
+          <If when={onDisk}>
+            <OfflineReading />
+          </If>
         </View>
       }
     >
@@ -170,5 +186,114 @@ export function Settings(props: { onDone: () => void; onCancel?: () => void; fir
         </Scroll>
       </View>
     </If>
+  );
+}
+
+const megabytes = (n: number) =>
+  n < 1 << 20 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / (1 << 20)).toFixed(1)} MB`;
+
+/**
+ * What is kept on the device for reading offline (`lib/articles.ts`): which
+ * articles are fetched ahead, how many are here and the room they take,
+ * and buttons to fetch them now (before a flight) or let them go.
+ */
+function OfflineReading() {
+  const bytes = signal(0);
+  // Measured again as articles come and go.
+  effect(() => {
+    keptCount();
+    if (downloading()) return;
+    untracked(() => void keptBytes().then((n) => bytes.set(n)));
+  });
+
+  const status = () => {
+    const d = downloading();
+    if (d) return `Downloading ${d.done} of ${d.total}…`;
+    const n = keptCount();
+    if (!n) return "No articles on this device yet.";
+    return `${n} article${n === 1 ? "" : "s"} on this device · ${megabytes(bytes())}`;
+  };
+
+  const remove = async () => {
+    const n = keptCount();
+    const { action } = await AlertDialog.show({
+      title: `Remove ${n} article${n === 1 ? "" : "s"} from this device?`,
+      description:
+        keepMode() === "opened"
+          ? "They're downloaded again when you open them."
+          : "They're downloaded again when you open them, and as you chose after the next sync.",
+      actions: [
+        { id: "remove", label: "Remove", role: "destructive" },
+        { id: "cancel", label: "Cancel", role: "cancel" },
+      ],
+    });
+    if (action === "remove") await clearArticles();
+  };
+
+  const button = (label: string, id: string, onPress: () => void, disabled: () => boolean) => (
+    <View
+      role="button"
+      testID={id}
+      accessibilityState={{ disabled: disabled() }}
+      onPress={() => {
+        if (!disabled()) onPress();
+      }}
+      class="rounded-full px-4 py-2 active:opacity-60"
+      style={{ borderWidth: 1, borderColor: look().rule, opacity: disabled() ? 0.5 : 1 }}
+    >
+      <Text style={{ color: look().ink, fontSize: 13.5, fontWeight: "500" }}>{label}</Text>
+    </View>
+  );
+
+  return (
+    <View class="gap-3 pt-2" style={{ borderTopWidth: 1, borderColor: look().ruleSoft }}>
+      <View class="gap-1 pt-3">
+        <Text style={{ color: look().ink, fontSize: 16, fontWeight: "700" }}>Reading offline</Text>
+        <Text style={{ color: look().inkSoft, fontSize: 13, lineHeight: 18 }}>
+          Every article you open is kept here, with its pictures. These are downloaded ahead too:
+        </Text>
+      </View>
+      <View role="radiogroup" class="gap-0.5">
+        <Each of={keepModes}>
+          {(m) => (
+            <View
+              role="radio"
+              testID={`keep-${m().mode}`}
+              accessibilityLabel={m().label}
+              accessibilityState={{ checked: keepMode() === m().mode }}
+              onPress={() => {
+                setKeepMode(m().mode);
+                void prefetchArticles(bookmarks());
+              }}
+              class="flex-row items-center gap-2.5 rounded-lg px-2 py-1.5 active:opacity-60"
+            >
+              <View style={{ width: 14 }}>
+                <If when={keepMode() === m().mode}>
+                  <Icon name="check" size={14} color={look().ink} />
+                </If>
+              </View>
+              <Text style={{ color: look().ink, fontSize: 14.5 }}>{m().label}</Text>
+            </View>
+          )}
+        </Each>
+      </View>
+      <Text testID="offline-status" style={{ color: look().inkFaint, fontSize: 12.5 }}>
+        {status()}
+      </Text>
+      <View class="flex-row flex-wrap gap-2">
+        {button(
+          "Download now",
+          "offline-download",
+          () => void prefetchArticles(bookmarks(), true),
+          () => !!downloading() || offline() || keepMode() === "opened",
+        )}
+        {button(
+          "Remove from this device",
+          "offline-remove",
+          () => void remove(),
+          () => !!downloading() || keptCount() === 0,
+        )}
+      </View>
+    </View>
   );
 }

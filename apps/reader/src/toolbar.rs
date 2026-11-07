@@ -40,6 +40,7 @@ fn emit(event: serde_json::Value) {
 /// "" after a second without one. The app asks again at once; the timeout
 /// lets a JS context that's gone (a hot reload) stop waiting, instead of
 /// holding the queue and taking the next event from the one that's live.
+#[cfg(not(target_arch = "wasm32"))]
 pub async fn next() -> String {
     nsh_core::prelude::blocking(|| {
         let rx = events().1.lock().unwrap_or_else(|e| e.into_inner());
@@ -48,6 +49,13 @@ pub async fn next() -> String {
     })
     .await
     .unwrap_or_default()
+}
+
+/// The web has no toolbar of the app's (`available()` is false, so the app
+/// never asks) and no threads to wait on.
+#[cfg(target_arch = "wasm32")]
+pub async fn next() -> String {
+    String::new()
 }
 
 #[cfg(not(target_os = "macos"))]

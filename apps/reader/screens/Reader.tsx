@@ -45,7 +45,14 @@ import {
   showBookmarkMenu,
 } from "../lib/actions";
 import { type ArticleImage, api, type Bookmark, type Highlight, OfflineError } from "../lib/api";
-import { fetchArticle, type Kept, keepArticle, keptArticle } from "../lib/articles";
+import {
+  fetchArticle,
+  type Kept,
+  keepArticle,
+  keepPictures,
+  keptArticle,
+  withKeptPictures,
+} from "../lib/articles";
 import {
   type DocIndex,
   indexDoc,
@@ -345,16 +352,19 @@ export function Reader(props: {
 
   /** The device's copy at once, then the server's (offline, the copy stays). */
   const load = async () => {
-    const kept = await keptArticle(props.bookmark.id);
-    if (kept?.markdown) show(kept);
+    const id = props.bookmark.id;
+    const kept = await keptArticle(id);
+    if (kept?.markdown) show(await withKeptPictures(id, kept));
     try {
       const fresh = await fetchArticle(props.bookmark.id);
       if (!fresh.markdown) {
         if (!kept?.markdown) status.set(noText(b()));
         return;
       }
-      if (fresh.markdown === shown) place(pendingHighlights(props.bookmark.id, fresh.highlights));
-      else show(fresh);
+      if (fresh.markdown === shown) place(pendingHighlights(id, fresh.highlights));
+      else show(await withKeptPictures(id, fresh));
+      // Its pictures too, for reading it offline (and from the disk next time).
+      void keepPictures(id, fresh);
     } catch (e) {
       if (kept?.markdown) return;
       status.set(
