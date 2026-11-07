@@ -1,4 +1,5 @@
 import {
+  effect,
   Keyboard,
   keyboardFrame,
   pixelRatio,
@@ -7,12 +8,14 @@ import {
   safeArea,
   signal,
   Text,
+  untracked,
   View,
 } from "nsh";
 import { Input } from "nsh/base";
 import type { JSX } from "nsh/jsx-runtime";
 import { SearchField } from "../components/SearchField";
 import {
+  BottomEdge,
   GlassButton,
   GlassTint,
   Icon,
@@ -20,7 +23,7 @@ import {
   RoundGlassButton,
   TopEdge,
 } from "../components/ui";
-import { showSourceMenu } from "../lib/actions";
+import { type MenuEntry, showSourceMenu, systemMenu, systemMenus } from "../lib/actions";
 import { glass, look } from "../lib/look";
 import {
   type CollectionSort,
@@ -88,6 +91,12 @@ export function Home(props: {
 }) {
   const menu = props.menu;
   const naming = signal(false);
+  // iOS: the system's menu (Liquid Glass) from the bar's •••, instead of the
+  // app's panel.
+  effect(() => {
+    if (!systemMenus || !menu()) return;
+    untracked(() => void openSystemMenu(() => naming.set(true)).finally(() => menu.set(false)));
+  });
   const query = signal("");
   const top = () => safeArea().top;
   // The search field rides up with the keyboard.
@@ -478,15 +487,8 @@ export function Home(props: {
       </If>
 
       {/* Search and add, on glass at the bottom, in reach of the thumb. */}
-      {/* The bottom scroll edge: the rows fade out under the glass. */}
-      <View
-        class="absolute right-0 bottom-0 left-0"
-        style={{
-          height: bottom() + 48 + 24,
-          backgroundImage: look().edgeFadeUp,
-          pointerEvents: "none",
-        }}
-      />
+      {/* The bottom scroll edge: the rows blur out under the glass. */}
+      <BottomEdge height={bottom() + 48 + 24} />
       <View
         class="absolute right-0 left-0 flex-row items-center gap-3 px-4"
         style={{ bottom: bottom(), pointerEvents: "box-none" }}
@@ -513,7 +515,7 @@ export function Home(props: {
         />
       </View>
 
-      <If when={menu()}>
+      <If when={menu() && !systemMenus}>
         <HomeMenu
           top={props.systemBar ? top() + BAR + 4 : top() + 6 + BUTTON + 8}
           onClose={() => menu.set(false)}
@@ -530,6 +532,57 @@ export function Home(props: {
   );
 }
 
+const collectionSorts: [CollectionSort, string][] = [
+  ["manual", "Manual"],
+  ["name", "By name"],
+  ["count", "By count"],
+];
+const tagSorts: [TagSort, string][] = [
+  ["count", "By count"],
+  ["name", "By name"],
+];
+const allSections: Section[] = ["collections", "filters", "tags"];
+const allCollapsed = () => allSections.every((s) => isCollapsed(s));
+
+/**
+ * The "…" menu as the system's (iOS): `UIMenu` from the bar's button, the
+ * sorts as submenus with the current one checked and named under them.
+ */
+async function openSystemMenu(onNewCollection: () => void) {
+  const sortEntries = (prefix: string, sorts: [string, string][], now: string): MenuEntry[] =>
+    sorts.map(([v, title]) => ({ id: `${prefix}:${v}`, title, checked: v === now }));
+  const label = (sorts: [string, string][], now: string) => sorts.find(([v]) => v === now)?.[1];
+  const collapsed = allCollapsed();
+  const id = await systemMenu("", [
+    { id: "new", title: "New collection", symbol: "folder.badge.plus" },
+    {
+      id: "collapse",
+      title: collapsed ? "Expand all" : "Collapse all",
+      symbol: collapsed
+        ? "arrow.up.and.down.text.horizontal"
+        : "arrow.down.and.line.horizontal.and.arrow.up",
+    },
+    { separator: true },
+    {
+      title: "Sort collections",
+      subtitle: label(collectionSorts, prefs().collectionSort),
+      symbol: "arrow.up.arrow.down",
+      children: sortEntries("collections", collectionSorts, prefs().collectionSort),
+    },
+    {
+      title: "Sort tags",
+      subtitle: label(tagSorts, prefs().tagSort),
+      symbol: "number",
+      children: sortEntries("tags", tagSorts, prefs().tagSort),
+    },
+  ]);
+  if (id === "new") onNewCollection();
+  else if (id === "collapse") setPrefs({ collapsed: collapsed ? [] : allSections });
+  else if (id?.startsWith("collections:"))
+    setPrefs({ collectionSort: id.slice(12) as CollectionSort });
+  else if (id?.startsWith("tags:")) setPrefs({ tagSort: id.slice(5) as TagSort });
+}
+
 /**
  * The "…" menu: a glass panel growing from its button, as iOS 26's pull-down
  * menus do; a submenu takes its place, with a way back.
@@ -538,9 +591,6 @@ function HomeMenu(props: { top: number; onClose: () => void; onNewCollection: ()
   const page = signal<"root" | "collections" | "tags">("root");
   const shown = signal(false);
   setTimeout(() => shown.set(true), 0);
-  const allCollapsed = () =>
-    (["collections", "filters", "tags"] as Section[]).every((s) => isCollapsed(s));
-
   const item = (
     label: string,
     icon: IconName | null,
@@ -577,16 +627,6 @@ function HomeMenu(props: { top: number; onClose: () => void; onNewCollection: ()
     setPrefs(patch);
     props.onClose();
   };
-  const collectionSorts: [CollectionSort, string][] = [
-    ["manual", "Manual"],
-    ["name", "By name"],
-    ["count", "By count"],
-  ];
-  const tagSorts: [TagSort, string][] = [
-    ["count", "By count"],
-    ["name", "By name"],
-  ];
-
   return (
     <>
       <View
@@ -625,7 +665,7 @@ function HomeMenu(props: { top: number; onClose: () => void; onNewCollection: ()
                     allCollapsed() ? "expand" : "collapse",
                     () =>
                       choose({
-                        collapsed: allCollapsed() ? [] : ["collections", "filters", "tags"],
+                        collapsed: allCollapsed() ? [] : allSections,
                       }),
                     { testID: "menu-collapse" },
                   )}

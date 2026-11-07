@@ -35,8 +35,6 @@ const light = {
   /** The scroll edge under floating bars: the page fading out under the glass. */
   edgeFade:
     "linear-gradient(to bottom, rgb(243 236 224 / 1) 0%, rgb(243 236 224 / 0.97) 62%, rgb(243 236 224 / 0) 100%)",
-  edgeFadeUp:
-    "linear-gradient(to top, rgb(243 236 224 / 1) 0%, rgb(243 236 224 / 0.97) 62%, rgb(243 236 224 / 0) 100%)",
 };
 const dark: typeof light = {
   paper: "#1b1915",
@@ -64,8 +62,6 @@ const dark: typeof light = {
   glassShadow: "0px 1px 1px rgb(0 0 0 / 0.25), 0px 8px 24px rgb(0 0 0 / 0.35)",
   edgeFade:
     "linear-gradient(to bottom, rgb(27 25 21 / 1) 0%, rgb(27 25 21 / 0.97) 62%, rgb(27 25 21 / 0) 100%)",
-  edgeFadeUp:
-    "linear-gradient(to top, rgb(27 25 21 / 1) 0%, rgb(27 25 21 / 0.97) 62%, rgb(27 25 21 / 0) 100%)",
 };
 
 /** Liquid Glass is drawn on iOS and macOS 26 and later; elsewhere the blur stands in. */

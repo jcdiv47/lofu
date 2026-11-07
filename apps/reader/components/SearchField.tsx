@@ -6,8 +6,9 @@ import { GlassTint, Icon } from "./ui";
 
 /**
  * A search field on a capsule of glass, as iOS 26 and macOS 26 draw theirs:
- * the system's own on iOS (`UISearchTextField` on interactive glass), and
- * the app's look-alike elsewhere (see `nativeSearchField`).
+ * the system's own on iOS (`UISearchTextField` on interactive glass, left
+ * untinted as the system's search bars are, so it stays clear over the
+ * page), and the app's look-alike elsewhere (see `nativeSearchField`).
  */
 export function SearchField(props: {
   value: () => string;
@@ -32,7 +33,6 @@ export function SearchField(props: {
         fontSize={big ? 17 : 14}
         tint={look().stamp}
         textColor={look().ink}
-        glassTint={look().glassTint}
         label={props.placeholder}
         autoFocus={props.autoFocus ?? false}
         onChange={(e) => props.onChange(e.value)}

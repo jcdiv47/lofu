@@ -106,7 +106,7 @@ export function destinations(b: Bookmark) {
 }
 
 /** Whether the system's menu can open from a point (`src/lib.rs`): iOS 17.4 on. */
-const systemMenus = (() => {
+export const systemMenus = (() => {
   try {
     return PopupMenu.available();
   } catch {
@@ -117,7 +117,7 @@ const systemMenus = (() => {
 type SheetAction = { id: string; label: string; role?: "destructive" };
 
 /** An item of the system's menu (`PopupMenu.show`); a separator starts a group. */
-type MenuEntry =
+export type MenuEntry =
   | {
       id: string;
       title: string;
@@ -125,15 +125,21 @@ type MenuEntry =
       /** An SF Symbol. */
       symbol?: string;
       destructive?: boolean;
+      /** Drawn with a checkmark. */
+      checked?: boolean;
     }
-  | { title: string; symbol?: string; children: MenuEntry[] }
+  | { title: string; subtitle?: string; symbol?: string; children: MenuEntry[] }
   | { separator: true };
 
 /**
  * The system's menu (iOS), from `at` (the navigation bar's right-hand button
  * without one). Resolves with the chosen item's id, or null.
  */
-async function systemMenu(title: string, items: MenuEntry[], at?: At): Promise<string | null> {
+export async function systemMenu(
+  title: string,
+  items: MenuEntry[],
+  at?: At,
+): Promise<string | null> {
   const id = await PopupMenu.show(title, JSON.stringify(items), at?.x ?? -1, at?.y ?? -1);
   return id || null;
 }

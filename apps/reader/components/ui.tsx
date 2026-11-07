@@ -148,6 +148,27 @@ export function GlassTint(props: { radius?: number }) {
 }
 
 /**
+ * The bottom scroll edge, under controls floating on glass at the foot of a
+ * page: TopEdge's progressive blur, easing off upwards. The rows stay faintly
+ * visible under the glass, which is what lets it read as glass; an opaque
+ * fade leaves it nothing to bend.
+ */
+export function BottomEdge(props: { height: number }) {
+  return (
+    <View
+      class="absolute right-0 bottom-0 left-0"
+      style={{
+        height: props.height,
+        backgroundColor: `${look().paper}99`,
+        backdropFilter: "blur(10px)",
+        maskImage: "linear-gradient(to top, #000 0%, #000 45%, #0000 100%)",
+        pointerEvents: "none",
+      }}
+    />
+  );
+}
+
+/**
  * The scroll edge under a transparent system header (iOS 26's look): the
  * page blurs out under the bar's glass buttons so its title stays legible.
  * Place it last in a page whose `NavPage` has `headerTransparent`.

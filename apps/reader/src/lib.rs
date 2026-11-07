@@ -140,7 +140,7 @@ impl PopupMenu {
     }
 
     /// Shows `items` (JSON: `[{ id, title, subtitle?, symbol?, destructive?,
-    /// checked? } | { title, symbol?, children } | { separator: true }]`)
+    /// checked? } | { title, subtitle?, symbol?, children } | { separator: true }]`)
     /// under `title`, from `x`, `y` (points in the window). A negative `x`
     /// opens it from the navigation bar's right-hand button. Resolves with the chosen item's id, or "" when it
     /// was dismissed.
@@ -339,7 +339,7 @@ mod menu {
             let image = symbol(value);
             if let Some(Value::Array(children)) = value.get("children") {
                 let children = group(children, tx);
-                return msg_send![
+                let menu: Retained<AnyObject> = msg_send![
                     class!(UIMenu),
                     menuWithTitle: &*title,
                     image: image.as_deref(),
@@ -347,6 +347,11 @@ mod menu {
                     options: 0usize,
                     children: &*children
                 ];
+                // What it's set to now ("By name"), under its title.
+                if let Some(subtitle) = text(value, "subtitle") {
+                    let _: () = msg_send![&*menu, setSubtitle: &*subtitle];
+                }
+                return Some(menu);
             }
             let id = value.get("id")?.as_str()?.to_owned();
             let tx = tx.clone();

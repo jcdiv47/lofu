@@ -12,7 +12,7 @@ import {
 import { BookmarkCard, BookmarkRow, CARD_COVER } from "../components/BookmarkCard";
 import { SearchField } from "../components/SearchField";
 import { SwipeRow, swipeable } from "../components/SwipeRow";
-import { RoundGlassButton, TopEdge } from "../components/ui";
+import { BottomEdge, RoundGlassButton, TopEdge } from "../components/ui";
 import { setSearchFocus } from "../lib/actions";
 import { api, type Bookmark, SEARCH_PAGE, type SearchHit } from "../lib/api";
 import { look } from "../lib/look";
@@ -309,14 +309,7 @@ export function Library(props: {
                 )
               }
             </List>
-            <View
-              class="absolute right-0 bottom-0 left-0"
-              style={{
-                height: SEARCH_H + searchBottom() + 24,
-                backgroundImage: look().edgeFadeUp,
-                pointerEvents: "none",
-              }}
-            />
+            <BottomEdge height={SEARCH_H + searchBottom() + 24} />
             {phoneSearch()}
             <If when={platform.os === "ios"}>
               <TopEdge largeTitle />
