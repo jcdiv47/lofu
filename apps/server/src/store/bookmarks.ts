@@ -8,7 +8,7 @@ import {
   type UpdateBookmark,
 } from "@lofu/shared";
 import type { Db } from "../db/index.ts";
-import type { ImageSizes } from "../extract/images.ts";
+import type { ImageProxy, ImageSizes } from "../extract/images.ts";
 import type { Hooks } from "./hooks.ts";
 import { type JobStore, Priority } from "./jobs.ts";
 import { type BookmarkRow, toBookmark } from "./rows.ts";
@@ -80,6 +80,7 @@ export class BookmarkStore {
     private db: Db,
     private jobs: JobStore,
     private hooks: Hooks,
+    private images: ImageProxy,
   ) {}
 
   get(id: string): Bookmark {
@@ -87,7 +88,7 @@ export class BookmarkStore {
       .query<BookmarkRow, [string]>("SELECT * FROM bookmarks WHERE id = ?")
       .get(id);
     if (!row || row.deleted_at !== null) throw new NotFoundError(`bookmark ${id} not found`);
-    return toBookmark(row);
+    return toBookmark(row, this.images);
   }
 
   /** Finds a live bookmark by URL, compared after normalization. */
@@ -98,7 +99,7 @@ export class BookmarkStore {
       )
       .get(normalizeUrl(url));
     if (!row) throw new NotFoundError("no bookmark for this URL");
-    return toBookmark(row);
+    return toBookmark(row, this.images);
   }
 
   /** Bulk fetch preserving the order of `ids`; missing/deleted ids are skipped. */
@@ -113,7 +114,7 @@ export class BookmarkStore {
     const out: Bookmark[] = [];
     for (const id of ids) {
       const r = byId.get(id);
-      if (r) out.push(toBookmark(r));
+      if (r) out.push(toBookmark(r, this.images));
     }
     return out;
   }
@@ -299,7 +300,7 @@ export class BookmarkStore {
     if (hasMore) rows.pop();
     const last = rows.at(-1);
     return {
-      items: rows.map(toBookmark),
+      items: rows.map((r) => toBookmark(r, this.images)),
       nextCursor: hasMore && last ? encodeCursor(last.created_at, last.id) : null,
     };
   }
@@ -312,6 +313,47 @@ export class BookmarkStore {
          WHERE b.deleted_at IS NULL GROUP BY bt.tag ORDER BY count DESC, name`,
       )
       .all();
+  }
+
+  /**
+   * Renames a tag on every bookmark that has it. A bookmark that already has
+   * `to` keeps one copy (the tags merge). Returns the number of bookmarks changed.
+   */
+  renameTag(from: string, to: string): number {
+    if (from === to) return 0;
+    return this.rewriteTag(from, (tags) => dedupeTags(tags.map((t) => (t === from ? to : t))));
+  }
+
+  /** Removes a tag from every bookmark. Returns the number of bookmarks changed. */
+  deleteTag(tag: string): number {
+    return this.rewriteTag(tag, (tags) => tags.filter((t) => t !== tag));
+  }
+
+  /**
+   * Rewrites the tags of every live bookmark that has `tag`, in one
+   * transaction. Like any update, each one gets a new `seq` (sync and the
+   * search index see the change) and `updated_at`.
+   */
+  private rewriteTag(tag: string, edit: (tags: string[]) => string[]): number {
+    const changed = this.db.transaction(() => {
+      const rows = this.db
+        .query<{ id: string; tags: string }, [string]>(
+          `SELECT b.id, b.tags FROM bookmark_tags bt JOIN bookmarks b ON b.id = bt.bookmark_id
+           WHERE bt.tag = ? AND b.deleted_at IS NULL ORDER BY b.seq`,
+        )
+        .all(tag);
+      const now = Date.now();
+      const update = this.db.query(
+        "UPDATE bookmarks SET tags = ?, updated_at = ?, seq = ? WHERE id = ?",
+      );
+      for (const r of rows) {
+        const tags = edit(JSON.parse(r.tags) as string[]);
+        update.run(JSON.stringify(tags), now, this.db.nextSeq(), r.id);
+      }
+      return rows.length;
+    })();
+    if (changed > 0) this.hooks.changed();
+    return changed;
   }
 
   /** Raw zstd-compressed content column, or null if not extracted. */

@@ -1,4 +1,5 @@
 import type { Db } from "../db/index.ts";
+import type { ImageProxy } from "../extract/images.ts";
 import {
   type BookmarkRow,
   type CollectionRow,
@@ -12,7 +13,7 @@ import {
  * Delta feed over the global seq. Returns at most `limit` changed rows across
  * all tables, cut at a seq boundary so a page never splits a seq.
  */
-export function syncSince(db: Db, since: number, limit: number) {
+export function syncSince(db: Db, images: ImageProxy, since: number, limit: number) {
   const cutoffRow = db
     .query<{ seq: number }, [number, number]>(
       `SELECT seq FROM (
@@ -59,7 +60,7 @@ export function syncSince(db: Db, since: number, limit: number) {
   return {
     cursor: maxSeen,
     hasMore,
-    bookmarks: bookmarks.map(toBookmark),
+    bookmarks: bookmarks.map((r) => toBookmark(r, images)),
     collections: collections.map(toCollection),
     highlights: highlights.map(toHighlight),
   };

@@ -15,13 +15,15 @@ Exit codes: `0` ok · `2` usage · `3` not found · `4` unauthorized · `5` serv
 lofu search sourdough hydration          # full text: title, tags, note, highlights, page content
 lofu search rust async -t rust --sort newest -n 5
 lofu search 副作用                        # CJK works
-lofu ls -t essays --archived false -n 20 # newest first; pass the returned nextCursor via --cursor
+lofu ls -t essays --trashed false -n 20  # newest first, Trash left out; pass the returned nextCursor via --cursor
 lofu ls --all -c unsorted                # follow every page
 lofu tags                                # all tags with counts
 lofu collections ls
 ```
 
 Search hits are `{bookmark, snippet}`. In `snippet`, the matched terms are wrapped in `<mark>`.
+
+`ls` and `search` include the Trash unless you pass `--trashed false`. In the JSON, a bookmark in the Trash has `"archived": true` (the API's name for it); the user's apps call it the Trash, so say "Trash" to the user, not "archive".
 
 ## Reading
 
@@ -39,9 +41,10 @@ lofu highlights <id>
 ```sh
 lofu add <url> -t tag1,tag2 --note "why it matters"   # idempotent; re-adding merges tags
 lofu add <url> --html page.html                       # use HTML you already have (e.g. behind a login)
-lofu update <id> --add-tag later --remove-tag inbox --archived true
+lofu update <id> --add-tag later --remove-tag inbox
+lofu update <id> --trashed true  # move to the Trash (false restores it)
 lofu update <id> --tags a,b      # replace all tags;  --collection none  → unsorted
-lofu rm <id> [<id>...]
+lofu rm <id> [<id>...]           # deletes for good; prefer --trashed true unless the user asked to delete
 lofu collections add "Reading list" [--parent <id>]
 ```
 

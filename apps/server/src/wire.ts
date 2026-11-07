@@ -33,8 +33,9 @@ export function wire(config: Config) {
     jobEnqueued: () => runner?.kick(),
   };
 
+  const images = ImageProxy.fromDb(db);
   const jobs = new JobStore(db, hooks);
-  const bookmarks = new BookmarkStore(db, jobs, hooks);
+  const bookmarks = new BookmarkStore(db, jobs, hooks, images);
   const collections = new CollectionStore(db, hooks);
   const highlights = new HighlightStore(db, bookmarks, hooks);
   const tokens = new TokenStore(db);
@@ -101,7 +102,7 @@ export function wire(config: Config) {
     collections,
     highlights,
     tokens,
-    images: ImageProxy.fromDb(db),
+    images,
     searcher,
     meiliHealthy: () => meili?.health() ?? Promise.resolve(false),
   };

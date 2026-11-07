@@ -37,6 +37,7 @@ describe("bookmarks", () => {
     expect(b.data.type).toBe("article");
     expect(b.data.author).toBe("Ada Baker");
     expect(b.data.coverUrl).toBe("https://example.com/cover.jpg");
+    expect(b.data.coverProxy).toBe(sys.ctx.images.path("https://example.com/cover.jpg"));
     expect(b.data.content).toContain("zymurgy");
     expect(b.data.content).not.toContain("Privacy");
   });
@@ -188,6 +189,31 @@ describe("bookmarks", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
+  test("every bookmark carries its cover's proxy path", async () => {
+    const proxy = sys.ctx.images.path("https://example.com/cover.jpg");
+    expect(proxy).toMatch(/^\/img\/[\w-]{22}\?u=https%3A%2F%2Fexample\.com%2Fcover\.jpg$/);
+    const listed = (await api("GET", "/v1/bookmarks?limit=500")).data.items;
+    expect(listed.find((b: any) => b.id === id).coverProxy).toBe(proxy);
+    const synced = (await api("GET", "/v1/sync?since=0&limit=5000")).data.bookmarks;
+    expect(synced.find((b: any) => b.id === id).coverProxy).toBe(proxy);
+    expect((await api("POST", "/v1/bookmarks", { url: `${base}/article` })).data.coverProxy).toBe(
+      proxy,
+    );
+
+    // Old rows may hold a cover relative to the page; it's resolved against the page URL.
+    const page = (await api("POST", "/v1/bookmarks", { url: `${base}/covers/post` })).data;
+    expect(page.coverProxy).toBeNull();
+    const rel = await api("PATCH", `/v1/bookmarks/${page.id}`, { coverUrl: "../img/c.png" });
+    expect(rel.data.coverUrl).toBe("../img/c.png");
+    expect(rel.data.coverProxy).toBe(sys.ctx.images.path(`${base}/img/c.png`));
+    const pr = await api("PATCH", `/v1/bookmarks/${page.id}`, { coverUrl: "//cdn.test/c.png" });
+    expect(pr.data.coverProxy).toBe(sys.ctx.images.path("http://cdn.test/c.png"));
+    for (const coverUrl of ["data:image/png;base64,iVBOR", null]) {
+      const r = await api("PATCH", `/v1/bookmarks/${page.id}`, { coverUrl });
+      expect(r.data.coverProxy).toBeNull();
+    }
+  });
+
   test("validation errors are 400", async () => {
     expect((await api("POST", "/v1/bookmarks", { url: "javascript:alert(1)" })).status).toBe(400);
     expect(
@@ -214,6 +240,7 @@ describe.if(withSearch)("search", () => {
     const r = await api("GET", "/v1/search?q=zymurgy");
     expect(r.status).toBe(200);
     expect(r.data.hits[0].bookmark.title).toBe("Sourdough Science");
+    expect(r.data.hits[0].bookmark.coverProxy).toStartWith("/img/");
     expect(r.data.hits[0].snippet).toContain("<mark>");
     const byHighlight = await api("GET", "/v1/search?q=key%20idea");
     expect(byHighlight.data.hits.length).toBeGreaterThan(0);
@@ -222,16 +249,107 @@ describe.if(withSearch)("search", () => {
   });
 });
 
+describe("tags", () => {
+  const tagsOf = async (ids: string[]) =>
+    Promise.all(ids.map(async (id) => (await api("GET", `/v1/bookmarks/${id}`)).data.tags));
+  const counts = async () =>
+    Object.fromEntries(
+      (await api("GET", "/v1/tags")).data.map((t: any) => [t.name, t.count]),
+    ) as Record<string, number>;
+  let ids: string[];
+
+  test("rename merges into an existing tag without duplicates, and bumps seq", async () => {
+    ids = await Promise.all(
+      [["Old-Name", "keep"], ["old-name", "new-name"], ["new-name"]].map(
+        async (tags, i) =>
+          (await api("POST", "/v1/bookmarks", { url: `${base}/tags/${i}`, tags })).data.id,
+      ),
+    );
+    await sys.runner.idle();
+    const cursor = (await api("GET", "/v1/sync?since=0&limit=5000")).data.cursor;
+
+    // Tag names are normalized like everywhere else: trimmed and lowercased.
+    const r = await api("POST", "/v1/tags/rename", { from: " OLD-NAME ", to: "New-Name" });
+    expect([r.status, r.data]).toEqual([200, { updated: 2 }]);
+    expect(await tagsOf(ids)).toEqual([["new-name", "keep"], ["new-name"], ["new-name"]]);
+    const c = await counts();
+    expect([c["old-name"], c["new-name"], c.keep]).toEqual([undefined, 3, 1]);
+
+    const delta = (await api("GET", `/v1/sync?since=${cursor}`)).data.bookmarks;
+    expect(delta.map((b: any) => b.id).sort()).toEqual([ids[0], ids[1]].sort());
+    expect(delta.every((b: any) => b.seq > cursor)).toBe(true);
+
+    expect((await api("POST", "/v1/tags/rename", { from: "absent", to: "x" })).data).toEqual({
+      updated: 0,
+    });
+    expect((await api("POST", "/v1/tags/rename", { from: "keep", to: "KEEP" })).data).toEqual({
+      updated: 0,
+    });
+    expect((await api("POST", "/v1/tags/rename", { from: "keep", to: " " })).status).toBe(400);
+    expect((await api("POST", "/v1/tags/rename", { from: "keep" })).status).toBe(400);
+  });
+
+  test("the search index follows a rename", async () => {
+    if (!withSearch) return;
+    await sys.indexer!.flush();
+    const hits = (await api("GET", "/v1/search?q=&tags=new-name&snippets=false")).data.hits;
+    expect(hits.map((h: any) => h.bookmark.id).sort()).toEqual([...ids].sort());
+    expect((await api("GET", "/v1/search?q=&tags=old-name")).data.hits).toHaveLength(0);
+  });
+
+  test("delete removes a tag from every bookmark", async () => {
+    await api("PATCH", `/v1/bookmarks/${ids[2]}`, { tags: ["new-name", "c++/rust"] });
+    const cursor = (await api("GET", "/v1/sync?since=0&limit=5000")).data.cursor;
+    const r = await api("DELETE", "/v1/tags/New-Name");
+    expect([r.status, r.data]).toEqual([200, { updated: 3 }]);
+    expect(await tagsOf(ids)).toEqual([["keep"], [], ["c++/rust"]]);
+    const delta = (await api("GET", `/v1/sync?since=${cursor}`)).data.bookmarks;
+    expect(delta).toHaveLength(3);
+
+    // Any tag name, URL-encoded.
+    const odd = await api("DELETE", `/v1/tags/${encodeURIComponent("c++/rust")}`);
+    expect(odd.data).toEqual({ updated: 1 });
+    expect((await api("DELETE", "/v1/tags/absent")).data).toEqual({ updated: 0 });
+    expect((await counts())["c++/rust"]).toBeUndefined();
+  });
+
+  test("are in the OpenAPI document", async () => {
+    const doc = (await (await app.request("/openapi.json")).json()) as any;
+    expect(doc.paths["/v1/tags/rename"].post).toBeDefined();
+    expect(doc.paths["/v1/tags/{name}"].delete).toBeDefined();
+    const bookmark = doc.components.schemas.Bookmark.properties;
+    expect(bookmark.archived.description).toContain("Trash");
+    expect(bookmark.coverProxy).toBeDefined();
+  });
+});
+
 describe("sync and deletes", () => {
-  test("collections delete moves bookmarks to unsorted", async () => {
+  test("collections can be renamed and reordered", async () => {
+    const col = await api("POST", "/v1/collections", { name: "Drafts", sort: 1 });
+    const r = await api("PATCH", `/v1/collections/${col.data.id}`, { name: "Ideas", sort: 2.5 });
+    expect([r.status, r.data.name, r.data.sort]).toEqual([200, "Ideas", 2.5]);
+    expect(r.data.seq).toBeGreaterThan(col.data.seq);
+  });
+
+  test("collections delete moves bookmarks to unsorted and leaves a tombstone", async () => {
     const col = await api("POST", "/v1/collections", { name: "Read later" });
     const b = await api("POST", "/v1/bookmarks", {
       url: `${base}/article-2`,
       collectionId: col.data.id,
     });
     expect(b.data.collectionId).toBe(col.data.id);
+    await sys.runner.idle();
+    const cursor = (await api("GET", "/v1/sync?since=0&limit=5000")).data.cursor;
     expect((await api("DELETE", `/v1/collections/${col.data.id}`)).status).toBe(204);
     expect((await api("GET", `/v1/bookmarks/${b.data.id}`)).data.collectionId).toBeNull();
+    expect((await api("GET", "/v1/collections")).data.map((c: any) => c.id)).not.toContain(
+      col.data.id,
+    );
+    const delta = (await api("GET", `/v1/sync?since=${cursor}`)).data;
+    expect(delta.bookmarks.map((x: any) => [x.id, x.collectionId])).toEqual([[b.data.id, null]]);
+    expect(delta.collections.map((x: any) => [x.id, Boolean(x.deletedAt)])).toEqual([
+      [col.data.id, true],
+    ]);
   });
 
   test("delta sync returns changes after a cursor, including tombstones", async () => {

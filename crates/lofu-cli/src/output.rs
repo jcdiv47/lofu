@@ -93,8 +93,9 @@ impl Out {
         if b["favorite"].as_bool() == Some(true) {
             meta.push("★".into());
         }
+        // `archived` is the Trash.
         if b["archived"].as_bool() == Some(true) {
-            meta.push("archived".into());
+            meta.push("trash".into());
         }
         match s(&b["contentStatus"]) {
             "ok" | "" => {}

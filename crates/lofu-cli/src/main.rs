@@ -69,7 +69,7 @@ enum Cmd {
     },
     /// Update fields of a bookmark
     Update(UpdateArgs),
-    /// Delete bookmarks
+    /// Delete bookmarks for good (to move them to the Trash: `update --trashed true`)
     Rm {
         #[arg(required = true)]
         ids: Vec<String>,
@@ -115,8 +115,9 @@ struct AddArgs {
     collection: Option<String>,
     #[arg(long)]
     favorite: bool,
-    #[arg(long)]
-    archived: bool,
+    /// Save it straight into the Trash
+    #[arg(long, alias = "archived")]
+    trashed: bool,
     /// Use this HTML instead of fetching the page ("-" reads stdin)
     #[arg(long, value_name = "PATH")]
     html: Option<String>,
@@ -144,8 +145,9 @@ struct UpdateArgs {
     collection: Option<String>,
     #[arg(long)]
     favorite: Option<bool>,
-    #[arg(long)]
-    archived: Option<bool>,
+    /// Move to the Trash (true) or restore from it (false)
+    #[arg(long, alias = "archived", value_name = "BOOL")]
+    trashed: Option<bool>,
     /// Reading progress 0..1
     #[arg(long)]
     progress: Option<f64>,
@@ -159,8 +161,9 @@ struct Filters {
     /// Require tag (repeatable or comma-separated; all must match)
     #[arg(short, long = "tag", value_delimiter = ',')]
     tags: Vec<String>,
-    #[arg(long)]
-    archived: Option<bool>,
+    /// Only bookmarks in the Trash (true), or none of them (false)
+    #[arg(long, alias = "archived", value_name = "BOOL")]
+    trashed: Option<bool>,
     #[arg(long)]
     favorite: Option<bool>,
     #[arg(long = "type", value_enum)]
@@ -259,8 +262,9 @@ fn filter_query(f: &Filters) -> Vec<(&'static str, String)> {
     if !f.tags.is_empty() {
         q.push(("tags", f.tags.join(",")));
     }
-    if let Some(a) = f.archived {
-        q.push(("archived", a.to_string()));
+    // The API calls the Trash `archived`.
+    if let Some(t) = f.trashed {
+        q.push(("archived", t.to_string()));
     }
     if let Some(v) = f.favorite {
         q.push(("favorite", v.to_string()));
@@ -315,7 +319,7 @@ fn run(cli: Cli, out: &Out) -> Result<(), Error> {
             if a.favorite {
                 body.insert("favorite".into(), json!(true));
             }
-            if a.archived {
+            if a.trashed {
                 body.insert("archived".into(), json!(true));
             }
             if let Some(path) = a.html {
@@ -367,8 +371,8 @@ fn run(cli: Cli, out: &Out) -> Result<(), Error> {
             if let Some(f) = u.favorite {
                 body.insert("favorite".into(), json!(f));
             }
-            if let Some(a) = u.archived {
-                body.insert("archived".into(), json!(a));
+            if let Some(t) = u.trashed {
+                body.insert("archived".into(), json!(t));
             }
             if let Some(p) = u.progress {
                 body.insert("readProgress".into(), json!(p));

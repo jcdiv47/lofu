@@ -1,4 +1,5 @@
 import type { Bookmark, BookmarkType, Collection, ContentStatus, Highlight } from "@lofu/shared";
+import type { ImageProxy } from "../extract/images.ts";
 
 export interface BookmarkRow {
   id: string;
@@ -58,7 +59,8 @@ export interface HighlightRow {
 const iso = (ms: number) => new Date(ms).toISOString();
 const isoOrNull = (ms: number | null) => (ms === null ? null : iso(ms));
 
-export function toBookmark(r: BookmarkRow): Bookmark {
+/** `images` signs the cover's proxy path (`coverProxy` is computed, not stored). */
+export function toBookmark(r: BookmarkRow, images: ImageProxy): Bookmark {
   return {
     id: r.id,
     url: r.url,
@@ -66,6 +68,7 @@ export function toBookmark(r: BookmarkRow): Bookmark {
     excerpt: r.excerpt,
     note: r.note,
     coverUrl: r.cover_url,
+    coverProxy: images.coverPath(r.cover_url, r.url),
     faviconUrl: r.favicon_url,
     domain: r.domain,
     type: r.type as BookmarkType,
