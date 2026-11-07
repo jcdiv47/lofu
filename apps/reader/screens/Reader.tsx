@@ -1,5 +1,17 @@
-import { effect, platform, safeArea, signal, Text, untracked, View } from "nsh";
 import {
+  cleanup,
+  effect,
+  platform,
+  safeArea,
+  signal,
+  Text,
+  untracked,
+  View,
+  type ViewRef,
+} from "nsh";
+import {
+  AlertDialog,
+  chain,
   createRichEditor,
   RichEditor,
   RichEditorPlugin,
@@ -8,6 +20,8 @@ import {
   type RichEditorSession,
   type RichNodeJSON,
   StarterKit,
+  scrollIntoView,
+  setTextSelection,
   TableKit,
 } from "nsh/base";
 import { findQuote, quoteAt } from "../../../packages/shared/src/anchor";
@@ -23,17 +37,37 @@ import {
 import {
   canShare,
   deleteBookmark,
+  editBookmark,
   nativeMenus,
+  notice,
   openOriginal,
   shareBookmark,
   showBookmarkMenu,
 } from "../lib/actions";
-import { type ArticleImage, api, type Bookmark, type Highlight } from "../lib/api";
-import { type DocIndex, indexDoc, toDocRange, toTextRange } from "../lib/docIndex";
+import { type ArticleImage, api, type Bookmark, type Highlight, OfflineError } from "../lib/api";
+import { fetchArticle, type Kept, keepArticle, keptArticle } from "../lib/articles";
+import {
+  type DocIndex,
+  indexDoc,
+  nodeSize,
+  toDocRange,
+  toTextRange,
+  withoutRange,
+} from "../lib/docIndex";
 import { isFootnoteNumber, numberFootnotes, raiseFootnotes } from "../lib/footnotes";
 import { readingTime } from "../lib/format";
 import { fonts, glass, look } from "../lib/look";
-import { bookmark as current, inTrash, setHighlightCount, updateBookmark } from "../lib/store";
+import {
+  bookmark as current,
+  removeHighlight as dropHighlight,
+  inTrash,
+  pendingHighlights,
+  addHighlight as saveHighlight,
+  setHighlightCount,
+  setReadProgress,
+  sync,
+  updateBookmark,
+} from "../lib/store";
 
 /**
  * Raw HTML embeds (iframes, scripts) can't be shown by the editor and would
@@ -111,6 +145,39 @@ export function compactCells(doc: RichNodeJSON): RichNodeJSON {
   return walk(doc, false);
 }
 
+/**
+ * The bookmark's note as a block under the article's title: a blockquote of
+ * paragraphs marked `textAlign: "justify"` (styled apart, as table cells
+ * are). Returns the document and the note's range, which the text index
+ * leaves out.
+ */
+export function withNote(
+  doc: RichNodeJSON,
+  note: string | null,
+): { doc: RichNodeJSON; note: { from: number; to: number } | null } {
+  const text = note?.trim();
+  if (!text) return { doc, note: null };
+  const content = doc.content ?? [];
+  const first = content[0];
+  const at = first?.type === "heading" ? 1 : 0;
+  const paragraphs = text.split(/\n\s*\n/).map((para) => ({
+    type: "paragraph",
+    attrs: { textAlign: "justify" },
+    content: para
+      .split("\n")
+      .flatMap((line, k) => [
+        ...(k ? [{ type: "hardBreak" }] : []),
+        ...(line ? [{ type: "text", text: line }] : []),
+      ]),
+  }));
+  const block: RichNodeJSON = { type: "blockquote", content: paragraphs as RichNodeJSON[] };
+  const from = content.slice(0, at).reduce((n, c) => n + nodeSize(c), 0);
+  return {
+    doc: { ...doc, content: [...content.slice(0, at), block, ...content.slice(at)] },
+    note: { from, to: from + nodeSize(block) },
+  };
+}
+
 /** The widest the text gets, for a comfortable line length. */
 const MEASURE = 680;
 /** The desktop's toolbar, floating over the article. */
@@ -140,9 +207,39 @@ export function Reader(props: {
   const width = signal(0);
   const editor = signal<RichEditorSession | null>(null);
   const status = signal("Loading…");
+  /** Why there's no text to show. */
+  const noText = (bm: Bookmark) =>
+    bm.contentStatus === "pending"
+      ? "lofu is still fetching this page."
+      : bm.contentStatus === "failed"
+        ? `lofu couldn't read this page${bm.contentError ? `: ${bm.contentError}` : "."}`
+        : "This page has no saved text.";
+  const retrying = signal(false);
+  /** Asks the server to read the page again, and shows it once it has. */
+  const retry = async () => {
+    retrying.set(true);
+    status.set("Reading the page again…");
+    try {
+      await api.refetch(props.bookmark.id);
+      for (let i = 0; i < 15; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        await sync();
+        if (b().contentStatus !== "pending") break;
+      }
+      if (b().contentStatus === "ok") await load();
+      else status.set(noText(b()));
+    } catch (e) {
+      status.set((e as Error).message);
+    } finally {
+      retrying.set(false);
+    }
+  };
   const selection = signal<RichEditorSelection | null>(null);
   const placed = signal<Placed[]>([]);
-  const orphans = signal(0);
+  /** Highlights whose text isn't in the article as saved now. */
+  const orphans = signal<Highlight[]>([]);
+  /** Every highlight of the bookmark, placed or not. */
+  const all = () => [...placed().map((p) => p.highlight), ...orphans()];
   const plugin = new RichEditorPlugin("highlights");
   let view: RichEditorRef | null = null;
   let index: DocIndex = { text: "", pos: [] };
@@ -173,77 +270,176 @@ export function Reader(props: {
 
   const place = (highlights: Highlight[]) => {
     const out: Placed[] = [];
-    let missing = 0;
+    const missing: Highlight[] = [];
     for (const h of highlights) {
       const hit = findQuote(index.text, h);
       if (!hit) {
-        missing++;
+        missing.push(h);
         continue;
       }
       const range = toDocRange(index, hit.start, hit.end);
       // Dev check that the text index and the editor agree on positions.
       // (Skipped with footnotes: their numbers are shown but not quoted.)
-      const shown = hasFootnotes ? undefined : editor()?.textBetween(range.from, range.to, " ");
+      const drawn = hasFootnotes ? undefined : editor()?.textBetween(range.from, range.to, " ");
       const norm = (t: string) => t.replace(/\s+/g, " ").trim();
-      if (shown !== undefined && norm(shown) !== norm(h.quote)) {
+      if (drawn !== undefined && norm(drawn) !== norm(h.quote)) {
         console.warn(
-          `highlight misplaced: wanted "${h.quote}", got "${shown}" at ${range.from}..${range.to}`,
+          `highlight misplaced: wanted "${h.quote}", got "${drawn}" at ${range.from}..${range.to}`,
         );
       }
       out.push({ highlight: h, ...range });
     }
     placed.set(out);
     orphans.set(missing);
+    // All of them: one the text has lost is still the bookmark's.
     setHighlightCount(
       props.bookmark.id,
-      out.map((p) => p.highlight.id),
+      highlights.map((h) => h.id),
     );
     decorate();
   };
 
-  (async () => {
+  /** The article as shown: compared with the server's when that comes. */
+  let shown: string | null = null;
+  /** What `show` last laid out, and the note it put above the text. */
+  let last: Kept | null = null;
+  let shownNote: string | null = null;
+
+  /** Shows an article (laid out from its Markdown), its highlights placed. */
+  const show = (a: Kept) => {
+    const markdown = a.markdown ?? "";
+    const content = numberFootnotes(withTitle(readable(markdown), props.bookmark.title));
+    const ed = createRichEditor({
+      content,
+      format: "markdown",
+      editable: false,
+      extensions: [StarterKit, TableKit.configure({ table: { resizable: false } })],
+      plugins: [plugin],
+    });
+    hasFootnotes = content.includes("\uE000");
+    last = a;
+    shownNote = b().note;
+    const noted = withNote(ed.getJSON(), shownNote);
+    if (a.images.length > 0 || hasFootnotes || content.includes("|") || noted.note) {
+      const doc = compactCells(raiseFootnotes(noted.doc));
+      if (a.images.length > 0) {
+        sized = { doc, images: a.images, width: textWidth() };
+        ed.setContent(placeImages(doc, a.images, sized.width), "json");
+      } else {
+        ed.setContent(doc, "json");
+      }
+    }
+    index = indexDoc(ed.getJSON(), isFootnoteNumber);
+    if (noted.note) index = withoutRange(index, noted.note.from, noted.note.to);
+    shown = markdown;
+    editor.set(ed);
+    status.set("");
+    place(pendingHighlights(props.bookmark.id, a.highlights));
+    restoreProgress();
+  };
+
+  /** The device's copy at once, then the server's (offline, the copy stays). */
+  const load = async () => {
+    const kept = await keptArticle(props.bookmark.id);
+    if (kept?.markdown) show(kept);
     try {
-      const [{ markdown, images }, highlights] = await Promise.all([
-        api.article(props.bookmark.id),
-        api.highlights(props.bookmark.id),
-      ]);
-      if (!markdown) {
-        const b = props.bookmark;
-        status.set(
-          b.contentStatus === "pending"
-            ? "lofu is still fetching this page."
-            : b.contentStatus === "failed"
-              ? `lofu couldn't read this page${b.contentError ? `: ${b.contentError}` : "."}`
-              : "This page has no saved text.",
-        );
+      const fresh = await fetchArticle(props.bookmark.id);
+      if (!fresh.markdown) {
+        if (!kept?.markdown) status.set(noText(b()));
         return;
       }
-      const content = numberFootnotes(withTitle(readable(markdown), props.bookmark.title));
-      const ed = createRichEditor({
-        content,
-        format: "markdown",
-        editable: false,
-        extensions: [StarterKit, TableKit.configure({ table: { resizable: false } })],
-        plugins: [plugin],
-      });
-      hasFootnotes = content.includes("\uE000");
-      if (images.length > 0 || hasFootnotes || content.includes("|")) {
-        const doc = compactCells(raiseFootnotes(ed.getJSON()));
-        if (images.length > 0) {
-          sized = { doc, images, width: textWidth() };
-          ed.setContent(placeImages(doc, images, sized.width), "json");
-        } else {
-          ed.setContent(doc, "json");
-        }
-      }
-      index = indexDoc(ed.getJSON(), isFootnoteNumber);
-      editor.set(ed);
-      status.set("");
-      place(highlights);
+      if (fresh.markdown === shown) place(pendingHighlights(props.bookmark.id, fresh.highlights));
+      else show(fresh);
     } catch (e) {
-      status.set((e as Error).message);
+      if (kept?.markdown) return;
+      status.set(
+        e instanceof OfflineError
+          ? "You're offline, and this article isn't on this device yet."
+          : (e as Error).message,
+      );
     }
-  })();
+  };
+  void load();
+
+  // The note was edited: lay the article out again with it.
+  effect(() => {
+    const note = b().note;
+    if (note === shownNote || !last) return;
+    untracked(() => last && show(last));
+  });
+
+  /** Keeps the device's copy in step with the highlights shown. */
+  const keepHighlights = () => {
+    if (shown === null) return;
+    void keptArticle(props.bookmark.id).then((k) => {
+      if (k) void keepArticle(props.bookmark.id, { ...k, highlights: all() });
+    });
+  };
+
+  // ---- Reading progress -------------------------------------------------
+  // The editor reports no scrolling, so every few seconds the reader asks
+  // which text is at the top of the view (once the pointer or a finger has
+  // been over the text, which is when the editor knows where it is on the
+  // page). Progress is that place's share of the text; reaching the end is 1.
+  let host: ViewRef | null = null;
+  let restoring = false;
+  /** Where the view starts under the bars over it. */
+  const chromeTop = () =>
+    props.wide ? TOOLBAR + 8 : platform.os === "ios" ? safeArea().top + 54 : 0;
+
+  const textOffset = (pos: number) => toTextRange(index, pos, pos).start;
+
+  const measureProgress = async (): Promise<number | null> => {
+    const ed = untracked(editor);
+    const m = await host?.measure();
+    if (!ed || !m || !index.text.length) return null;
+    const x = m.pagePosition.x + sidePad() + 4;
+    const top = ed.posAtPageCoords({ x, y: m.pagePosition.y + chromeTop() + 16 });
+    const bottom = ed.posAtPageCoords({
+      x,
+      y: m.pagePosition.y + m.bounds.size.height - 24,
+    });
+    if (top == null) return null;
+    const len = index.text.length;
+    if (bottom != null && textOffset(bottom) >= len - 1) return 1;
+    return Math.min(1, textOffset(top) / len);
+  };
+
+  const saveProgress = async () => {
+    if (restoring) return;
+    const p = await measureProgress().catch(() => null);
+    if (p != null) setReadProgress(props.bookmark.id, Math.round(p * 1000) / 1000);
+  };
+  const progressTimer = setInterval(() => void saveProgress(), 4000);
+  cleanup(() => {
+    clearInterval(progressTimer);
+    void saveProgress();
+  });
+
+  /** Back where the reader left off: to the end, then up to the place, so it
+   * lands at the top of the view (scrolling into view moves the least). */
+  let restored = false;
+  const restoreProgress = () => {
+    const p = b().readProgress;
+    if (restored || !(p > 0.02 && p < 0.98) || !index.text.length) return;
+    restored = true;
+    restoring = true;
+    setTimeout(() => {
+      const ed = untracked(editor);
+      const end = index.pos[index.pos.length - 1];
+      const at = index.pos[Math.min(index.pos.length - 1, Math.floor(p * index.text.length))];
+      if (ed && end != null && at != null) {
+        ed.run(chain([setTextSelection(end), scrollIntoView()]));
+        setTimeout(() => {
+          ed.run(chain([setTextSelection(at), scrollIntoView()]));
+          setTimeout(() => {
+            restoring = false;
+            selection.set(null);
+          }, 300);
+        }, 60);
+      } else restoring = false;
+    }, 250);
+  };
 
   const underCaret = () => {
     const s = selection();
@@ -260,24 +456,46 @@ export function Reader(props: {
     if (!quote.quote) return;
     view?.setSelection(s.to, s.to); // collapse it: the bubble menu closes
     try {
-      const h = await api.addHighlight(props.bookmark.id, quote);
-      place([...placed().map((p) => p.highlight), h]);
+      const h = await saveHighlight(props.bookmark.id, quote);
+      place([...all(), h]);
+      keepHighlights();
     } catch (e) {
-      status.set((e as Error).message);
+      void notice("Couldn't highlight", (e as Error).message);
     }
   };
 
-  const removeHighlight = async (p: Placed) => {
+  const removeHighlights = async (gone: Highlight[]) => {
     try {
-      await api.removeHighlight(p.highlight.id);
-      place(
-        placed()
-          .filter((x) => x !== p)
-          .map((x) => x.highlight),
-      );
+      for (const h of gone) await dropHighlight(h);
+      place(all().filter((h) => !gone.includes(h)));
+      keepHighlights();
     } catch (e) {
-      status.set((e as Error).message);
+      void notice("Couldn't remove it", (e as Error).message);
     }
+  };
+  const removeHighlight = (p: Placed) => removeHighlights([p.highlight]);
+
+  /** Highlights the text has lost (the page changed, or the extraction did):
+   * shown as quotes, to keep or remove. */
+  const showOrphans = async () => {
+    const lost = orphans();
+    if (!lost.length) return;
+    const { action } = await AlertDialog.show({
+      title:
+        lost.length === 1
+          ? "A highlight isn't in this text"
+          : `${lost.length} highlights aren't in this text`,
+      description: `${lost.map((h) => `“${h.quote.trim()}”`).join("\n\n")}\n\nThe saved page doesn't have these words any more, so they can't be shown in place.`,
+      actions: [
+        {
+          id: "remove",
+          label: lost.length === 1 ? "Remove it" : "Remove them",
+          role: "destructive",
+        },
+        { id: "keep", label: "Keep", role: "cancel" },
+      ],
+    });
+    if (action === "remove") await removeHighlights(lost);
   };
 
   const menuButton = (label: string, onPress: () => void) => (
@@ -314,7 +532,7 @@ export function Reader(props: {
       .join(" · ");
   const highlights = () =>
     (placed().length ? `${placed().length} highlight${placed().length === 1 ? "" : "s"}` : "") +
-    (orphans() ? ` · ${orphans()} not found` : "");
+    (orphans().length ? ` · ${orphans().length} not found` : "");
 
   // A narrower window or a rotated phone resizes the images (the text keeps its
   // positions, so highlights only need drawing again). Settles first: a window
@@ -334,6 +552,9 @@ export function Reader(props: {
   return (
     <View
       class="flex-1"
+      ref={(r) => {
+        host = r;
+      }}
       style={{ backgroundColor: look().paper }}
       onLayout={(e) => width.set(e.bounds.size.width)}
     >
@@ -347,9 +568,23 @@ export function Reader(props: {
             >
               {status()}
             </Text>
-            <If when={props.bookmark.contentStatus !== "ok"}>
-              <GlassButton label="Open original" prominent onPress={() => openOriginal(b())} />
+            <If when={b().contentStatus === "failed"}>
+              <Text
+                class="text-center"
+                style={{ color: look().inkFaint, fontSize: 13.5, lineHeight: 19, maxWidth: 420 }}
+              >
+                Pages behind a login or a bot check save in full from the browser extension: open
+                the page there and save it again.
+              </Text>
             </If>
+            <View class="flex-row items-center gap-2.5 pt-2">
+              <If when={b().contentStatus === "failed" && !retrying()}>
+                <GlassButton label="Try reading it again" onPress={() => void retry()} />
+              </If>
+              <If when={b().contentStatus !== "ok" || !editor()}>
+                <GlassButton label="Open original" prominent onPress={() => openOriginal(b())} />
+              </If>
+            </View>
           </View>
         }
       >
@@ -363,7 +598,9 @@ export function Reader(props: {
             testID="article"
             accessibilityLabel="Article"
             class="flex-1"
-            onSelectionChange={({ selection: s }) => selection.set(s)}
+            onSelectionChange={({ selection: s }) => {
+              if (!restoring) selection.set(s);
+            }}
             bubbleMenu={bubble()}
             classes={{
               content: `px-[${sidePad()}px] pt-[${topPad()}px] pb-32`,
@@ -373,7 +610,7 @@ export function Reader(props: {
                 "heading[level=1]": "text-[32px] leading-[39px] mt-0 mb-6",
                 "heading[level=2]": "text-[24px] leading-[31px]",
                 "heading[level=3]": "text-[20px] leading-[27px]",
-                blockquote: "pl-4 border-l-2",
+                blockquote: `pl-4 border-l-2 border-[${look().rule}]`,
                 codeBlock: "rounded-md p-3 font-mono text-[13px] leading-[20px]",
                 table: "my-6",
                 tableCell: `px-3 py-2 border-b border-[${look().rule}]`,
@@ -381,6 +618,8 @@ export function Reader(props: {
                 horizontalRule: `my-8 border-t border-[${look().rule}]`,
                 // Paragraphs in cells (compactCells).
                 "paragraph[textAlign=left]": "text-[15px] leading-[22px] mb-0",
+                // The bookmark's note (withNote).
+                "paragraph[textAlign=justify]": `text-[15px] leading-[23px] mb-2 text-[${look().inkSoft}]`,
               },
               marks: {
                 code: "font-mono text-[15px]",
@@ -396,13 +635,15 @@ export function Reader(props: {
           />
         )}
       </If>
-      <If when={!props.wide && (placed().length || orphans())}>
+      <If when={!props.wide && (placed().length || orphans().length)}>
         {/* Phones: the count on a small capsule of glass over the article's foot. */}
         <View
           class="absolute right-0 left-0 items-center"
-          style={{ bottom: Math.max(safeArea().bottom, 12) + 6, pointerEvents: "none" }}
+          style={{ bottom: Math.max(safeArea().bottom, 12) + 6, pointerEvents: "box-none" }}
         >
           <View
+            role={orphans().length ? "button" : undefined}
+            onPress={orphans().length ? () => void showOrphans() : undefined}
             class="h-8 justify-center rounded-full px-3.5"
             style={{ ...glass(), borderCurve: "continuous" }}
           >
@@ -441,9 +682,16 @@ export function Reader(props: {
           <Text class="flex-1 truncate" style={{ color: look().inkSoft, fontSize: 12.5 }}>
             {meta()}
           </Text>
-          <Text testID="highlight-count" style={{ color: look().stamp, fontSize: 12 }}>
-            {highlights()}
-          </Text>
+          <View
+            role={orphans().length ? "button" : undefined}
+            accessibilityLabel={orphans().length ? "Highlights not found" : undefined}
+            onPress={orphans().length ? () => void showOrphans() : undefined}
+            class="active:opacity-60"
+          >
+            <Text testID="highlight-count" style={{ color: look().stamp, fontSize: 12 }}>
+              {highlights()}
+            </Text>
+          </View>
           <GlassGroup>
             <IconButton
               name={b().favorite ? "starFill" : "star"}
@@ -468,6 +716,11 @@ export function Reader(props: {
                   if (gone) props.onBack();
                 })
               }
+            />
+            <IconButton
+              name="pencil"
+              label="Edit title, tags and note"
+              onPress={() => editBookmark(b())}
             />
             <IconButton name="external" label="Open original" onPress={() => openOriginal(b())} />
             <If

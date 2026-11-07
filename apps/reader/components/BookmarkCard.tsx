@@ -112,6 +112,17 @@ function Marks(props: { b: Bookmark }) {
           <Text style={{ color: look().inkFaint, fontSize: 11.5 }}>{hl()}</Text>
         </View>
       </If>
+      <If when={props.b.readProgress >= 0.98}>
+        <View class="flex-row items-center gap-0.5">
+          <Icon name="check" size={12} color={look().inkFaint} />
+          <Text style={{ color: look().inkFaint, fontSize: 11.5 }}>Read</Text>
+        </View>
+      </If>
+      <If when={props.b.readProgress > 0.02 && props.b.readProgress < 0.98}>
+        <Text style={{ color: look().inkFaint, fontSize: 11.5, fontVariant: ["tabular-nums"] }}>
+          {`${Math.round(props.b.readProgress * 100)}%`}
+        </Text>
+      </If>
       <If when={status() === "failed" || status() === "pending"}>
         <View class="flex-row items-center gap-1">
           <Icon name={status() === "failed" ? "alert" : "clock"} size={12} color={look().stamp} />

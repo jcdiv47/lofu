@@ -81,3 +81,29 @@ export const toDocRange = (idx: DocIndex, start: number, end: number) => ({
   from: idx.pos[start]!,
   to: idx.pos[end - 1]! + 1,
 });
+
+/** A node's size in document positions (as `indexDoc` counts them). */
+export function nodeSize(n: RichNodeJSON): number {
+  if (n.type === "text") return (n.text ?? "").length;
+  if (LEAVES.has(n.type)) return 1;
+  return 2 + (n.content ?? []).reduce((s, c) => s + nodeSize(c), 0);
+}
+
+/**
+ * Leaves the document range `[from, to)` out of the text (the reader's note
+ * above the article): quotes are matched in the article's own text, which is
+ * what other readers see.
+ */
+export function withoutRange(idx: DocIndex, from: number, to: number): DocIndex {
+  const chars: string[] = [];
+  const pos: number[] = [];
+  for (let i = 0; i < idx.pos.length; i++) {
+    const p = idx.pos[i]!;
+    const c = idx.text[i]!;
+    if (p >= from && p < to) continue;
+    if (c === "\n" && (chars.length === 0 || chars[chars.length - 1] === "\n")) continue;
+    chars.push(c);
+    pos.push(p);
+  }
+  return { text: chars.join(""), pos };
+}

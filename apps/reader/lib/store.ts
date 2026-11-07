@@ -1,5 +1,16 @@
 import { computed, Storage, signal } from "nsh";
-import { api, type Bookmark, type BookmarkPatch, type Collection } from "./api";
+import {
+  api,
+  type Bookmark,
+  type BookmarkPatch,
+  type Collection,
+  type Highlight,
+  loadedSettings,
+  normalizeServer,
+  OfflineError,
+} from "./api";
+import { clearArticles, prefetchArticles, removeArticle } from "./articles";
+import { readText, removeText, writeText } from "./files";
 import { plainExcerpt } from "./format";
 
 /**
@@ -27,7 +38,12 @@ export const sameSource = (a: Source, b: Source) =>
   (a.kind !== "tag" || a.name === (b as { name: string }).name) &&
   (a.kind !== "type" || a.type === (b as { type: BookmarkType }).type);
 
-const SNAPSHOT_KEY = "library.v1";
+/**
+ * The mirror kept on the device. The version goes up when bookmarks need
+ * fields only a full sync brings (v2: `coverProxy`); older ones are dropped.
+ */
+const SNAPSHOT_KEY = "library.v2";
+const OLD_SNAPSHOTS = ["library.v1"];
 
 const byId = signal(new Map<string, Bookmark>(), { equals: false });
 const collectionsById = signal(new Map<string, Collection>(), { equals: false });
@@ -186,12 +202,139 @@ const absolute = (raw: string | null, page: string): string | null => {
     return null;
   }
 };
+/**
+ * Covers load through the server's image proxy where it offers one: WeChat
+ * and CSDN answer a hotlinked cover with a placeholder or a 403.
+ */
+const cover = (b: Bookmark): string | null => {
+  const server = loadedSettings()?.server;
+  if (b.coverProxy && server) return `${normalizeServer(server)}${b.coverProxy}`;
+  return absolute(b.coverUrl, b.url);
+};
 const normalize = (b: Bookmark): Bookmark => ({
   ...b,
   excerpt: plainExcerpt(b.excerpt),
-  coverUrl: absolute(b.coverUrl, b.url),
+  coverUrl: cover(b),
   faviconUrl: absolute(b.faviconUrl, b.url),
 });
+
+// ---------------------------------------------------------------------------
+// Changes waiting for the server. Every change applies here at once; one the
+// server can't be reached for waits in this outbox (kept on the device) and
+// is sent, in order, before the next sync. A change the server refuses is
+// dropped and the bookmark is read back from the server.
+
+export type Op =
+  | { kind: "create"; id: string; url: string; fields: CreateFields }
+  | { kind: "patch"; id: string; patch: BookmarkPatch }
+  | { kind: "delete"; id: string }
+  | {
+      kind: "addHighlight";
+      bookmarkId: string;
+      localId: string;
+      quote: string;
+      prefix: string;
+      suffix: string;
+    }
+  | { kind: "removeHighlight"; bookmarkId: string; id: string };
+
+type CreateFields = Partial<Pick<Bookmark, "tags" | "collectionId" | "favorite">>;
+
+const OUTBOX_KEY = "outbox.v1";
+export const outbox = signal<Op[]>([]);
+/** A highlight made offline: its local id, then the server's once it's sent. */
+const sentHighlights = new Map<string, string>();
+
+function saveOutbox() {
+  void Storage.setItem(OUTBOX_KEY, JSON.stringify(outbox())).catch(() => {});
+}
+
+function enqueue(op: Op) {
+  const ops = [...outbox()];
+  const last = ops[ops.length - 1];
+  if (op.kind === "patch" && last?.kind === "patch" && last.id === op.id) {
+    // Consecutive edits of one bookmark (reading progress, say) are one.
+    ops[ops.length - 1] = { ...last, patch: { ...last.patch, ...op.patch } };
+  } else if (op.kind === "removeHighlight" && op.id.startsWith("local-")) {
+    // Never sent: forget it instead.
+    const i = ops.findIndex((o) => o.kind === "addHighlight" && o.localId === op.id);
+    if (i >= 0) ops.splice(i, 1);
+    else ops.push(op);
+  } else {
+    ops.push(op);
+  }
+  outbox.set(ops);
+  saveOutbox();
+}
+
+/** The bookmark as the waiting changes leave it (or undefined: deleted). */
+function overlay(b: Bookmark): Bookmark | undefined {
+  let out: Bookmark | undefined = b;
+  for (const op of outbox()) {
+    if (!out) break;
+    if (op.kind === "patch" && op.id === b.id) out = { ...out, ...op.patch };
+    else if (op.kind === "delete" && op.id === b.id) out = undefined;
+  }
+  return out;
+}
+
+async function send(op: Op): Promise<void> {
+  switch (op.kind) {
+    case "create": {
+      const b = normalize(await api.create(op.url, { ...op.fields, id: op.id }));
+      byId.update((m) => m.set(b.id, overlay(b) ?? b));
+      return;
+    }
+    case "patch":
+      await api.update(op.id, op.patch);
+      return;
+    case "delete":
+      await api.remove(op.id);
+      return;
+    case "addHighlight": {
+      const h = await api.addHighlight(op.bookmarkId, op);
+      sentHighlights.set(op.localId, h.id);
+      return;
+    }
+    case "removeHighlight":
+      await api.removeHighlight(sentHighlights.get(op.id) ?? op.id);
+      return;
+  }
+}
+
+let flushing: Promise<void> | null = null;
+
+/** Sends the waiting changes, in order, until one can't reach the server. */
+export function flush(): Promise<void> {
+  if (flushing) return flushing;
+  if (!outbox().length) return Promise.resolve();
+  const run = async () => {
+    while (outbox().length) {
+      const op = outbox()[0]!;
+      try {
+        await send(op);
+      } catch (e) {
+        if (e instanceof OfflineError) return;
+        // Refused (the bookmark is gone, say): drop it, and read back
+        // what the server has.
+        console.warn(`lofu: the server refused a change (${op.kind}): ${(e as Error).message}`);
+        if ("id" in op && op.kind !== "removeHighlight") refusedIds.add(op.id);
+      }
+      outbox.set(outbox().slice(1));
+      saveOutbox();
+    }
+  };
+  // Cleared once it settles (not inside: a run that finishes at once would
+  // clear it before it's set).
+  const p = run().finally(() => {
+    if (flushing === p) flushing = null;
+  });
+  flushing = p;
+  return p;
+}
+const refusedIds = new Set<string>();
+
+// ---------------------------------------------------------------------------
 
 function apply(page: {
   bookmarks: Bookmark[];
@@ -200,7 +343,12 @@ function apply(page: {
 }) {
   if (page.bookmarks.length) {
     byId.update((m) => {
-      for (const b of page.bookmarks) m.set(b.id, normalize(b));
+      for (const b of page.bookmarks) {
+        // The server's state, under the changes still waiting to be sent.
+        const local = overlay(normalize(b));
+        if (local) m.set(b.id, local);
+        else m.delete(b.id);
+      }
       return m;
     });
   }
@@ -240,15 +388,28 @@ function persist() {
       collections: [...collectionsById().values()].filter((c) => !c.deletedAt),
       highlights: [...highlightOwner.entries()].map(([id, bookmarkId]) => ({ id, bookmarkId })),
     });
-    // Storage holds 5 MB; a library too large for it just syncs from scratch.
-    Storage.setItem(SNAPSHOT_KEY, snapshot).catch(() => Storage.removeItem(SNAPSHOT_KEY));
+    // A file on the device; on the web, Storage (5 MB): a library too
+    // large for it just syncs from scratch.
+    void writeText(SNAPSHOT_KEY, snapshot).then((ok) => {
+      if (!ok) void removeText(SNAPSHOT_KEY);
+    });
   }, 1000);
 }
 
 /** Shows the last snapshot at once, then catches up with the server. */
 export async function start() {
   try {
-    const raw = await Storage.getItem(SNAPSHOT_KEY);
+    const ops = await Storage.getItem(OUTBOX_KEY);
+    if (ops) outbox.set(JSON.parse(ops) as Op[]);
+  } catch {
+    outbox.set([]);
+  }
+  for (const key of OLD_SNAPSHOTS) {
+    await Storage.removeItem(key).catch(() => {});
+    await removeText(key);
+  }
+  try {
+    const raw = await readText(SNAPSHOT_KEY);
     if (raw) {
       const snap = JSON.parse(raw);
       apply(snap);
@@ -256,30 +417,52 @@ export async function start() {
       if (byId().size) loaded.set(true);
     }
   } catch {
-    await Storage.removeItem(SNAPSHOT_KEY);
+    await removeText(SNAPSHOT_KEY);
   }
   await sync();
 }
 
 let inflight: Promise<void> | null = null;
 
-/** Pulls everything that changed since the last sync. */
+/** Sends what's waiting, then pulls everything that changed since the last sync. */
 export function sync(): Promise<void> {
   if (inflight) return inflight;
   inflight = (async () => {
     syncing.set(true);
     try {
+      await flush();
       for (;;) {
         const page = await api.sync(cursor);
         apply(page);
         cursor = page.cursor;
         if (!page.hasMore) break;
       }
+      // Changes the server refused: read back what it has.
+      for (const id of [...refusedIds]) {
+        refusedIds.delete(id);
+        try {
+          const b = await api.bookmark(id);
+          byId.update((m) => {
+            if (b.deletedAt) m.delete(id);
+            else m.set(id, normalize(b));
+            return m;
+          });
+        } catch {
+          byId.update((m) => {
+            m.delete(id);
+            return m;
+          });
+        }
+      }
       syncError.set("");
       persist();
+      // Newest first, as the library lists them.
+      void prefetchArticles(bookmarks());
     } catch (e) {
       syncError.set((e as Error).message);
+      if (e instanceof OfflineError) offline.set(true);
     } finally {
+      if (!syncError()) offline.set(false);
       loaded.set(true);
       syncing.set(false);
       inflight = null;
@@ -287,6 +470,9 @@ export function sync(): Promise<void> {
   })();
   return inflight;
 }
+
+/** The last sync couldn't reach the server. */
+export const offline = signal(false);
 
 /** Forgets the mirror (a different server or token). */
 export async function reset() {
@@ -296,22 +482,51 @@ export async function reset() {
   highlightOwner.clear();
   cursor = 0;
   loaded.set(false);
-  await Storage.removeItem(SNAPSHOT_KEY);
+  outbox.set([]);
+  await Storage.removeItem(OUTBOX_KEY);
+  await removeText(SNAPSHOT_KEY);
+  await clearArticles();
 }
 
-/** Applies a change locally at once, then on the server; reverts if the server refuses. */
+/**
+ * Applies a change locally at once, then on the server. Offline it waits in
+ * the outbox; a change the server refuses is undone (and rethrown).
+ */
 export async function updateBookmark(id: string, patch: BookmarkPatch) {
   const before = byId().get(id);
   if (!before) return;
   byId.update((m) => m.set(id, { ...before, ...patch }));
+  persist();
+  if (outbox().length) {
+    // Behind changes still waiting: in order after them.
+    enqueue({ kind: "patch", id, patch });
+    void flush();
+    return;
+  }
   try {
     const after = await api.update(id, patch);
-    byId.update((m) => m.set(id, normalize(after)));
+    // Unless it changed again meanwhile.
+    if (!outbox().some((o) => "id" in o && o.id === id)) {
+      byId.update((m) => m.set(id, { ...normalize(after), ...patch }));
+    }
     persist();
   } catch (e) {
+    if (e instanceof OfflineError) {
+      enqueue({ kind: "patch", id, patch });
+      offline.set(true);
+      return;
+    }
     byId.update((m) => m.set(id, before));
+    persist();
     throw e;
   }
+}
+
+/** How far into the article the reader got (0–1): kept quietly, never undone. */
+export function setReadProgress(id: string, readProgress: number) {
+  const b = byId().get(id);
+  if (!b || Math.abs(b.readProgress - readProgress) < 0.005) return;
+  void updateBookmark(id, { readProgress }).catch(() => {});
 }
 
 /** Moves a bookmark to a collection (`null`: Unsorted); out of the Trash too. */
@@ -335,22 +550,57 @@ export async function deleteForever(id: string) {
     m.delete(id);
     return m;
   });
+  persist();
+  void removeArticle(id);
+  if (outbox().length) {
+    enqueue({ kind: "delete", id });
+    void flush();
+    return;
+  }
   try {
     await api.remove(id);
-    persist();
   } catch (e) {
+    if (e instanceof OfflineError) {
+      enqueue({ kind: "delete", id });
+      offline.set(true);
+      return;
+    }
     byId.update((m) => m.set(id, before));
+    persist();
     throw e;
   }
 }
 
 /**
+ * An id made on the device for a bookmark saved offline, which the server
+ * keeps: UUIDv7's layout (time first, so ids sort by when they were made).
+ * Math.random is enough here; the ids only need to be unique per library.
+ */
+const newId = () => {
+  const hex = (n: number, digits: number) => Math.floor(n).toString(16).padStart(digits, "0");
+  const rand = (digits: number) =>
+    Array.from({ length: digits }, () => hex(Math.random() * 16, 1)).join("");
+  const t = hex(Date.now(), 12);
+  const variant = hex(8 + Math.random() * 4, 1);
+  return `${t.slice(0, 8)}-${t.slice(8)}-7${rand(3)}-${variant}${rand(3)}-${rand(12)}`;
+};
+
+const domainOf = (url: string) => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+};
+
+/**
  * Saves a URL into a source (its collection, tag or favorites). The bookmark
  * shows at once; the server reads the page in the background, so a sync a
- * little later brings its title, excerpt and cover.
+ * little later brings its title, excerpt and cover. Offline it waits in the
+ * outbox under an id made here, which the server keeps.
  */
 export async function addBookmark(url: string, into: Source): Promise<Bookmark> {
-  const fields =
+  const fields: CreateFields =
     into.kind === "collection"
       ? { collectionId: into.id }
       : into.kind === "tag"
@@ -358,10 +608,41 @@ export async function addBookmark(url: string, into: Source): Promise<Bookmark> 
         : into.kind === "favorites"
           ? { favorite: true }
           : {};
-  const b = normalize(await api.create(url, fields));
+  let b: Bookmark;
+  try {
+    b = normalize(await api.create(url, fields));
+  } catch (e) {
+    if (!(e instanceof OfflineError)) throw e;
+    const now = new Date().toISOString();
+    b = {
+      id: newId(),
+      url,
+      title: "",
+      excerpt: null,
+      note: null,
+      coverUrl: null,
+      faviconUrl: null,
+      domain: domainOf(url),
+      type: "link",
+      tags: fields.tags ?? [],
+      collectionId: fields.collectionId ?? null,
+      favorite: fields.favorite ?? false,
+      archived: false,
+      readProgress: 0,
+      wordCount: null,
+      contentStatus: "pending",
+      contentError: null,
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: null,
+      seq: 0,
+    };
+    enqueue({ kind: "create", id: b.id, url, fields });
+    offline.set(true);
+  }
   byId.update((m) => m.set(b.id, b));
   persist();
-  if (b.contentStatus === "pending") {
+  if (b.contentStatus === "pending" && !offline()) {
     setTimeout(() => void sync(), 3000);
     setTimeout(() => void sync(), 12000);
   }
@@ -376,11 +657,138 @@ export async function createCollection(name: string): Promise<Collection> {
   return c;
 }
 
-/** Highlights changed in the reader: keep the sidebar's count current without a sync. */
+export async function renameCollection(id: string, name: string) {
+  const c = await api.updateCollection(id, { name: name.trim() });
+  collectionsById.update((m) => m.set(c.id, c));
+  void sync();
+}
+
+/** Deletes a collection; its bookmarks go to Unsorted (as the server does). */
+export async function deleteCollection(id: string) {
+  await api.removeCollection(id);
+  collectionsById.update((m) => {
+    m.delete(id);
+    return m;
+  });
+  byId.update((m) => {
+    for (const b of m.values())
+      if (b.collectionId === id) m.set(b.id, { ...b, collectionId: null });
+    return m;
+  });
+  persist();
+  void sync();
+}
+
+/**
+ * Moves a collection up or down the list (the server's own order, `sort`):
+ * every collection whose place changes is numbered again.
+ */
+export async function moveCollection(id: string, by: -1 | 1) {
+  const list = collections();
+  const i = list.findIndex((c) => c.id === id);
+  const j = i + by;
+  if (i < 0 || j < 0 || j >= list.length) return;
+  const order = [...list];
+  [order[i], order[j]] = [order[j]!, order[i]!];
+  const changed = order.map((c, k) => ({ c, sort: k })).filter(({ c, sort }) => c.sort !== sort);
+  collectionsById.update((m) => {
+    for (const { c, sort } of changed) m.set(c.id, { ...c, sort });
+    return m;
+  });
+  try {
+    for (const { c, sort } of changed) await api.updateCollection(c.id, { sort });
+  } finally {
+    void sync();
+  }
+}
+
+/** Renames a tag everywhere (merging into one that exists). */
+export async function renameTag(from: string, to: string) {
+  const name = to.trim().toLowerCase();
+  if (!name || name === from) return;
+  await api.renameTag(from, name);
+  byId.update((m) => {
+    for (const b of m.values()) {
+      if (!b.tags.includes(from)) continue;
+      const tags = b.tags.map((t) => (t === from ? name : t));
+      m.set(b.id, { ...b, tags: [...new Set(tags)] });
+    }
+    return m;
+  });
+  persist();
+  void sync();
+}
+
+/** Takes a tag off every bookmark. */
+export async function deleteTag(name: string) {
+  await api.removeTag(name);
+  byId.update((m) => {
+    for (const b of m.values()) {
+      if (b.tags.includes(name)) m.set(b.id, { ...b, tags: b.tags.filter((t) => t !== name) });
+    }
+    return m;
+  });
+  persist();
+  void sync();
+}
+
+/**
+ * Highlights changed in the reader: keep the sidebar's count current without
+ * a sync. `ids` are all of the bookmark's highlights, those the reader
+ * couldn't place in the text too.
+ */
 export function setHighlightCount(bookmarkId: string, ids: string[]) {
   for (const [hid, owner] of highlightOwner) {
     if (owner === bookmarkId) highlightOwner.delete(hid);
   }
   for (const hid of ids) highlightOwner.set(hid, bookmarkId);
   highlightCounts.update((m) => m.set(bookmarkId, ids.length));
+  persist();
+}
+
+/** Saves a highlight; offline it waits with a local id. */
+export async function addHighlight(
+  bookmarkId: string,
+  q: { quote: string; prefix: string; suffix: string },
+): Promise<Highlight> {
+  if (!outbox().length) {
+    try {
+      return await api.addHighlight(bookmarkId, q);
+    } catch (e) {
+      if (!(e instanceof OfflineError)) throw e;
+    }
+  }
+  const localId = `local-${newId()}`;
+  enqueue({ kind: "addHighlight", bookmarkId, localId, ...q });
+  void flush();
+  return { id: localId, bookmarkId, ...q, note: null, color: null };
+}
+
+export async function removeHighlight(h: Highlight) {
+  if (!outbox().length && !h.id.startsWith("local-")) {
+    try {
+      await api.removeHighlight(h.id);
+      return;
+    } catch (e) {
+      if (!(e instanceof OfflineError)) throw e;
+    }
+  }
+  enqueue({ kind: "removeHighlight", bookmarkId: h.bookmarkId, id: h.id });
+  void flush();
+}
+
+/** Highlights still waiting to be sent or removed, as the reader should show them. */
+export function pendingHighlights(bookmarkId: string, server: Highlight[]): Highlight[] {
+  const removed = new Set<string>();
+  const added: Highlight[] = [];
+  for (const op of outbox()) {
+    if (op.kind === "removeHighlight" && op.bookmarkId === bookmarkId) removed.add(op.id);
+    if (op.kind === "addHighlight" && op.bookmarkId === bookmarkId) {
+      const { localId, quote, prefix, suffix } = op;
+      added.push({ id: localId, bookmarkId, quote, prefix, suffix, note: null, color: null });
+    }
+  }
+  return [...server, ...added].filter(
+    (h) => !removed.has(h.id) && !removed.has(sentHighlights.get(h.id) ?? ""),
+  );
 }

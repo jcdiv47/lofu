@@ -12,7 +12,7 @@ skills/lofu       Agent skill describing the CLI
 docker/           compose stack (server + Meilisearch) and Dockerfile
 ```
 
-Still to come: the iOS share extension and the Safari extension. See the roadmap below.
+Still to come: the Safari extension. See the roadmap below.
 
 ## Quick start (development)
 
@@ -81,7 +81,7 @@ Chrome/Edge/Brave: open `chrome://extensions`, turn on developer mode, and use *
 
 ## Saving from the iOS share sheet
 
-Until the share extension exists, a Shortcut puts lofu in the share sheet, and it saves without opening the app. In the Shortcuts app, make a shortcut and, under its ⓘ, turn on *Show in Share Sheet* and let it receive URLs, Safari web pages and Text. Then add these actions:
+The app's share extension puts *lofu* in every app's share sheet (`apps/reader/share`, see `apps/reader/README.md`). Without it (a build made by `nsh package` alone), a Shortcut does the same, and it saves without opening the app. In the Shortcuts app, make a shortcut and, under its ⓘ, turn on *Show in Share Sheet* and let it receive URLs, Safari web pages and Text. Then add these actions:
 
 1. **Get URLs from Input** (Shortcut Input). Share text from apps like Xiaohongshu or Douyin ("【Title】 http://xhslink.com/a/… 复制本条信息…") gives its link.
 2. **Get Item from List**: First Item.
@@ -103,9 +103,11 @@ The import takes the CSV export from Raindrop (Settings → Export, or the `rain
 The OpenAPI 3.1 document is served at `/openapi.json`, generated from the zod schemas in `packages/shared`. Main endpoints:
 
 - `POST /v1/bookmarks`: idempotent on the normalized URL (tracking params, `www.`, fragments and scheme are ignored). Pass `html` to skip fetching (for pages behind a login). Without `html`, short links (t.co, t.cn, xhslink.com, b23.tv, bit.ly…) are followed and wrapper pages (`weibo.cn/sinaurl?u=`, `link.zhihu.com/?target=`) unwrapped first, so the bookmark is the page they lead to. A short link that dies or ends on a login wall or its site's home page is saved as given.
+- Bookmarks: `archived` means **in the Trash** (the field kept its old name). Clients show it as the Trash, and deleting from there deletes for good. `coverProxy` is the cover through the image proxy below (computed, a path relative to the server; null without an http(s) cover), for covers whose hosts refuse hotlinks (WeChat, CSDN).
 - `GET /v1/bookmarks` (keyset pagination; filters `collectionId`, `tags`, `archived`, `favorite`, `type`), `GET|PATCH|DELETE /v1/bookmarks/{id}`, `POST /v1/bookmarks/{id}/refetch`, `GET /v1/bookmarks/{id}/content?format=markdown|html|text`. With `?content=markdown`, `GET /v1/bookmarks/{id}` also lists the article's `images`: each one's `src`, measured `width`/`height`, and `proxy` path.
-- `GET /img/<signature>?u=<url>`: an article image through the server (no token: the signature is the authorization, and only URLs the API handed out are signed)
-- `GET /v1/search`, `GET /v1/tags`, `/v1/collections`, `/v1/bookmarks/{id}/highlights`, `/v1/highlights/{id}`
+- `GET /img/<signature>?u=<url>`: an article image or cover through the server (no token: the signature is the authorization, and only URLs the API handed out are signed)
+- `POST /v1/tags/rename` (`{from, to}`; merges into `to` where a bookmark already has it) and `DELETE /v1/tags/{name}`: change every bookmark with the tag and return `{updated}`
+- `GET /v1/search`, `GET /v1/tags`, `/v1/collections` (deleting one moves its bookmarks to Unsorted), `/v1/bookmarks/{id}/highlights`, `/v1/highlights/{id}`
 - `GET /v1/sync?since=<cursor>`: everything changed since the cursor, deletions included
 - `POST /v1/import/raindrop` (body: the CSV file): returns an import report
 - `GET /v1/bookmarks/lookup?url=`: the bookmark for any variant of a URL. Request bodies may be `Content-Encoding: gzip`.
@@ -115,5 +117,5 @@ The OpenAPI 3.1 document is served at `/openapi.json`, generated from the zod sc
 1. More importers as needed: Netscape bookmark HTML (browsers), Pocket export.
 2. Per-site cookies for the browser fallback (Zhihu and other login walls); screenshot thumbnails.
 3. **Permanent copies**: single-file archives via `monolith`; periodic broken-link checks.
-4. **Clients**: the nsh app (`apps/reader`) runs on macOS, iOS and the web: a sidebar and card grid on the Mac, a native navigation stack on the phone, both over a `/v1/sync` mirror (findings in `apps/reader/README.md`; drag-to-select on the web is [longbridge/nsh#1004](https://github.com/longbridge/nsh/issues/1004); a Linux desktop app is deferred). Next: verify long-press selection and highlighting on an iPhone by hand, then the Swift share extension and keychain. The extension's Safari build comes along with the Apple apps.
+4. **Clients**: the nsh app (`apps/reader`) runs on macOS, iOS and the web: a sidebar and card grid on the Mac, a native navigation stack on the phone, both over a `/v1/sync` mirror (findings in `apps/reader/README.md`; drag-to-select on the web is [longbridge/nsh#1004](https://github.com/longbridge/nsh/issues/1004); a Linux desktop app is deferred). The apps keep the reading list and changes on the device for offline use, track reading progress, and edit titles, tags, notes, collections and tags. Next: verify long-press selection, highlighting and reading progress on an iPhone by hand. The extension's Safari build comes along with the Apple apps.
 5. Semantic search (a Meilisearch embedder, e.g. Ollama → `MEILI_EMBEDDER`), suggested tags, text-to-speech.

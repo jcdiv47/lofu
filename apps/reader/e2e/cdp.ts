@@ -178,7 +178,13 @@ export async function launch(opts: {
     },
     /** Scrolls the first text containing `text` to the middle of its scroll view. */
     async scrollTo(text: string) {
-      await page.waitForText(text);
+      // Wait for it in the page (not necessarily on screen), then bring it into view.
+      const end = Date.now() + 10_000;
+      while (
+        Date.now() < end &&
+        !(await page.eval<boolean>(`document.body.textContent.includes(${JSON.stringify(text)})`))
+      )
+        await Bun.sleep(100);
       await page.eval(`(() => {
         const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
         for (let n = w.nextNode(); n; n = w.nextNode())
@@ -214,7 +220,8 @@ export const locate = (text: string) => {
     r.setStart(n, i);
     r.setEnd(n, i + ${t.length});
     const b = r.getBoundingClientRect();
-    if (b.width === 0) continue;
+    // Not drawn, or off-screen (a list's measuring cell, far outside the viewport).
+    if (b.width === 0 || b.bottom < 0 || b.top > innerHeight) continue;
     return { x: b.left, y: b.top, w: b.width, h: b.height };
   }
   return null;
