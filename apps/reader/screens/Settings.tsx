@@ -284,7 +284,7 @@ function OfflineReading() {
         {button(
           "Download now",
           "offline-download",
-          () => void prefetchArticles(bookmarks()),
+          () => void prefetchArticles(bookmarks(), true),
           () => !!downloading() || offline() || keepMode() === "opened",
         )}
         {button(

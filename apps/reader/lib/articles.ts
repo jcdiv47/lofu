@@ -256,13 +256,25 @@ async function inTurn<T>(items: T[], n: number, f: (item: T) => Promise<void>) {
   await Promise.all(Array.from({ length: Math.min(n, items.length) }, worker));
 }
 
+/** The library to go over again once the running pass is done (asked during it), and whether to retry. */
+let again: Bookmark[] | null = null;
+let againRetry = false;
+
 /**
  * Fetches the articles `keepMode` asks for that aren't kept yet, and the
  * pictures of those kept, a few at a time, and forgets those deleted or put
- * in the Trash. Stops quietly when the server can't be reached.
+ * in the Trash. Stops quietly when the server can't be reached. Asked while
+ * it runs (a sync, another choice in Settings), it goes over the library
+ * again afterwards. `retry` (Download now) tries what this session gave up on.
  */
-export async function prefetchArticles(all: Bookmark[]) {
-  if (!onDisk || prefetching) return;
+export async function prefetchArticles(all: Bookmark[], retry = false) {
+  if (!onDisk) return;
+  if (prefetching) {
+    again = all;
+    againRetry ||= retry;
+    return;
+  }
+  if (retry) later.clear();
   prefetching = true;
   try {
     const kept = new Set((await listText(PREFIX)).map(idOf));
@@ -297,5 +309,9 @@ export async function prefetchArticles(all: Bookmark[]) {
   } finally {
     prefetching = false;
     downloading.set(null);
+    const [next, nextRetry] = [again, againRetry];
+    again = null;
+    againRetry = false;
+    if (next) void prefetchArticles(next, nextRetry);
   }
 }
