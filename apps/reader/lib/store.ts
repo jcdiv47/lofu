@@ -45,6 +45,14 @@ export const sameSource = (a: Source, b: Source) =>
 const SNAPSHOT_KEY = "library.v2";
 const OLD_SNAPSHOTS = ["library.v1"];
 
+/**
+ * The server a snapshot came from. The file outlives `Storage`'s settings
+ * (another build of the app, or `nsh test --target macos`, shares the data
+ * directory but not the settings), so one from elsewhere is dropped rather
+ * than merged with this server's library.
+ */
+const snapshotServer = () => normalizeServer(loadedSettings()?.server ?? "");
+
 const byId = signal(new Map<string, Bookmark>(), { equals: false });
 const collectionsById = signal(new Map<string, Collection>(), { equals: false });
 /** Bookmark id → number of live highlights. */
@@ -383,6 +391,7 @@ function persist() {
   persistTimer = setTimeout(() => {
     persistTimer = null;
     const snapshot = JSON.stringify({
+      server: snapshotServer(),
       cursor,
       bookmarks: [...byId().values()].filter((b) => !b.deletedAt),
       collections: [...collectionsById().values()].filter((c) => !c.deletedAt),
@@ -410,8 +419,11 @@ export async function start() {
   }
   try {
     const raw = await readText(SNAPSHOT_KEY);
-    if (raw) {
-      const snap = JSON.parse(raw);
+    const snap = raw ? JSON.parse(raw) : null;
+    if (snap && snap.server !== snapshotServer()) {
+      await removeText(SNAPSHOT_KEY);
+      await clearArticles();
+    } else if (snap) {
       apply(snap);
       cursor = snap.cursor ?? 0;
       if (byId().size) loaded.set(true);
