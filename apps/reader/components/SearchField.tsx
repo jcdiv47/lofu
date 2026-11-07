@@ -1,4 +1,4 @@
-import { View } from "nsh";
+import { type InputRef, View } from "nsh";
 import { Input } from "nsh/base";
 import { glass, look } from "../lib/look";
 import { NativeSearchField, nativeSearchField } from "./native";
@@ -18,6 +18,8 @@ export function SearchField(props: {
   testID?: string;
   /** Return on the keyboard. */
   onSubmit?: (v: string) => void;
+  /** The app's own field (not the system's): for focusing it from a shortcut. */
+  inputRef?: (r: InputRef) => void;
 }) {
   const big = (props.height ?? 0) > 40;
   if (nativeSearchField) {
@@ -48,6 +50,7 @@ export function SearchField(props: {
       <Icon name="search" size={big ? 17 : 14} color={look().inkSoft} />
       <Input
         testID={props.testID ?? "search"}
+        ref={(r) => props.inputRef?.(r)}
         autoFocus={props.autoFocus}
         value={props.value()}
         placeholder={props.placeholder}

@@ -32,7 +32,11 @@ fn native(registry: &mut Registry) {
     registry.module::<Sheet>();
     registry.module::<Controls>();
     registry.module::<ShareExtension>();
+    registry.module::<files::Files>();
+    registry.module::<files::Secrets>();
 }
+
+mod files;
 
 /// The iOS share extension (`share/`): "lofu" in other apps' share sheets.
 /// It saves with the app's server address and token, which it reads from a

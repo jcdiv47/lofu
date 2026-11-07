@@ -1,13 +1,44 @@
-import { cleanup, effect, lifecycle, mount, platform, signal, Text, View, windowSize } from "nsh";
+import {
+  cleanup,
+  effect,
+  keyboardFrame,
+  lifecycle,
+  mount,
+  platform,
+  Scroll,
+  signal,
+  Text,
+  View,
+  windowSize,
+} from "nsh";
 import { createNavStack, Dialog, NavPage, NavStack } from "nsh/base";
-import { isAvailable, titleBar, Window } from "nsh/desktop";
+import { isAvailable, Menu, titleBar, Window } from "nsh/desktop";
 import { AddBookmark } from "./components/AddBookmark";
-import { GlassTint } from "./components/ui";
-import { setBrowser, showBookmarkMenu } from "./lib/actions";
+import { EditBookmark } from "./components/EditBookmark";
+import { PromptHost } from "./components/Prompt";
+import { GlassTint, RoundGlassButton } from "./components/ui";
+import {
+  deleteBookmark,
+  editBookmark,
+  focusSearch,
+  openOriginal,
+  setBrowser,
+  setEditor,
+  shareBookmark,
+  showBookmarkMenu,
+} from "./lib/actions";
 import type { Bookmark } from "./lib/api";
 import { loadSettings, shareLogin } from "./lib/api";
 import { glass, look } from "./lib/look";
-import { bookmark as current, reset, type Source, sourceTitle, start, sync } from "./lib/store";
+import {
+  bookmark as current,
+  reset,
+  type Source,
+  sourceTitle,
+  start,
+  sync,
+  updateBookmark,
+} from "./lib/store";
 import { Browser } from "./screens/Browser";
 import { Home } from "./screens/Home";
 import { Library } from "./screens/Library";
@@ -20,13 +51,17 @@ type Route =
   | { name: "library"; source: Source; query?: string }
   | { name: "reader"; bookmark: Bookmark }
   | { name: "browser"; url: string; domain: string }
-  | { name: "add"; source: Source };
+  | { name: "add"; source: Source }
+  | { name: "edit"; bookmark: Bookmark };
 
 /** "Open original" pushes the page onto this stack while it's mounted. */
 function useBrowser(push: (r: Route) => void) {
   setBrowser((b) => push({ name: "browser", url: b.url, domain: b.domain }));
   cleanup(() => setBrowser(null));
 }
+
+/** How often an open app catches up, besides coming to the front. */
+const SYNC_EVERY = 5 * 60_000;
 
 const SIDEBAR = 240;
 /** The sidebar floats inset from the window's edges, as on macOS 26. */
@@ -55,11 +90,17 @@ function App() {
   // Catch up whenever the app comes back to the front. nsh 0.4.0's web
   // runtime doesn't have `lifecycle` (it's typed and documented), so the web
   // build only syncs on start and on request.
+  const active = () => typeof lifecycle !== "function" || lifecycle() === "active";
   if (typeof lifecycle === "function") {
     effect(() => {
       if (lifecycle() === "active" && ready() === "app") void sync();
     });
   }
+  // A window left open (the Mac's, a browser tab) stays current too.
+  const timer = setInterval(() => {
+    if (ready() === "app" && active()) void sync();
+  }, SYNC_EVERY);
+  cleanup(() => clearInterval(timer));
 
   const onConnected = async () => {
     await reset();
@@ -75,6 +116,7 @@ function App() {
         if (r === "settings") return <Settings first onDone={onConnected} />;
         return wide() ? <Desktop onReconnect={onConnected} /> : <Phone onReconnect={onConnected} />;
       }}
+      <PromptHost />
     </View>
   );
 }
@@ -85,11 +127,28 @@ function Desktop(props: { onReconnect: () => void }) {
   const nav = createNavStack<Route>([{ name: "library", source: source() }]);
   const settingsOpen = signal(false);
   const adding = signal(false);
+  const editing = signal<Bookmark | null>(null);
   useBrowser((r) => nav.push(r));
+  setEditor((b) => editing.set(b));
+  cleanup(() => setEditor(null));
   const select = (s: Source) => {
     source.set(s);
     nav.setRoutes([{ name: "library", source: s }]);
   };
+  /** The bookmark open in the reader, for the Bookmark menu. */
+  const reading = () => {
+    const top = nav.routes().at(-1);
+    return top?.name === "reader" ? (current(top.bookmark.id) ?? top.bookmark) : null;
+  };
+  useMenuBar({
+    select,
+    reading,
+    add: () => adding.set(true),
+    settings: () => settingsOpen.set(true),
+    back: () => {
+      if (nav.routes().length > 1) nav.pop();
+    },
+  });
   return (
     <View class="flex-1 flex-row">
       <View
@@ -165,6 +224,32 @@ function Desktop(props: { onReconnect: () => void }) {
         />
       </Dialog>
       <Dialog
+        open={!!editing()}
+        animation="fade"
+        onOpenChange={(e) => {
+          if (!e.open) editing.set(null);
+        }}
+        backdropClass="bg-black/25"
+        class="m-auto w-[480px] overflow-hidden rounded-[26px]"
+        style={{ ...glass(), borderCurve: "continuous" }}
+      >
+        <GlassTint radius={26} />
+        <If when={editing()}>
+          {(b) => (
+            <View class="gap-5 p-6">
+              <Text style={{ color: look().ink, fontSize: 19, fontWeight: "700" }}>
+                Edit bookmark
+              </Text>
+              <EditBookmark
+                b={b()}
+                onCancel={() => editing.set(null)}
+                onDone={() => editing.set(null)}
+              />
+            </View>
+          )}
+        </If>
+      </Dialog>
+      <Dialog
         open={adding()}
         animation="fade"
         onOpenChange={(e) => adding.set(e.open)}
@@ -188,12 +273,138 @@ function Desktop(props: { onReconnect: () => void }) {
   );
 }
 
+/**
+ * The Mac's menu bar (and the shortcuts of the window's menu on Windows and
+ * Linux): saving, finding, syncing, going between the fixed views, and what
+ * can be done to the bookmark being read.
+ */
+function useMenuBar(app: {
+  select: (s: Source) => void;
+  reading: () => Bookmark | null;
+  add: () => void;
+  settings: () => void;
+  back: () => void;
+}) {
+  if (!isAvailable) return;
+  effect(() => {
+    const b = app.reading();
+    const go = (label: string, shortcut: string, s: Source) => ({
+      label,
+      shortcut,
+      onSelect: () => app.select(s),
+    });
+    Menu.setApplicationMenu([
+      {
+        label: "lofu",
+        submenu: [
+          { role: "about" },
+          { type: "separator" },
+          { label: "Settings…", shortcut: "mod+,", onSelect: app.settings },
+          { type: "separator" },
+          { role: "hide" },
+          { role: "hideOthers" },
+          { role: "showAll" },
+          { type: "separator" },
+          { role: "quit" },
+        ],
+      },
+      {
+        label: "File",
+        submenu: [
+          { label: "New Bookmark…", shortcut: "mod+n", onSelect: app.add },
+          { type: "separator" },
+          { role: "close" },
+        ],
+      },
+      {
+        label: "Edit",
+        submenu: [
+          { role: "undo" },
+          { role: "redo" },
+          { type: "separator" },
+          { role: "cut" },
+          { role: "copy" },
+          { role: "paste" },
+          { role: "selectAll" },
+          { type: "separator" },
+          { label: "Find", shortcut: "mod+f", onSelect: () => focusSearch() },
+        ],
+      },
+      {
+        label: "View",
+        submenu: [
+          { label: "Sync Now", shortcut: "mod+r", onSelect: () => void sync() },
+          { type: "separator" },
+          { role: "toggleFullScreen" },
+        ],
+      },
+      {
+        label: "Go",
+        submenu: [
+          { label: "Back", shortcut: "mod+[", when: "notEditing", onSelect: app.back },
+          { type: "separator" },
+          go("All Bookmarks", "mod+1", { kind: "all" }),
+          go("Unsorted", "mod+2", { kind: "unsorted" }),
+          go("Favorites", "mod+3", { kind: "favorites" }),
+          go("Highlights", "mod+4", { kind: "highlights" }),
+          go("Trash", "mod+5", { kind: "trash" }),
+        ],
+      },
+      {
+        label: "Bookmark",
+        submenu: [
+          {
+            label: b?.favorite ? "Remove from Favorites" : "Add to Favorites",
+            shortcut: "mod+d",
+            disabled: !b || b.archived,
+            onSelect: () =>
+              b && void updateBookmark(b.id, { favorite: !b.favorite }).catch(() => {}),
+          },
+          {
+            label: "Edit Title, Tags and Note…",
+            shortcut: "mod+e",
+            disabled: !b,
+            onSelect: () => b && editBookmark(b),
+          },
+          {
+            label: "Open Original",
+            shortcut: "mod+o",
+            disabled: !b,
+            onSelect: () => b && openOriginal(b),
+          },
+          {
+            label: "Share…",
+            disabled: !b,
+            onSelect: () => b && shareBookmark(b),
+          },
+          { type: "separator" },
+          {
+            label: b?.archived ? "Delete Permanently…" : "Move to Trash",
+            shortcut: "mod+backspace",
+            when: "notEditing",
+            disabled: !b,
+            onSelect: () =>
+              b &&
+              void deleteBookmark(b).then((gone) => {
+                if (gone) app.back();
+              }),
+          },
+        ],
+      },
+      { label: "Window", submenu: [{ role: "minimize" }, { role: "zoom" }] },
+    ]);
+  });
+  cleanup(() => Menu.setApplicationMenu(null));
+}
+
 /** Library → bookmarks → reader, as a native stack that opens on the Library page. */
 function Phone(props: { onReconnect: () => void }) {
   const nav = createNavStack<Route | { name: "settings" }>([{ name: "sources" }]);
   /** The Library page's "…" menu: the system bar's button opens it on iOS. */
   const homeMenu = signal(false);
   useBrowser((r) => nav.push(r));
+  setEditor((b) => nav.push({ name: "edit", bookmark: b }));
+  cleanup(() => setEditor(null));
   // No header background: iOS 26 draws its bar as Liquid Glass over the page,
   // with the content scrolling under it; the app only tints it.
   const headerClass = () => `text-[${look().ink}] tint-[${look().stamp}]`;
@@ -258,6 +469,7 @@ function Phone(props: { onReconnect: () => void }) {
                 headerClass={headerClass()}
                 style={{ backgroundColor: look().paper }}
               >
+                <WebBar title={sourceTitle(route.source)} onBack={() => nav.pop()} />
                 <Library
                   source={route.source}
                   wide={false}
@@ -285,6 +497,11 @@ function Phone(props: { onReconnect: () => void }) {
                   />
                 }
               >
+                <WebBar
+                  title={route.bookmark.domain.replace(/^www\./, "")}
+                  onBack={() => nav.pop()}
+                  onMore={(at) => void showBookmarkMenu(b(), undefined, at)}
+                />
                 <Reader bookmark={route.bookmark} wide={false} onBack={() => nav.pop()} />
               </NavPage>
             );
@@ -308,6 +525,7 @@ function Phone(props: { onReconnect: () => void }) {
                 headerClass={solidHeaderClass()}
                 style={{ backgroundColor: look().paper }}
               >
+                <WebBar title="Add bookmark" onBack={() => nav.pop()} />
                 <View class="flex-1 p-5" style={{ backgroundColor: look().paper }}>
                   <AddBookmark
                     source={route.source}
@@ -318,6 +536,30 @@ function Phone(props: { onReconnect: () => void }) {
                 </View>
               </NavPage>
             );
+          case "edit":
+            return (
+              <NavPage
+                animation={pageAnimation}
+                title="Edit bookmark"
+                headerClass={solidHeaderClass()}
+                style={{ backgroundColor: look().paper }}
+              >
+                <WebBar title="Edit bookmark" onBack={() => nav.pop()} />
+                <Scroll
+                  class="flex-1"
+                  keyboardDismissMode="on-drag"
+                  keyboardShouldPersistTaps="handled"
+                  contentStyle={{ padding: 20, paddingBottom: keyboardFrame().height + 20 }}
+                  style={{ backgroundColor: look().paper }}
+                >
+                  <EditBookmark
+                    b={route.bookmark}
+                    onDone={() => nav.pop()}
+                    onCancel={platform.os === "web" ? () => nav.pop() : undefined}
+                  />
+                </Scroll>
+              </NavPage>
+            );
           case "settings":
             return (
               <NavPage
@@ -326,6 +568,7 @@ function Phone(props: { onReconnect: () => void }) {
                 headerClass={solidHeaderClass()}
                 style={{ backgroundColor: look().paper }}
               >
+                <WebBar title="Server" onBack={() => nav.pop()} />
                 <Settings
                   onDone={() => {
                     nav.pop();
@@ -341,3 +584,36 @@ function Phone(props: { onReconnect: () => void }) {
 }
 
 mount(App);
+
+/**
+ * The web draws no navigation header (on iOS the system's bar has the title
+ * and Back): a phone-sized browser window gets a bar of the app's own.
+ */
+function WebBar(props: {
+  title: string;
+  onBack: () => void;
+  onMore?: (at: { x: number; y: number }) => void;
+}) {
+  if (platform.os !== "web") return null;
+  return (
+    <View
+      class="flex-row items-center gap-3 px-3"
+      style={{ height: 56, backgroundColor: look().paper }}
+    >
+      <RoundGlassButton name="back" label="Back" testID="back" onPress={props.onBack} />
+      <Text
+        class="flex-1 truncate"
+        style={{ color: look().ink, fontSize: 17, fontWeight: "600", textAlign: "center" }}
+      >
+        {props.title}
+      </Text>
+      <If when={props.onMore} else={<View style={{ width: 40 }} />}>
+        <RoundGlassButton
+          name="more"
+          label="More"
+          onPress={(e) => props.onMore?.(e?.pagePosition ?? { x: 0, y: 0 })}
+        />
+      </If>
+    </View>
+  );
+}

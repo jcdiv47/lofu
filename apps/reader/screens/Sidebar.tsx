@@ -1,8 +1,27 @@
 import { Scroll, Text, View } from "nsh";
 import { Icon, type IconName } from "../components/ui";
+import { showSourceMenu } from "../lib/actions";
 import { fonts, look } from "../lib/look";
 import { sortedCollections, sortedTags } from "../lib/prefs";
-import { countFor, type Source, sameSource, syncError, syncing } from "../lib/store";
+import {
+  countFor,
+  offline,
+  outbox,
+  type Source,
+  sameSource,
+  syncError,
+  syncing,
+} from "../lib/store";
+
+/** The sync line under the sources: phones' Library page says the same. */
+export const syncStatus = () => {
+  const waiting = outbox().length;
+  const pending = waiting ? ` · ${waiting} change${waiting === 1 ? "" : "s"} waiting` : "";
+  if (offline()) return `Offline${pending}`;
+  if (syncError()) return syncError();
+  if (syncing()) return "Syncing…";
+  return waiting ? `Sending${pending}` : "Up to date";
+};
 
 /**
  * Where the library can be looked at from, in the desktop's sidebar: the
@@ -29,6 +48,14 @@ export function Sources(props: {
         accessibilityState={{ selected: active() }}
         testID={testID}
         onPress={() => props.onSelect(source)}
+        onContextMenu={
+          source.kind === "collection" || source.kind === "tag"
+            ? (e) =>
+                void showSourceMenu(source, e.pagePosition, () => {
+                  if (active()) props.onSelect({ kind: "all" });
+                })
+            : undefined
+        }
         class="h-8 flex-row items-center gap-2.5 rounded-lg px-2.5"
         style={{ backgroundColor: active() ? selectedBg() : undefined }}
         hoverStyle={{ backgroundColor: active() ? selectedBg() : hoverBg() }}
@@ -95,11 +122,16 @@ export function Sources(props: {
             width: 7,
             height: 7,
             borderRadius: 4,
-            backgroundColor: syncError() ? look().stamp : syncing() ? look().favorite : "#6f9b6a",
+            backgroundColor:
+              syncError() || offline()
+                ? look().stamp
+                : syncing() || outbox().length
+                  ? look().favorite
+                  : "#6f9b6a",
           }}
         />
         <Text class="flex-1 truncate" style={{ color: look().inkFaint, fontSize: 12 }}>
-          {syncError() ? syncError() : syncing() ? "Syncing…" : "Up to date"}
+          {syncStatus()}
         </Text>
         <View
           role="button"

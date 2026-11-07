@@ -440,3 +440,158 @@ test("desktop: the context menu moves, shares and deletes", async () => {
   await app.press("label:Trash");
   await app.waitFor("text:Article a");
 });
+
+const desktop = { ...saved, platform: "macos" as const, width: 1200, height: 800 };
+
+test("desktop: a highlight the text has lost still counts, and can be removed", async () => {
+  const deleted: string[] = [];
+  const app = await open("./App.tsx", {
+    ...desktop,
+    network: {
+      ...readable,
+      [`GET ${S}/v1/bookmarks/a/highlights`]: {
+        body: [{ id: "h1", bookmarkId: "a", quote: "words that are gone", prefix: "", suffix: "" }],
+      },
+      [`DELETE ${S}/v1/highlights/h1`]: () => {
+        deleted.push("h1");
+        return { status: 204 };
+      },
+    },
+  });
+  await app.press("text:Article a");
+  await app.waitUntil(() => app.texts().some((t) => t.includes("1 not found")));
+  // Opening it doesn't drop it from Highlights.
+  expect(app.texts().join(" ")).toContain("Highlights 1");
+  const asked: string[] = [];
+  app.onDialog((d) => {
+    asked.push(d.message ?? "");
+    return "Remove it";
+  });
+  await app.press("label:Highlights not found");
+  await app.waitUntil(() => deleted.length > 0);
+  expect(asked[0]).toContain("“words that are gone”");
+  await app.waitUntil(() => !app.texts().some((t) => t.includes("not found")));
+});
+
+test("desktop: a bookmark's title, tags and note are edited, and the note shows above the text", async () => {
+  const log = { patches: [] as [string, unknown][], deletes: [] as string[] };
+  const app = await open("./App.tsx", {
+    ...desktop,
+    network: {
+      ...editable(log),
+      ...readable,
+      [`PATCH ${S}/v1/bookmarks/a`]: (r) => {
+        const patch = JSON.parse(r.body ?? "{}");
+        log.patches.push(["a", patch]);
+        return { body: { ...library.bookmarks[0], ...patch } };
+      },
+    },
+  });
+  await app.waitFor("text:Article a");
+  await app.rightClick("id:card-a");
+  await app.chooseMenuItem("Edit title, tags and note…");
+  await app.waitFor("id:edit-title");
+  await app.clear("id:edit-title");
+  await app.type("id:edit-title", "A better title");
+  await app.clear("id:edit-tags");
+  await app.type("id:edit-tags", "rust, Reading List");
+  await app.type("id:edit-note", "Read the second half.");
+  await app.press("id:edit-save");
+  await app.waitUntil(() => log.patches.length > 0);
+  expect(log.patches[0]).toEqual([
+    "a",
+    { title: "A better title", tags: ["rust", "reading list"], note: "Read the second half." },
+  ]);
+  await app.waitFor("text:A better title");
+  await app.press("text:A better title");
+  await app.waitFor("text:Read the second half.");
+  await app.waitFor("text:Some text to read here.");
+});
+
+test("offline: a change waits on the device and is sent once the server is back", async () => {
+  let online = false;
+  const patches: unknown[] = [];
+  const app = await open("./App.tsx", {
+    ...desktop,
+    network: {
+      [`GET ${S}/v1/sync*`]: () => {
+        if (!online) return { error: "offline" };
+        const bookmarks = library.bookmarks.map((b) =>
+          b.id === "bb" ? { ...b, ...(patches[0] as object) } : b,
+        );
+        return { body: { ...library, bookmarks } };
+      },
+      [`PATCH ${S}/v1/bookmarks/bb`]: (r) => {
+        if (!online) return { error: "offline" };
+        const patch = JSON.parse(r.body ?? "{}");
+        patches.push(patch);
+        return { body: { ...library.bookmarks[1], ...patch } };
+      },
+    },
+  });
+  online = true;
+  await app.press("id:sync");
+  await app.waitFor("text:Article bb");
+  online = false;
+  await app.rightClick("id:card-bb");
+  await app.chooseMenuItem("Remove from favorites");
+  // It stays changed, and says it's waiting.
+  await app.waitUntil(() => app.texts().some((t) => t.includes("1 change waiting")));
+  await app.press("label:Favorites");
+  await app.waitUntil(() => !app.shows("text:Article bb"));
+  online = true;
+  await app.press("id:sync");
+  await app.waitUntil(() => patches.length > 0);
+  expect(patches).toEqual([{ favorite: false }]);
+  await app.waitFor("text:Up to date");
+  expect(app.shows("text:Article bb")).toBe(false);
+});
+
+test("desktop: tags are renamed and collections deleted from their menus", async () => {
+  const calls: string[] = [];
+  // The server's library, as the changes leave it.
+  let now = library;
+  const app = await open("./App.tsx", {
+    ...desktop,
+    network: {
+      [`GET ${S}/v1/sync*`]: () => ({ body: now }),
+      [`POST ${S}/v1/tags/rename`]: (r) => {
+        calls.push(`rename ${r.body}`);
+        now = {
+          ...now,
+          bookmarks: now.bookmarks.map((b) =>
+            b.tags.includes("rust") ? { ...b, tags: ["rustlang"] } : b,
+          ),
+        };
+        return { body: { updated: 1 } };
+      },
+      [`DELETE ${S}/v1/collections/c1`]: () => {
+        calls.push("delete c1");
+        now = {
+          ...now,
+          collections: now.collections.map((c) => ({ ...c, deletedAt: "2026-11-06T00:00:00Z" })),
+          bookmarks: now.bookmarks.map((b) => ({ ...b, collectionId: null })),
+        };
+        return { status: 204 };
+      },
+    },
+  });
+  await app.waitFor("label:rust");
+  await app.rightClick("label:rust");
+  await app.chooseMenuItem("Rename or merge…");
+  await app.waitFor("id:prompt-text");
+  await app.clear("id:prompt-text");
+  await app.type("id:prompt-text", "Rustlang");
+  await app.press("id:prompt-confirm");
+  await app.waitUntil(() => calls.length > 0);
+  expect(calls[0]).toBe(`rename ${JSON.stringify({ from: "rust", to: "rustlang" })}`);
+  await app.waitFor("label:rustlang");
+
+  app.onDialog(() => "Delete");
+  await app.rightClick("label:Homelab");
+  await app.chooseMenuItem("Delete collection…");
+  await app.waitUntil(() => calls.length > 1);
+  expect(calls[1]).toBe("delete c1");
+  await app.press("label:Unsorted");
+  await app.waitFor("text:Article a");
+});

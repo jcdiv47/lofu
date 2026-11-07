@@ -13,7 +13,8 @@ import { BookmarkCard, BookmarkRow, CARD_COVER } from "../components/BookmarkCar
 import { SearchField } from "../components/SearchField";
 import { SwipeRow, swipeable } from "../components/SwipeRow";
 import { RoundGlassButton, TopEdge } from "../components/ui";
-import { api, type Bookmark, type SearchHit } from "../lib/api";
+import { setSearchFocus } from "../lib/actions";
+import { api, type Bookmark, SEARCH_PAGE, type SearchHit } from "../lib/api";
 import { look } from "../lib/look";
 import {
   bookmark,
@@ -106,6 +107,9 @@ export function Library(props: {
 }) {
   const query = signal(props.initialQuery ?? "");
   const hits = signal<SearchHit[] | null>(null);
+  /** How many the server found (it counts them roughly). */
+  const total = signal(0);
+  cleanup(() => setSearchFocus(null));
   const searching = () => query().trim().length > 0;
 
   // Search as the user types, on the server (it knows the article text); a
@@ -121,13 +125,41 @@ export function Library(props: {
     const timer = setTimeout(async () => {
       try {
         const r = await api.search(q, searchFilter(props.source));
-        if (mine === generation) hits.set(r.hits);
+        if (mine === generation) {
+          hits.set(r.hits);
+          total.set(r.estimatedTotal ?? r.hits.length);
+        }
       } catch {
-        if (mine === generation) hits.set([]);
+        if (mine === generation) {
+          hits.set([]);
+          total.set(0);
+        }
       }
     }, 180);
     cleanup(() => clearTimeout(timer));
   });
+
+  /** The next page of hits, as the list nears its end. */
+  let paging = false;
+  const loadMore = async () => {
+    const h = hits();
+    const q = query().trim();
+    if (!q || !h || paging || h.length >= total() || h.length % SEARCH_PAGE !== 0) return;
+    paging = true;
+    const mine = generation;
+    try {
+      const r = await api.search(q, searchFilter(props.source), h.length);
+      if (mine === generation) {
+        const seen = new Set(h.map((x) => x.bookmark.id));
+        hits.set([...h, ...r.hits.filter((x) => !seen.has(x.bookmark.id))]);
+        if (!r.hits.length) total.set(h.length);
+      }
+    } catch {
+      // Offline, say: the hits so far stay.
+    } finally {
+      paging = false;
+    }
+  };
 
   type Item = { b: Bookmark; snippet: string | null };
   const items = (): Item[] => {
@@ -169,7 +201,7 @@ export function Library(props: {
             {sourceTitle(props.source)}
           </Text>
           <Text style={{ color: look().inkFaint, fontSize: 13, fontVariant: ["tabular-nums"] }}>
-            {searching() ? (hits() ? `${hits()?.length} found` : "") : countFor(props.source) || ""}
+            {searching() ? (hits() ? `${total()} found` : "") : countFor(props.source) || ""}
           </Text>
         </View>
         <View style={{ width: 280 }}>
@@ -177,6 +209,7 @@ export function Library(props: {
             value={query}
             onChange={(v) => query.set(v)}
             placeholder="Search titles and text"
+            inputRef={(r) => setSearchFocus(() => r.focus())}
           />
         </View>
         <RoundGlassButton
@@ -256,6 +289,7 @@ export function Library(props: {
               keyboardShouldPersistTaps="handled"
               contentStyle={{ paddingTop: 4, paddingBottom: SEARCH_H + 40 }}
               empty={<Empty searching={searching()} source={props.source} />}
+              onLoadMore={() => void loadMore()}
             >
               {(i) =>
                 swipeable ? (
@@ -310,6 +344,7 @@ export function Library(props: {
                   columnGap: GAP,
                 }}
                 empty={<Empty searching={searching()} source={props.source} />}
+                onLoadMore={() => void loadMore()}
               >
                 {(i) => (
                   <BookmarkCard

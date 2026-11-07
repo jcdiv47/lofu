@@ -20,6 +20,7 @@ import {
   RoundGlassButton,
   TopEdge,
 } from "../components/ui";
+import { showSourceMenu } from "../lib/actions";
 import { glass, look } from "../lib/look";
 import {
   type CollectionSort,
@@ -36,11 +37,14 @@ import {
   type BookmarkType,
   countFor,
   createCollection,
+  offline,
+  outbox,
   type Source,
   syncError,
   syncing,
   typeTitles,
 } from "../lib/store";
+import { syncStatus } from "./Sidebar";
 
 /** The colored glyphs of the list, as iOS's own lists draw them. */
 const tint = {
@@ -113,6 +117,16 @@ export function Home(props: {
       accessibilityLabel={label}
       testID={testID}
       onPress={() => props.onSelect(source)}
+      onLongPress={
+        source.kind === "collection" || source.kind === "tag"
+          ? () => void showSourceMenu(source)
+          : undefined
+      }
+      onContextMenu={
+        source.kind === "collection" || source.kind === "tag"
+          ? (e) => void showSourceMenu(source, e.pagePosition)
+          : undefined
+      }
       class="h-[52px] flex-row items-center gap-3.5 pr-5 pl-4"
       activeStyle={{ backgroundColor: look().selected }}
     >
@@ -302,7 +316,7 @@ export function Home(props: {
     </>
   );
 
-  const status = () => (syncError() ? syncError() : syncing() ? "Syncing…" : "Up to date");
+  const status = syncStatus;
 
   return (
     <View class="flex-1" style={{ backgroundColor: look().paper }}>
@@ -323,11 +337,12 @@ export function Home(props: {
                 width: 7,
                 height: 7,
                 borderRadius: 4,
-                backgroundColor: syncError()
-                  ? look().stamp
-                  : syncing()
-                    ? look().favorite
-                    : "#6f9b6a",
+                backgroundColor:
+                  syncError() || offline()
+                    ? look().stamp
+                    : syncing() || outbox().length
+                      ? look().favorite
+                      : "#6f9b6a",
               }}
             />
             <Text class="truncate" style={{ color: look().inkFaint, fontSize: 13 }}>
