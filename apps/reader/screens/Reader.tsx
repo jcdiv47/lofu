@@ -394,12 +394,17 @@ export function Reader(props: {
     const m = await host?.measure();
     if (!ed || !m || !index.text.length) return null;
     const x = m.pagePosition.x + sidePad() + 4;
+    const viewBottom = m.pagePosition.y + m.bounds.size.height - 24;
     const top = ed.posAtPageCoords({ x, y: m.pagePosition.y + chromeTop() + 16 });
-    const bottom = ed.posAtPageCoords({
-      x,
-      y: m.pagePosition.y + m.bounds.size.height - 24,
-    });
     if (top == null) return null;
+    // The end is on screen: read. (The point at the view's bottom lies in
+    // the padding under the text there, so it can't tell; an article not
+    // much longer than the screen never got past its first percent.)
+    const last = index.pos[index.pos.length - 1];
+    const end =
+      last == null ? null : (ed.pageCoordsAtPos(last) as { y: number; height: number } | null);
+    if (end && end.y + end.height <= viewBottom) return 1;
+    const bottom = ed.posAtPageCoords({ x, y: viewBottom });
     const len = index.text.length;
     if (bottom != null && textOffset(bottom) >= len - 1) return 1;
     return Math.min(1, textOffset(top) / len);
