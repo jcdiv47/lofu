@@ -1,3 +1,4 @@
+import { ShareExtension } from "lofu/native";
 import { Storage } from "nsh";
 
 /** The subset of the lofu API the app uses (shapes from packages/shared/src/schemas.ts). */
@@ -95,6 +96,20 @@ export const normalizeServer = (s: string) => s.trim().replace(/\/+$/, "");
 export async function saveSettings(s: Settings): Promise<void> {
   await Storage.setItem("server", normalizeServer(s.server));
   await Storage.setItem("token", s.token.trim());
+  shareLogin(s);
+}
+
+/**
+ * Hands the server and token to the iOS share extension (`share/`), which
+ * saves with them from other apps' share sheets. A no-op where there's no
+ * extension: other platforms, and builds without it.
+ */
+export function shareLogin(s: Settings) {
+  try {
+    ShareExtension.remember(normalizeServer(s.server), s.token.trim());
+  } catch {
+    // No native module (headless tests, the web).
+  }
 }
 
 async function request<T>(method: string, path: string, body?: unknown, settings?: Settings) {

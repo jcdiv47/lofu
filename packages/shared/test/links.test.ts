@@ -1,32 +1,64 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { extractUrl, isRedirectLink, unwrapUrl } from "../src/links.ts";
 
+/** Share text and what it saves; the share extension's Swift port runs them too. */
+const EXTRACT: [string, string | null][] = [
+  ["https://example.com/a", "https://example.com/a"],
+  ["  https://zh.wikipedia.org/wiki/中文  ", "https://zh.wikipedia.org/wiki/中文"],
+  [
+    "【好物分享】 http://xhslink.com/a/AbC123 复制本条信息，打开【小红书】App查看精彩内容！",
+    "http://xhslink.com/a/AbC123",
+  ],
+  ["7.43 复制打开抖音 https://v.douyin.com/iRxYz12/ 看看【作品】", "https://v.douyin.com/iRxYz12/"],
+  ["Read this: https://example.com/post.", "https://example.com/post"],
+  ["(see https://en.wikipedia.org/wiki/Foo_(bar))", "https://en.wikipedia.org/wiki/Foo_(bar)"],
+  ["链接：https://example.com/x，快看", "https://example.com/x"],
+  ["Great thread https://t.co/AbCdEf via @someone", "https://t.co/AbCdEf"],
+  ["example.com", "https://example.com"],
+  ["www.example.com", "https://www.example.com"],
+  ["check xhslink.com/a/xyz now", "https://xhslink.com/a/xyz"],
+  ["I use Node.js, e.g. daily", null],
+  ["no link here", null],
+  ["", null],
+  ["javascript:alert(1)", null],
+];
+
 describe("extractUrl", () => {
-  test.each([
-    ["https://example.com/a", "https://example.com/a"],
-    ["  https://zh.wikipedia.org/wiki/中文  ", "https://zh.wikipedia.org/wiki/中文"],
-    [
-      "【好物分享】 http://xhslink.com/a/AbC123 复制本条信息，打开【小红书】App查看精彩内容！",
-      "http://xhslink.com/a/AbC123",
-    ],
-    [
-      "7.43 复制打开抖音 https://v.douyin.com/iRxYz12/ 看看【作品】",
-      "https://v.douyin.com/iRxYz12/",
-    ],
-    ["Read this: https://example.com/post.", "https://example.com/post"],
-    ["(see https://en.wikipedia.org/wiki/Foo_(bar))", "https://en.wikipedia.org/wiki/Foo_(bar)"],
-    ["链接：https://example.com/x，快看", "https://example.com/x"],
-    ["Great thread https://t.co/AbCdEf via @someone", "https://t.co/AbCdEf"],
-    ["example.com", "https://example.com"],
-    ["www.example.com", "https://www.example.com"],
-    ["check xhslink.com/a/xyz now", "https://xhslink.com/a/xyz"],
-    ["I use Node.js, e.g. daily", null],
-    ["no link here", null],
-    ["", null],
-    ["javascript:alert(1)", null],
-  ])("%s", (input, expected) => {
+  test.each(EXTRACT)("%s", (input, expected) => {
     expect(extractUrl(input)).toBe(expected);
   });
+
+  // apps/reader/share/Sources/Links.swift, where there's a Swift compiler.
+  const swiftc = process.platform === "darwin" ? Bun.which("swiftc") : null;
+  test.skipIf(!swiftc)(
+    "the share extension's port agrees",
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), "lofu-links-"));
+      const share = join(import.meta.dir, "../../../apps/reader/share");
+      try {
+        writeFileSync(join(dir, "cases.json"), JSON.stringify(EXTRACT));
+        const build = Bun.spawnSync([
+          swiftc!,
+          "-swift-version",
+          "6",
+          join(share, "Sources/Links.swift"),
+          join(share, "check/main.swift"),
+          "-o",
+          join(dir, "check"),
+        ]);
+        expect(build.stderr.toString()).not.toContain("error:");
+        const run = Bun.spawnSync([join(dir, "check"), join(dir, "cases.json")]);
+        expect(run.stdout.toString()).toBe("");
+        expect(run.exitCode).toBe(0);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
 });
 
 describe("unwrapUrl", () => {

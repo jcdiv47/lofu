@@ -1,6 +1,7 @@
 //! What the app needs from the platform that nsh doesn't offer: the system's
 //! share sheet (`UIActivityViewController` on iOS, `NSSharingServicePicker`
-//! on macOS), and the system's own glass buttons (and, on iOS, search field) as native
+//! on macOS), the login the iOS share extension (`share/`) saves with, and
+//! the system's own glass buttons (and, on iOS, search field) as native
 //! components (`controls`, used through `components/native.tsx`). TSX
 //! imports the modules from `lofu/native` (`lib/share.ts`); their TypeScript
 //! declarations are generated into `.nsh/types/lofu/native.d.ts`.
@@ -30,6 +31,77 @@ fn native(registry: &mut Registry) {
     registry.module::<Share>();
     registry.module::<Sheet>();
     registry.module::<Controls>();
+    registry.module::<ShareExtension>();
+}
+
+/// The iOS share extension (`share/`): "lofu" in other apps' share sheets.
+/// It saves with the app's server address and token, which it reads from a
+/// Keychain group the two share. `share/package.ts` names the group in the
+/// app's Info.plist (`LofuKeychainGroup`); a build without the extension has
+/// none, and there is nothing to share.
+#[module]
+pub struct ShareExtension;
+
+#[module]
+impl ShareExtension {
+    /// Hands the extension the server address and token, or forgets them
+    /// when both are empty. Returns whether the extension can save with
+    /// them: false without the extension, or when the Keychain refuses.
+    pub fn remember(server: String, token: String) -> bool {
+        login::remember(&server, &token)
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+mod login {
+    pub fn remember(_server: &str, _token: &str) -> bool {
+        false
+    }
+}
+
+#[cfg(target_os = "ios")]
+mod login {
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    use objc2_foundation::NSString;
+    use security_framework::passwords::{
+        PasswordOptions, delete_generic_password_options, set_generic_password_options,
+    };
+
+    /// The item both read: `share/Sources/Login.swift` looks for the same.
+    const SERVICE: &str = "app.lofu.reader";
+    const ACCOUNT: &str = "login";
+
+    /// The group in the app's Info.plist, from `share/package.ts`.
+    fn group() -> Option<String> {
+        // SAFETY: NSBundle is thread-safe; the value is a string or absent.
+        unsafe {
+            let bundle: Retained<AnyObject> = msg_send![class!(NSBundle), mainBundle];
+            let key = NSString::from_str("LofuKeychainGroup");
+            let value: Option<Retained<AnyObject>> =
+                msg_send![&*bundle, objectForInfoDictionaryKey: &*key];
+            let s = value?.downcast::<NSString>().ok()?;
+            Some(s.to_string()).filter(|s| !s.is_empty())
+        }
+    }
+
+    fn options(group: &str) -> PasswordOptions {
+        let mut o = PasswordOptions::new_generic_password(SERVICE, ACCOUNT);
+        o.set_access_group(group);
+        o
+    }
+
+    pub fn remember(server: &str, token: &str) -> bool {
+        let Some(group) = group() else {
+            return false;
+        };
+        if server.is_empty() && token.is_empty() {
+            return delete_generic_password_options(options(&group)).is_ok();
+        }
+        let login = serde_json::json!({ "server": server, "token": token }).to_string();
+        set_generic_password_options(login.as_bytes(), options(&group)).is_ok()
+    }
 }
 
 /// The native controls (`controls`).

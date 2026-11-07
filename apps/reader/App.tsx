@@ -5,7 +5,7 @@ import { AddBookmark } from "./components/AddBookmark";
 import { GlassTint } from "./components/ui";
 import { setBrowser, showBookmarkMenu } from "./lib/actions";
 import type { Bookmark } from "./lib/api";
-import { loadSettings } from "./lib/api";
+import { loadSettings, shareLogin } from "./lib/api";
 import { glass, look } from "./lib/look";
 import { bookmark as current, reset, type Source, sourceTitle, start, sync } from "./lib/store";
 import { Browser } from "./screens/Browser";
@@ -45,6 +45,8 @@ function App() {
   const ready = signal<"settings" | "app" | null>(null);
   void loadSettings().then((s) => {
     if (s.server && s.token) {
+      // Logins from before the share extension reach it this way.
+      shareLogin(s);
       ready.set("app");
       void start();
     } else ready.set("settings");
