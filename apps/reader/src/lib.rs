@@ -31,6 +31,7 @@ fn macos_components(components: &nsh_platform_macos::Components) {
 fn native(registry: &mut Registry) {
     registry.module::<Share>();
     registry.module::<PopupMenu>();
+    registry.module::<Toolbar>();
     registry.module::<Controls>();
     registry.module::<ShareExtension>();
     registry.module::<files::Files>();
@@ -38,6 +39,42 @@ fn native(registry: &mut Registry) {
 }
 
 mod files;
+mod toolbar;
+
+/// The window's toolbar on macOS (`src/toolbar.rs`): a real `NSToolbar`,
+/// which AppKit draws in Liquid Glass on macOS 26.
+#[module]
+pub struct Toolbar;
+
+#[module]
+impl Toolbar {
+    /// Whether the window has a toolbar of the app's here (macOS).
+    pub fn available() -> bool {
+        cfg!(target_os = "macos")
+    }
+
+    /// Shows `items` (JSON: `[{ kind: "button", id, symbol, label, tint?,
+    /// prominent?, disabled? } | { kind: "search", id, label, placeholder,
+    /// value, width? } | { kind: "space", id, x } | { kind: "flex" } |
+    /// { kind: "gap" }]`) in the window's toolbar. A `space` widens until the
+    /// next item starts `x` points from the window's left edge; `gap` parts
+    /// two groups of glass.
+    pub fn set(items: String) {
+        toolbar::set(items)
+    }
+
+    /// The next click or search edit, as JSON: `{ type: "press", id, x, y }`
+    /// (the pointer, from the window's top left) or `{ type: "search", id,
+    /// value }`.
+    pub async fn next() -> String {
+        toolbar::next().await
+    }
+
+    /// Puts the keyboard in the toolbar's search field (⌘F).
+    pub fn search() {
+        toolbar::search()
+    }
+}
 
 /// The iOS share extension (`share/`): "lofu" in other apps' share sheets.
 /// It saves with the app's server address and token, which it reads from a

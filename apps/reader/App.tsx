@@ -15,7 +15,7 @@ import { createNavStack, Dialog, NavPage, NavStack } from "nsh/base";
 import { isAvailable, Menu, titleBar, Window } from "nsh/desktop";
 import { AddBookmark } from "./components/AddBookmark";
 import { EditBookmark } from "./components/EditBookmark";
-import { PromptHost } from "./components/Prompt";
+import { PromptHost, prompting } from "./components/Prompt";
 import { GlassTint, RoundGlassButton } from "./components/ui";
 import {
   deleteBookmark,
@@ -39,6 +39,7 @@ import {
   sync,
   updateBookmark,
 } from "./lib/store";
+import { contentLeft, toolbarBlocked } from "./lib/toolbar";
 import { Browser } from "./screens/Browser";
 import { Home } from "./screens/Home";
 import { Library } from "./screens/Library";
@@ -131,6 +132,11 @@ function Desktop(props: { onReconnect: () => void }) {
   useBrowser((r) => nav.push(r));
   setEditor((b) => editing.set(b));
   cleanup(() => setEditor(null));
+  // The window toolbar's leading items line up with the content (`lib/toolbar.ts`).
+  contentLeft.set(SIDEBAR + INSET);
+  // The window toolbar can't be covered by a dialog: it waits while one is open.
+  effect(() => toolbarBlocked.set(settingsOpen() || !!editing() || adding() || prompting()));
+  cleanup(() => toolbarBlocked.set(false));
   const select = (s: Source) => {
     source.set(s);
     nav.setRoutes([{ name: "library", source: s }]);

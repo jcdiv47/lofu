@@ -33,11 +33,20 @@ test("signs in, browses sources, searches and reads", async () => {
   await shot(app, `${target.name}-2-library`);
 
   // Search runs on the server, over the article text, with matches marked.
-  await app.type("id:search", "write-ahead log");
+  // On the Mac the field is the window toolbar's (NSSearchToolbarItem), not
+  // a view of the app's: ⌘F puts the keyboard in it and real keys type.
+  if (desktop) {
+    await app.keyboard.press("mod+f");
+    await app.wait(300);
+    for (const c of "write-ahead log") await app.keyboard.press(c === " " ? "space" : c);
+  } else {
+    await app.type("id:search", "write-ahead log");
+  }
   await app.waitFor("text:/\\d+ found|SQLite Internals/", { timeout: 8000 });
   await app.wait(1000);
   await shot(app, `${target.name}-4-search`);
-  await app.clear("id:search");
+  if (desktop) await app.keyboard.press("Escape");
+  else await app.clear("id:search");
   await app.waitFor("text:Rope & SumTree");
 
   if (desktop) {

@@ -2,6 +2,10 @@ import { safeAreaInsets, signal, Text, View, WebView, type WebViewRef } from "ns
 import { GlassButton, GlassGroup, GlassTint, IconButton, RoundGlassButton } from "../components/ui";
 import { openInBrowser } from "../lib/actions";
 import { glass, look } from "../lib/look";
+import { contentLeft, nativeToolbar, useToolbar } from "../lib/toolbar";
+
+/** The window toolbar's Close and its back, forward and reload (macOS), before the page's title. */
+const NAV_ROOM = 160;
 
 const host = (url: string) => {
   try {
@@ -76,25 +80,87 @@ export function Browser(props: {
     />
   );
 
+  /** The Mac's window toolbar has the page's controls (`lib/toolbar.ts`). */
+  const native = props.wide && nativeToolbar;
+  if (native) {
+    useToolbar(() => [
+      { kind: "space", id: "lead", x: contentLeft() + 16 },
+      {
+        kind: "button",
+        id: "close",
+        symbol: "xmark",
+        label: "Close page",
+        onPress: () => props.onClose(),
+      },
+      { kind: "gap" },
+      {
+        kind: "button",
+        id: "web-back",
+        symbol: "chevron.left",
+        label: "Back",
+        disabled: !at().canGoBack,
+        onPress: () => web?.goBack(),
+      },
+      {
+        kind: "button",
+        id: "web-forward",
+        symbol: "chevron.right",
+        label: "Forward",
+        disabled: !at().canGoForward,
+        onPress: () => web?.goForward(),
+      },
+      {
+        kind: "button",
+        id: "web-reload",
+        symbol: at().loading ? "xmark" : "arrow.clockwise",
+        label: at().loading ? "Stop loading" : "Reload",
+        onPress: () => {
+          if (at().loading) web?.stopLoading();
+          else {
+            failed.set(null);
+            web?.reload();
+          }
+        },
+      },
+      { kind: "flex" },
+      {
+        kind: "button",
+        id: "web-external",
+        symbol: "safari",
+        label: "Open in browser",
+        onPress: () => openInBrowser(at().url),
+      },
+    ]);
+  }
+
   return (
     <View class="flex-1" style={{ backgroundColor: look().paper }}>
       <If when={props.wide}>
         <View
           desktop={{ windowDrag: true }}
-          class="flex-row items-center gap-2.5 pr-4"
-          style={{ height: 60, paddingTop: 8, paddingLeft: (props.toolbarInset ?? 0) + 16 }}
+          class="flex-row items-center gap-2.5"
+          style={{
+            // With the window's toolbar, the controls are its items: the row
+            // keeps the page's title, between them.
+            height: native ? 52 : 60,
+            paddingTop: native ? 0 : 8,
+            paddingLeft: (props.toolbarInset ?? 0) + 16 + (native ? NAV_ROOM : 0),
+            paddingRight: native ? 64 : 16,
+          }}
         >
-          <RoundGlassButton
-            name="close"
-            label="Close page"
-            testID="web-close"
-            onPress={props.onClose}
-          />
-          <GlassGroup>
-            {back()}
-            {forward()}
-            {reload()}
-          </GlassGroup>
+          <If when={!native}>
+            <RoundGlassButton
+              name="close"
+              label="Close page"
+              testID="web-close"
+              onPress={props.onClose}
+            />
+            <GlassGroup>
+              {back()}
+              {forward()}
+              {reload()}
+            </GlassGroup>
+          </If>
           <View class="flex-1 px-1">
             <Text
               testID="web-title"
@@ -107,12 +173,14 @@ export function Browser(props: {
               {host(at().url)}
             </Text>
           </View>
-          <RoundGlassButton
-            name="external"
-            label="Open in browser"
-            testID="web-external"
-            onPress={() => openInBrowser(at().url)}
-          />
+          <If when={!native}>
+            <RoundGlassButton
+              name="external"
+              label="Open in browser"
+              testID="web-external"
+              onPress={() => openInBrowser(at().url)}
+            />
+          </If>
         </View>
       </If>
       <View class="flex-1">

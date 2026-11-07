@@ -18,7 +18,7 @@
 use nsh_core::JsonValue;
 
 /// A color from `#rgb`, `#rrggbb` or `#rrggbbaa`, as sRGB components 0…1.
-fn parse_color(value: Option<&JsonValue>) -> Option<[f64; 4]> {
+pub(crate) fn parse_color(value: Option<&JsonValue>) -> Option<[f64; 4]> {
     let hex = value?.as_str()?.strip_prefix('#')?;
     let digits: Vec<u8> = hex
         .chars()

@@ -28,6 +28,7 @@ import {
   syncError,
   syncing,
 } from "../lib/store";
+import { focusToolbarSearch, nativeToolbar, useToolbar } from "../lib/toolbar";
 
 const CARD_MIN = 236;
 const GAP = 18;
@@ -110,6 +111,40 @@ export function Library(props: {
   /** How many the server found (it counts them roughly). */
   const total = signal(0);
   cleanup(() => setSearchFocus(null));
+  /** The Mac's window toolbar has the search, sync and + (`lib/toolbar.ts`). */
+  const native = props.wide && nativeToolbar;
+  if (native) {
+    setSearchFocus(focusToolbarSearch);
+    useToolbar(() => [
+      { kind: "flex" },
+      {
+        kind: "button",
+        id: "sync",
+        symbol: "arrow.clockwise",
+        label: "Sync now",
+        disabled: syncing(),
+        onPress: () => void sync(),
+      },
+      {
+        kind: "button",
+        id: "add",
+        symbol: "plus",
+        label: "Add bookmark",
+        tint: look().stamp,
+        prominent: true,
+        onPress: () => props.onAdd?.(),
+      },
+      {
+        kind: "search",
+        id: "search",
+        label: "Search",
+        placeholder: "Search titles and text",
+        value: query(),
+        width: 260,
+        onChange: (v) => query.set(v),
+      },
+    ]);
+  }
   const searching = () => query().trim().length > 0;
 
   // Search as the user types, on the server (it knows the article text); a
@@ -191,7 +226,12 @@ export function Library(props: {
       <View
         desktop={{ windowDrag: true }}
         class="absolute top-0 right-0 left-0 flex-row items-center gap-2.5 pr-4"
-        style={{ height: TOOLBAR + 8, paddingTop: 8, paddingLeft: (props.toolbarInset ?? 0) + PAD }}
+        style={{
+          // With the window's toolbar, the title is centred on its row.
+          height: native ? TOOLBAR : TOOLBAR + 8,
+          paddingTop: native ? 0 : 8,
+          paddingLeft: (props.toolbarInset ?? 0) + PAD,
+        }}
       >
         <View class="min-w-0 flex-1 flex-row items-baseline gap-2">
           <Text
@@ -204,29 +244,31 @@ export function Library(props: {
             {searching() ? (hits() ? `${total()} found` : "") : countFor(props.source) || ""}
           </Text>
         </View>
-        <View style={{ width: 280 }}>
-          <SearchField
-            value={query}
-            onChange={(v) => query.set(v)}
-            placeholder="Search titles and text"
-            inputRef={(r) => setSearchFocus(() => r.focus())}
+        <If when={!native}>
+          <View style={{ width: 280 }}>
+            <SearchField
+              value={query}
+              onChange={(v) => query.set(v)}
+              placeholder="Search titles and text"
+              inputRef={(r) => setSearchFocus(() => r.focus())}
+            />
+          </View>
+          <RoundGlassButton
+            name="refresh"
+            label="Sync now"
+            testID="sync"
+            onPress={() => void sync()}
+            color={syncing() ? look().inkFaint : look().inkSoft}
           />
-        </View>
-        <RoundGlassButton
-          name="refresh"
-          label="Sync now"
-          testID="sync"
-          onPress={() => void sync()}
-          color={syncing() ? look().inkFaint : look().inkSoft}
-        />
-        <RoundGlassButton
-          name="plus"
-          label="Add bookmark"
-          testID="add"
-          color={look().stamp}
-          prominent
-          onPress={() => props.onAdd?.()}
-        />
+          <RoundGlassButton
+            name="plus"
+            label="Add bookmark"
+            testID="add"
+            color={look().stamp}
+            prominent
+            onPress={() => props.onAdd?.()}
+          />
+        </If>
       </View>
     </>
   );
