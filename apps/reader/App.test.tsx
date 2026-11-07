@@ -92,6 +92,48 @@ test("phone: opens on the Library page; all bookmarks are newest first, from a s
   expect(texts.join(" ")).toContain("example.com  ·  Homelab");
 });
 
+test("desktop: a snapshot from another server is dropped, not merged", async () => {
+  const snapshot = (server: string) =>
+    JSON.stringify({
+      server,
+      cursor: 3,
+      bookmarks: [bookmark("zzz", { collectionId: "c9" })],
+      collections: [
+        {
+          id: "c9",
+          name: "Elsewhere",
+          parentId: null,
+          sort: 2,
+          color: null,
+          deletedAt: null,
+          seq: 1,
+        },
+      ],
+      highlights: [],
+    });
+  const empty = { cursor: 9, hasMore: false, collections: [], bookmarks: [], highlights: [] };
+  const desktop = { platform: "macos", width: 1200, height: 800 } as const;
+
+  // Written by another build (or the e2e host) connected elsewhere.
+  const other = await open("./App.tsx", {
+    ...desktop,
+    storage: { ...saved.storage, "library.v2": snapshot("http://127.0.0.1:8787") },
+    network: { [`GET ${S}/v1/sync*`]: { body: library } },
+  });
+  await other.waitFor("text:Article a");
+  expect(other.shows("text:Elsewhere")).toBe(false);
+  expect(other.shows("text:Article zzz")).toBe(false);
+
+  // This server's own snapshot shows, and the sync only catches up.
+  const same = await open("./App.tsx", {
+    ...desktop,
+    storage: { ...saved.storage, "library.v2": snapshot(S) },
+    network: { [`GET ${S}/v1/sync*`]: { body: empty } },
+  });
+  await same.waitFor("text:Article zzz");
+  expect(same.shows("text:Elsewhere")).toBe(true);
+});
+
 test("desktop: the sidebar counts and filters", async () => {
   const app = await open("./App.tsx", {
     ...saved,
