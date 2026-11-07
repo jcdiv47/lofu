@@ -1,10 +1,11 @@
 //! What the app needs from the platform that nsh doesn't offer: the system's
 //! share sheet (`UIActivityViewController` on iOS, `NSSharingServicePicker`
-//! on macOS), the login the iOS share extension (`share/`) saves with, and
-//! the system's own glass buttons (and, on iOS, search field) as native
-//! components (`controls`, used through `components/native.tsx`). TSX
-//! imports the modules from `lofu/native` (`lib/share.ts`); their TypeScript
-//! declarations are generated into `.nsh/types/lofu/native.d.ts`.
+//! on macOS), the system's menu from a point on iOS (`PopupMenu`), the login
+//! the iOS share extension (`share/`) saves with, and the system's own glass
+//! buttons (and, on iOS, search field) as native components (`controls`,
+//! used through `components/native.tsx`). TSX imports the modules from
+//! `lofu/native` (`lib/share.ts`); their TypeScript declarations are
+//! generated into `.nsh/types/lofu/native.d.ts`.
 
 use nsh_core::prelude::*;
 
@@ -29,7 +30,7 @@ fn macos_components(components: &nsh_platform_macos::Components) {
 #[native_module("lofu/native")]
 fn native(registry: &mut Registry) {
     registry.module::<Share>();
-    registry.module::<Sheet>();
+    registry.module::<PopupMenu>();
     registry.module::<Controls>();
     registry.module::<ShareExtension>();
     registry.module::<files::Files>();
@@ -122,31 +123,29 @@ impl Controls {
     }
 }
 
-/// An action sheet that opens from a point: nsh's `AlertDialog` opens at the
-/// bottom of the screen, while iOS 26 draws a sheet with a source from it
-/// (an iPad, as a popover there).
+/// The system's menu (`UIMenu`) from a point in the window: what a long
+/// press, a swipe's buttons and the reader's ••• open on iOS. UIKit draws it
+/// as it draws a long press's menu (Liquid Glass on iOS 26), with symbols,
+/// groups, submenus and destructive items, beside what was touched.
+/// nsh's `AlertDialog` opens at the bottom of the screen, and iOS 26 squeezes
+/// an action sheet with a source into a narrow popover.
 #[module]
-pub struct Sheet;
+pub struct PopupMenu;
 
 #[module]
-impl Sheet {
-    /// Whether `show` works here: iOS.
+impl PopupMenu {
+    /// Whether `show` works here: iOS, while UIKit has the call it uses.
     pub fn available() -> bool {
-        cfg!(target_os = "ios")
+        menu::available()
     }
 
-    /// Shows `labels` (each `"default"` or `"destructive"` by `roles`) under
-    /// `title`, with a Cancel, from `x`, `y` (points in the window; negative
-    /// for its middle). Resolves with the index of the label chosen, or -1
-    /// when it was cancelled.
-    pub async fn show(
-        title: Option<String>,
-        labels: Vec<String>,
-        roles: Vec<String>,
-        x: f64,
-        y: f64,
-    ) -> i32 {
-        menu::actions(title, labels, roles, x, y).await
+    /// Shows `items` (JSON: `[{ id, title, subtitle?, symbol?, destructive?,
+    /// checked? } | { title, symbol?, children } | { separator: true }]`)
+    /// under `title`, from `x`, `y` (points in the window). A negative `x`
+    /// opens it from the navigation bar's right-hand button. Resolves with the chosen item's id, or "" when it
+    /// was dismissed.
+    pub async fn show(title: Option<String>, items: String, x: f64, y: f64) -> String {
+        menu::show(title, items, x, y).await
     }
 }
 
@@ -180,125 +179,336 @@ mod sheet {
 
 #[cfg(not(target_os = "ios"))]
 mod menu {
-    pub async fn actions(
-        _title: Option<String>,
-        _labels: Vec<String>,
-        _roles: Vec<String>,
-        _x: f64,
-        _y: f64,
-    ) -> i32 {
-        -1
+    pub fn available() -> bool {
+        false
+    }
+
+    pub async fn show(_title: Option<String>, _items: String, _x: f64, _y: f64) -> String {
+        String::new()
     }
 }
 
+/// `UIMenu` from a clear button laid over the point for as long as the menu
+/// shows, the menu being the button's own: UIKit draws a button's menu in
+/// Liquid Glass (iOS 26), growing out of the button without dimming the
+/// screen, where a long press's menu sits on a dimmed backdrop. UIKit has no
+/// public call that opens a menu (a button's `performPrimaryAction` doesn't),
+/// so the button's interaction is asked to, as a tap would; without that
+/// call, nothing opens and `available` says so. The button sits in the view
+/// of the controller on top, which presents the menu.
 #[cfg(target_os = "ios")]
 mod menu {
+    use std::cell::RefCell;
+    use std::ffi::CStr;
+    use std::sync::OnceLock;
     use std::sync::mpsc::{Sender, channel};
+    use std::time::Duration;
 
     use block2::RcBlock;
     use objc2::rc::Retained;
-    use objc2::runtime::AnyObject;
-    use objc2::{class, msg_send};
-    use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+    use objc2::runtime::{AnyClass, AnyObject, ClassBuilder, Sel};
+    use objc2::{class, msg_send, sel};
+    use objc2_foundation::{NSArray, NSPoint, NSRect, NSSize, NSString};
+    use serde_json::Value;
 
-    pub async fn actions(
-        title: Option<String>,
-        labels: Vec<String>,
-        roles: Vec<String>,
-        x: f64,
-        y: f64,
-    ) -> i32 {
-        let (tx, rx) = channel();
-        dispatch2::DispatchQueue::main().exec_async(move || {
-            // SAFETY: on the main thread, with UIKit's own classes.
-            unsafe { present(title, &labels, &roles, x, y, tx) };
-        });
-        // Every way the sheet closes runs one of its actions (a tap outside
-        // runs Cancel); one that never showed drops `tx`, and so -1.
-        nsh_core::prelude::blocking(move || rx.recv().unwrap_or(-1))
-            .await
-            .unwrap_or(-1)
+    /// The call that opens an interaction's menu.
+    fn present_sel() -> Sel {
+        sel!(_presentMenuAtLocation:)
     }
 
-    unsafe fn action(
-        title: &str,
-        style: isize,
-        tx: &Sender<i32>,
-        index: i32,
-    ) -> Retained<AnyObject> {
-        let tx = tx.clone();
-        let handler = RcBlock::new(move |_: *mut AnyObject| {
-            let _ = tx.send(index);
-        });
+    pub fn available() -> bool {
+        // SAFETY: asking a class whether its instances answer a selector.
         unsafe {
-            msg_send![
-                class!(UIAlertAction),
-                actionWithTitle: &*NSString::from_str(title),
-                style: style,
-                handler: &*handler
-            ]
+            msg_send![class!(UIContextMenuInteraction), instancesRespondToSelector: present_sel()]
         }
     }
 
-    unsafe fn present(
-        title: Option<String>,
-        labels: &[String],
-        roles: &[String],
-        x: f64,
-        y: f64,
-        tx: Sender<i32>,
+    pub async fn show(title: Option<String>, items: String, x: f64, y: f64) -> String {
+        let Ok(Value::Array(items)) = serde_json::from_str::<Value>(&items) else {
+            return String::new();
+        };
+        let (tx, rx) = channel::<String>();
+        dispatch2::DispatchQueue::main().exec_async(move || {
+            // SAFETY: on the main thread, with UIKit's own classes.
+            unsafe { present(title, &items, NSPoint::new(x, y), tx) };
+        });
+        // The first word is the choice, or "" for a menu closed without one
+        // (or one that never showed, which drops `tx`). UIKit may report the
+        // close before it runs the chosen action, so a close waits a moment
+        // for one.
+        nsh_core::prelude::blocking(move || match rx.recv() {
+            Ok(id) if !id.is_empty() => id,
+            Ok(_) => rx
+                .recv_timeout(Duration::from_millis(600))
+                .unwrap_or_default(),
+            Err(_) => String::new(),
+        })
+        .await
+        .unwrap_or_default()
+    }
+
+    struct Open {
+        /// The clear button the menu opens from.
+        button: Retained<AnyObject>,
+        tx: Sender<String>,
+    }
+
+    thread_local! {
+        /// The menu on screen (one at a time).
+        static OPEN: RefCell<Option<Open>> = const { RefCell::new(None) };
+    }
+
+    /// Takes the button away and answers "" (a choice, if any, was sent first).
+    fn close() {
+        if let Some(open) = OPEN.with(|o| o.borrow_mut().take()) {
+            let _ = open.tx.send(String::new());
+            // SAFETY: on the main thread; the button is in a view or nowhere.
+            unsafe {
+                let _: () = msg_send![&*open.button, removeFromSuperview];
+            }
+        }
+    }
+
+    /// `contextMenuInteraction:willEndForConfiguration:animator:`, as UIButton
+    /// has it, then `close` once the menu has gone.
+    unsafe extern "C-unwind" fn will_end(
+        this: &AnyObject,
+        _cmd: Sel,
+        interaction: *mut AnyObject,
+        configuration: *mut AnyObject,
+        animator: *mut AnyObject,
     ) {
+        // SAFETY: UIButton's own method, with what UIKit passed.
         unsafe {
+            let _: () = msg_send![
+                super(this, class!(UIButton)),
+                contextMenuInteraction: interaction,
+                willEndForConfiguration: configuration,
+                animator: animator
+            ];
+            if animator.is_null() {
+                dispatch2::DispatchQueue::main().exec_async(close);
+            } else {
+                let done = RcBlock::new(|| dispatch2::DispatchQueue::main().exec_async(close));
+                let _: () = msg_send![animator, addCompletion: &*done];
+            }
+        }
+    }
+
+    /// UIButton, hearing its menu close.
+    fn button_class() -> &'static AnyClass {
+        static CLASS: OnceLock<usize> = OnceLock::new();
+        let ptr = *CLASS.get_or_init(|| {
+            let name: &CStr = c"LofuMenuButton";
+            let cls = match ClassBuilder::new(name, class!(UIButton)) {
+                Some(mut builder) => {
+                    // SAFETY: the signature UIKit calls the selector with.
+                    unsafe {
+                        builder.add_method(
+                            sel!(contextMenuInteraction:willEndForConfiguration:animator:),
+                            will_end as unsafe extern "C-unwind" fn(_, _, _, _, _),
+                        );
+                    }
+                    builder.register()
+                }
+                None => AnyClass::get(name).expect("LofuMenuButton"),
+            };
+            cls as *const AnyClass as usize
+        });
+        // SAFETY: a registered class lives as long as the process.
+        unsafe { &*(ptr as *const AnyClass) }
+    }
+
+    fn text(value: &Value, key: &str) -> Option<Retained<NSString>> {
+        value
+            .get(key)?
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(NSString::from_str)
+    }
+
+    unsafe fn symbol(value: &Value) -> Option<Retained<AnyObject>> {
+        let name = text(value, "symbol")?;
+        unsafe { msg_send![class!(UIImage), systemImageNamed: &*name] }
+    }
+
+    /// One item: an action, or a submenu when it has `children`.
+    unsafe fn element(value: &Value, tx: &Sender<String>) -> Option<Retained<AnyObject>> {
+        unsafe {
+            let title = text(value, "title")?;
+            let image = symbol(value);
+            if let Some(Value::Array(children)) = value.get("children") {
+                let children = group(children, tx);
+                return msg_send![
+                    class!(UIMenu),
+                    menuWithTitle: &*title,
+                    image: image.as_deref(),
+                    identifier: Option::<&NSString>::None,
+                    options: 0usize,
+                    children: &*children
+                ];
+            }
+            let id = value.get("id")?.as_str()?.to_owned();
+            let tx = tx.clone();
+            let handler = RcBlock::new(move |_: *mut AnyObject| {
+                let _ = tx.send(id.clone());
+            });
+            let action: Retained<AnyObject> = msg_send![
+                class!(UIAction),
+                actionWithTitle: &*title,
+                image: image.as_deref(),
+                identifier: Option::<&NSString>::None,
+                handler: &*handler
+            ];
+            if let Some(subtitle) = text(value, "subtitle") {
+                let _: () = msg_send![&*action, setSubtitle: &*subtitle];
+            }
+            if value.get("destructive").and_then(Value::as_bool) == Some(true) {
+                // UIMenuElementAttributesDestructive
+                let _: () = msg_send![&*action, setAttributes: 2usize];
+            }
+            if value.get("checked").and_then(Value::as_bool) == Some(true) {
+                // UIMenuElementStateOn
+                let _: () = msg_send![&*action, setState: 1isize];
+            }
+            Some(action)
+        }
+    }
+
+    /// `items` as menu elements: a separator ends a group, which UIKit draws
+    /// apart from the next (an inline menu).
+    unsafe fn group(items: &[Value], tx: &Sender<String>) -> Retained<NSArray<AnyObject>> {
+        let is_separator = |v: &Value| v.get("separator").and_then(Value::as_bool) == Some(true);
+        let groups: Vec<&[Value]> = items
+            .split(is_separator)
+            .filter(|g| !g.is_empty())
+            .collect();
+        // SAFETY: UIKit's own classes, on the main thread.
+        let list = |g: &[Value]| -> Vec<Retained<AnyObject>> {
+            g.iter().filter_map(|v| unsafe { element(v, tx) }).collect()
+        };
+        if groups.len() <= 1 {
+            let one = groups.first().map(|g| list(g)).unwrap_or_default();
+            return NSArray::from_retained_slice(&one);
+        }
+        let empty = NSString::from_str("");
+        let inline: Vec<Retained<AnyObject>> = groups
+            .iter()
+            .map(|g| {
+                let children = NSArray::from_retained_slice(&list(g));
+                // UIMenuOptionsDisplayInline
+                unsafe {
+                    msg_send![
+                        class!(UIMenu),
+                        menuWithTitle: &*empty,
+                        image: Option::<&AnyObject>::None,
+                        identifier: Option::<&NSString>::None,
+                        options: 1usize,
+                        children: &*children
+                    ]
+                }
+            })
+            .collect();
+        NSArray::from_retained_slice(&inline)
+    }
+
+    /// The navigation bar showing in `window`, if any: the innermost one.
+    unsafe fn navigation_bar(view: &AnyObject) -> Option<Retained<AnyObject>> {
+        unsafe {
+            let subviews: Retained<NSArray<AnyObject>> = msg_send![view, subviews];
+            for v in subviews.to_vec().into_iter().rev() {
+                let hidden: bool = msg_send![&*v, isHidden];
+                if hidden {
+                    continue;
+                }
+                if msg_send![&*v, isKindOfClass: class!(UINavigationBar)] {
+                    return Some(v);
+                }
+                if let Some(bar) = navigation_bar(&v) {
+                    return Some(bar);
+                }
+            }
+            None
+        }
+    }
+
+    /// Where a menu without a rect opens from: the navigation bar's
+    /// right-hand button (a `headerRight`), else the window's middle.
+    unsafe fn bar_button(window: &AnyObject) -> NSRect {
+        unsafe {
+            let bounds: NSRect = msg_send![window, bounds];
+            let Some(bar) = navigation_bar(window) else {
+                return NSRect::new(
+                    NSPoint::new(bounds.size.width / 2.0, bounds.size.height / 2.0),
+                    NSSize::new(1.0, 1.0),
+                );
+            };
+            let b: NSRect = msg_send![&*bar, bounds];
+            let r: NSRect = msg_send![&*bar, convertRect: b, toView: window];
+            // A bar button: 44 points, 16 in from the edge.
+            NSRect::new(
+                NSPoint::new(r.origin.x + r.size.width - 16.0 - 44.0, r.origin.y),
+                NSSize::new(44.0, r.size.height),
+            )
+        }
+    }
+
+    unsafe fn present(title: Option<String>, items: &[Value], at: NSPoint, tx: Sender<String>) {
+        unsafe {
+            // One menu at a time: one still up (it shouldn't be) answers "".
+            close();
             let Some(window) = super::window::key() else {
                 return;
             };
-            let Some(top) = super::window::top(&window) else {
+            let rect = if at.x < 0.0 || at.y < 0.0 {
+                bar_button(&window)
+            } else {
+                NSRect::new(at, NSSize::new(1.0, 1.0))
+            };
+            let children = group(items, &tx);
+            let title = NSString::from_str(title.as_deref().unwrap_or(""));
+            let menu: Retained<AnyObject> = msg_send![
+                class!(UIMenu),
+                menuWithTitle: &*title,
+                image: Option::<&AnyObject>::None,
+                identifier: Option::<&NSString>::None,
+                options: 0usize,
+                children: &*children
+            ];
+            // In the view of the controller on top, which presents the menu
+            // (a view in the window itself has no controller to present it).
+            let host: Retained<AnyObject> = match super::window::top(&window) {
+                Some(top) => msg_send![&*top, view],
+                None => window.clone(),
+            };
+            let rect: NSRect = msg_send![&*host, convertRect: rect, fromView: &*window];
+            let button: Retained<AnyObject> = msg_send![button_class(), buttonWithType: 0isize];
+            let _: () = msg_send![&*button, setFrame: rect];
+            let _: () = msg_send![&*button, setMenu: &*menu];
+            let _: () = msg_send![&*button, setShowsMenuAsPrimaryAction: true];
+            // UIContextMenuConfigurationElementOrderFixed: the order given,
+            // whether it opens up or down.
+            let _: () = msg_send![&*button, setPreferredMenuElementOrder: 2isize];
+            let _: () = msg_send![&*button, setAccessibilityElementsHidden: true];
+            let _: () = msg_send![&*host, addSubview: &*button];
+            let interaction: Option<Retained<AnyObject>> =
+                msg_send![&*button, contextMenuInteraction];
+            let Some(interaction) = interaction.filter(|i| {
+                let responds: bool = msg_send![&**i, respondsToSelector: present_sel()];
+                responds
+            }) else {
+                let _: () = msg_send![&*button, removeFromSuperview];
                 return;
             };
-            let title = title.as_deref().map(NSString::from_str);
-            // UIAlertControllerStyleActionSheet
-            let alert: Retained<AnyObject> = msg_send![
-                class!(UIAlertController),
-                alertControllerWithTitle: title.as_deref(),
-                message: Option::<&NSString>::None,
-                preferredStyle: 0isize
-            ];
-            for (i, label) in labels.iter().enumerate() {
-                // UIAlertActionStyleDefault, UIAlertActionStyleDestructive
-                let style = if roles.get(i).is_some_and(|r| r == "destructive") {
-                    2
-                } else {
-                    0
-                };
-                let a = action(label, style, &tx, i as i32);
-                let _: () = msg_send![&*alert, addAction: &*a];
-            }
-            // UIAlertActionStyleCancel: hidden in a popover, run by a tap outside it.
-            let cancel = action("Cancel", 1, &tx, -1);
-            let _: () = msg_send![&*alert, addAction: &*cancel];
-            drop(tx);
-
-            let popover: Option<Retained<AnyObject>> =
-                msg_send![&*alert, popoverPresentationController];
-            if let Some(popover) = popover {
-                let bounds: NSRect = msg_send![&*window, bounds];
-                let (px, py) = if x >= 0.0 && y >= 0.0 {
-                    (x, y)
-                } else {
-                    (bounds.size.width / 2.0, bounds.size.height / 2.0)
-                };
-                let _: () = msg_send![&*popover, setSourceView: &*window];
-                let _: () = msg_send![
-                    &*popover,
-                    setSourceRect: NSRect::new(NSPoint::new(px, py), NSSize::new(1.0, 1.0))
-                ];
-            }
-            let _: () = msg_send![
-                &*top,
-                presentViewController: &*alert,
-                animated: true,
-                completion: Option::<&block2::Block<dyn Fn()>>::None
-            ];
+            OPEN.with(|o| {
+                *o.borrow_mut() = Some(Open {
+                    button: button.clone(),
+                    tx,
+                })
+            });
+            let b: NSRect = msg_send![&*button, bounds];
+            let at = NSPoint::new(b.size.width / 2.0, b.size.height / 2.0);
+            let _: () = msg_send![&*interaction, _presentMenuAtLocation: at];
         }
     }
 }

@@ -252,7 +252,9 @@ export function BookmarkRow(props: {
       accessibilityLabel={displayTitle(b())}
       testID={`row-${b().id}`}
       onPress={props.onOpen}
-      onLongPress={nativeMenus ? () => void showBookmarkMenu(b(), props.onOpen) : undefined}
+      onLongPress={
+        nativeMenus ? (e) => void showBookmarkMenu(b(), props.onOpen, e.pagePosition) : undefined
+      }
       onContextMenu={
         nativeMenus ? (e) => void showBookmarkMenu(b(), props.onOpen, e.pagePosition) : undefined
       }

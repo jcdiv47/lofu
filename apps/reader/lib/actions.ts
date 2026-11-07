@@ -1,4 +1,4 @@
-import { Share, Sheet } from "lofu/native";
+import { PopupMenu, Share } from "lofu/native";
 import { Clipboard, openUrl, platform } from "nsh";
 import { AlertDialog } from "nsh/base";
 import { isAvailable, Menu } from "nsh/desktop";
@@ -105,10 +105,10 @@ export function destinations(b: Bookmark) {
   ].filter((d) => d.id !== here);
 }
 
-/** Whether an action sheet can open from a point (`src/lib.rs`): iOS. */
-const anchoredSheets = (() => {
+/** Whether the system's menu can open from a point (`src/lib.rs`): iOS 17.4 on. */
+const systemMenus = (() => {
   try {
-    return Sheet.available();
+    return PopupMenu.available();
   } catch {
     return false;
   }
@@ -116,22 +116,30 @@ const anchoredSheets = (() => {
 
 type SheetAction = { id: string; label: string; role?: "destructive" };
 
+/** An item of the system's menu (`PopupMenu.show`); a separator starts a group. */
+type MenuEntry =
+  | {
+      id: string;
+      title: string;
+      subtitle?: string;
+      /** An SF Symbol. */
+      symbol?: string;
+      destructive?: boolean;
+    }
+  | { title: string; symbol?: string; children: MenuEntry[] }
+  | { separator: true };
+
 /**
- * An action sheet with a Cancel: on iOS from `at` (iOS 26 draws it from
- * there, by what it is about), elsewhere the platform's own. Resolves with
- * the chosen action's id, or null.
+ * The system's menu (iOS), from `at` (the navigation bar's right-hand button
+ * without one). Resolves with the chosen item's id, or null.
  */
-async function actionSheet(title: string, actions: SheetAction[], at?: At): Promise<string | null> {
-  if (anchoredSheets) {
-    const i = await Sheet.show(
-      title,
-      actions.map((a) => a.label),
-      actions.map((a) => a.role ?? "default"),
-      at?.x ?? -1,
-      at?.y ?? -1,
-    );
-    return actions[i]?.id ?? null;
-  }
+async function systemMenu(title: string, items: MenuEntry[], at?: At): Promise<string | null> {
+  const id = await PopupMenu.show(title, JSON.stringify(items), at?.x ?? -1, at?.y ?? -1);
+  return id || null;
+}
+
+/** An action sheet with a Cancel, where there's no menu to open (Android). */
+async function actionSheet(title: string, actions: SheetAction[]): Promise<string | null> {
   const { action } = await AlertDialog.show({
     title,
     presentation: platform.os === "web" ? "alert" : "actionSheet",
@@ -145,8 +153,8 @@ async function actionSheet(title: string, actions: SheetAction[], at?: At): Prom
 const move = (b: Bookmark, to: string | null) => void moveBookmark(b.id, to).catch(() => {});
 
 /**
- * Asks where to move a bookmark: a menu at the pointer on the desktop, an
- * action sheet on phones (from `at` on iOS), a dialog on the web.
+ * Asks where to move a bookmark: a menu at the pointer on the desktop and
+ * from `at` on iOS, an action sheet on Android, a dialog on the web.
  */
 export async function chooseDestination(b: Bookmark, at?: At) {
   const places = destinations(b);
@@ -157,14 +165,26 @@ export async function chooseDestination(b: Bookmark, at?: At) {
     );
     return;
   }
+  if (systemMenus) {
+    const id = await systemMenu("Move to", moveEntries(b), at);
+    if (id?.startsWith("to:")) move(b, id.slice(3) || null);
+    return;
+  }
   const action = await actionSheet(
     "Move to",
     places.map((d) => ({ id: d.id ?? "", label: d.label })),
-    at,
   );
   if (action == null) return;
   move(b, action || null);
 }
+
+/** The places a bookmark can move to, as menu items with ids `to:<collection>` (`to:` for Unsorted). */
+const moveEntries = (b: Bookmark): MenuEntry[] =>
+  destinations(b).map((d) => ({
+    id: `to:${d.id ?? ""}`,
+    title: d.label,
+    symbol: d.id == null ? "tray" : "folder",
+  }));
 
 /**
  * Deletes a bookmark: out of the library into the Trash, or, from the Trash,
@@ -239,14 +259,62 @@ export const separatedBefore = (a: BookmarkAction, i: number) =>
   i > 0 && (a.id === "original" || a.id === "favorite" || a.id === "delete");
 
 /**
- * Menus the platform draws: a context menu on the desktop apps, an action
- * sheet on phones. The web build has neither (its action sheet is pinned to
+ * Menus the platform draws: a context menu on the desktop apps, the
+ * system's menu on iOS, an action sheet on Android. The web build has neither (its action sheet is pinned to
  * the bottom of the window), so its cards use the app's `ContextMenu`
  * (`components/BookmarkMenu.tsx`), which opens at the pointer.
  */
 export const nativeMenus = platform.os !== "web";
 
-/** A native context menu on the desktop, an action sheet on phones. */
+/** Each action's SF Symbol in the system's menu (iOS). */
+const symbolFor: Record<string, (b: Bookmark) => string> = {
+  original: () => "safari",
+  copy: () => "link",
+  share: () => "square.and.arrow.up",
+  edit: () => "pencil",
+  favorite: (b) => (b.favorite ? "star.slash" : "star"),
+  move: () => "folder",
+  restore: () => "arrow.uturn.backward",
+  refetch: () => "arrow.clockwise",
+  delete: () => "trash",
+};
+
+/**
+ * The bookmark's actions as the system's menu (iOS), in three groups: the
+ * page (open, copy, share), the bookmark itself (favorite, edit, move…) and
+ * Delete. With symbols, the collections as a submenu of *Move to*, and
+ * without *Open*, which a tap on the row does. The edit item is short, with
+ * what it edits under it, since the menu is narrow.
+ */
+function menuEntries(b: Bookmark, actions: BookmarkAction[]): MenuEntry[] {
+  const groups = [
+    ["original", "copy", "share"],
+    ["favorite", "edit", "move", "restore", "refetch"],
+    ["delete"],
+  ];
+  const entry = (a: BookmarkAction): MenuEntry =>
+    a.id === "move"
+      ? { title: "Move to", symbol: "folder", children: moveEntries(b) }
+      : a.id === "edit"
+        ? { id: a.id, title: "Edit", subtitle: "Title, tags and note", symbol: "pencil" }
+        : { id: a.id, title: a.label, symbol: symbolFor[a.id]?.(b), destructive: a.destructive };
+  return groups
+    .map((ids) =>
+      actions
+        .filter((a) => ids.includes(a.id))
+        .sort((x, y) => ids.indexOf(x.id) - ids.indexOf(y.id)),
+    )
+    .filter((g) => g.length > 0)
+    .flatMap((g, i): MenuEntry[] => [
+      ...(i > 0 ? [{ separator: true as const }] : []),
+      ...g.map(entry),
+    ]);
+}
+
+/**
+ * A native context menu on the desktop, the system's menu from `at` on iOS
+ * (from the navigation bar's ••• without it), an action sheet on Android.
+ */
 export async function showBookmarkMenu(b: Bookmark, open: (() => void) | undefined, at?: At) {
   const actions = bookmarkActions(b, open, at);
   if (isAvailable) {
@@ -267,6 +335,12 @@ export async function showBookmarkMenu(b: Bookmark, open: (() => void) | undefin
     );
     return;
   }
+  if (systemMenus) {
+    const id = await systemMenu(b.title || b.domain, menuEntries(b, actions), at);
+    if (id?.startsWith("to:")) move(b, id.slice(3) || null);
+    else actions.find((a) => a.id === id)?.run();
+    return;
+  }
   const action = await actionSheet(
     b.title || b.domain,
     actions.map((a) => ({
@@ -274,7 +348,6 @@ export async function showBookmarkMenu(b: Bookmark, open: (() => void) | undefin
       label: a.label,
       role: a.destructive ? ("destructive" as const) : undefined,
     })),
-    at,
   );
   actions.find((a) => a.id === action)?.run();
 }
@@ -286,32 +359,50 @@ export async function showBookmarkMenu(b: Bookmark, open: (() => void) | undefin
  */
 export async function showSourceMenu(s: Source, at?: At, onGone?: () => void) {
   if (s.kind !== "collection" && s.kind !== "tag") return;
-  const actions: (SheetAction & { run: () => void })[] = [];
+  const actions: (SheetAction & { run: () => void; symbol: string })[] = [];
   if (s.kind === "collection") {
     const list = collections();
     const i = list.findIndex((c) => c.id === s.id);
     const manual = prefs().collectionSort === "manual";
-    actions.push({ id: "rename", label: "Rename…", run: () => void renameCollectionPrompt(s.id) });
+    actions.push({
+      id: "rename",
+      label: "Rename…",
+      symbol: "pencil",
+      run: () => void renameCollectionPrompt(s.id),
+    });
     if (manual && i > 0)
-      actions.push({ id: "up", label: "Move up", run: () => void moveCollection(s.id, -1) });
+      actions.push({
+        id: "up",
+        label: "Move up",
+        symbol: "arrow.up",
+        run: () => void moveCollection(s.id, -1),
+      });
     if (manual && i >= 0 && i < list.length - 1)
-      actions.push({ id: "down", label: "Move down", run: () => void moveCollection(s.id, 1) });
+      actions.push({
+        id: "down",
+        label: "Move down",
+        symbol: "arrow.down",
+        run: () => void moveCollection(s.id, 1),
+      });
     actions.push({
       id: "delete",
       label: "Delete collection…",
       role: "destructive",
+      symbol: "trash",
       run: () => void confirmDeleteCollection(s.id, onGone),
     });
   } else {
     actions.push({
       id: "rename",
       label: "Rename or merge…",
+      symbol: "pencil",
       run: () => void renameTagPrompt(s.name, onGone),
     });
     actions.push({
       id: "delete",
       label: "Delete tag…",
       role: "destructive",
+      symbol: "trash",
       run: () => void confirmDeleteTag(s.name, onGone),
     });
   }
@@ -326,7 +417,16 @@ export async function showSourceMenu(s: Source, at?: At, onGone?: () => void) {
     return;
   }
   const title = s.kind === "collection" ? collectionName(s.id) : `#${s.name}`;
-  const chosen = await actionSheet(title, actions, at);
+  const chosen = systemMenus
+    ? await systemMenu(
+        title,
+        actions.flatMap((a): MenuEntry[] => [
+          ...(a.role === "destructive" ? [{ separator: true as const }] : []),
+          { id: a.id, title: a.label, symbol: a.symbol, destructive: a.role === "destructive" },
+        ]),
+        at,
+      )
+    : await actionSheet(title, actions);
   actions.find((a) => a.id === chosen)?.run();
 }
 

@@ -119,7 +119,7 @@ export function Home(props: {
       onPress={() => props.onSelect(source)}
       onLongPress={
         source.kind === "collection" || source.kind === "tag"
-          ? () => void showSourceMenu(source)
+          ? (e) => void showSourceMenu(source, e.pagePosition)
           : undefined
       }
       onContextMenu={
