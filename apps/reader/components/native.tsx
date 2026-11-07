@@ -148,3 +148,46 @@ export const NativeSearchField = nativeComponent<
   ],
   events: ["change", "submit", "editing"],
 });
+
+/**
+ * The system's scroll edge effect (iOS 26, `src/edges.rs`): the page blurs
+ * and fades out under the bars' glass as UIKit draws it, where the app would
+ * otherwise imitate it (`TopEdge`, `BottomEdge` in `ui.tsx`).
+ */
+export const nativeScrollEdges = nativeControls && platform.os === "ios" && Controls.scrollEdges();
+
+const NativeScrollEdge = nativeComponent<{ edge: "top" | "bottom" }, Record<string, never>>(
+  "lofu.scrollEdge",
+  { props: ["edge"], events: [] },
+);
+
+/**
+ * Hands the page's scroll view to UIKit for `edge`. For `top`, anywhere in
+ * the page: the navigation bar gets the effect. For `bottom`, inside the
+ * view that holds the controls floating at the page's foot: the effect is
+ * shaped around them. Draws nothing.
+ */
+export function ScrollEdge(props: { edge: "top" | "bottom" }) {
+  return (
+    <NativeScrollEdge
+      edge={props.edge}
+      style={{ position: "absolute", top: 0, left: 0, width: 1, height: 1, pointerEvents: "none" }}
+    />
+  );
+}
+
+/** A button of a `NativeGlassBar`: an SF Symbol, and what VoiceOver says. */
+export type GlassBarItem = { id: string; symbol: string; label: string; disabled?: boolean };
+
+/**
+ * A row of the system's symbol buttons on one capsule of interactive glass
+ * (iOS, `src/glassbar.rs`), as Safari's bar along the bottom. It sizes itself
+ * to its buttons.
+ */
+export const NativeGlassBar = nativeComponent<
+  { items: GlassBarItem[]; tint?: string; height?: number },
+  { tap: { id: string; x: number; y: number } }
+>("lofu.glassBar", { props: ["items", "tint", "height"], events: ["tap"] });
+
+/** `NativeGlassBar` is here: the system's glass on iOS. */
+export const nativeGlassBar = nativeControls && platform.os === "ios";

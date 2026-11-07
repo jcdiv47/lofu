@@ -13,6 +13,8 @@ import {
 } from "nsh";
 import { Input } from "nsh/base";
 import type { JSX } from "nsh/jsx-runtime";
+import { nativeScrollEdges, ScrollEdge } from "../components/native";
+import { promptText, systemPrompt } from "../components/Prompt";
 import { SearchField } from "../components/SearchField";
 import {
   BottomEdge,
@@ -91,11 +93,25 @@ export function Home(props: {
 }) {
   const menu = props.menu;
   const naming = signal(false);
+  /** Names a new collection: the system's alert on iOS, else the card below. */
+  const newCollection = () => {
+    if (systemPrompt)
+      void promptText({
+        title: "New collection",
+        value: "",
+        placeholder: "Name",
+        confirm: "Create",
+        run: async (name) => {
+          await createCollection(name);
+        },
+      });
+    else naming.set(true);
+  };
   // iOS: the system's menu (Liquid Glass) from the bar's •••, instead of the
   // app's panel.
   effect(() => {
     if (!systemMenus || !menu()) return;
-    untracked(() => void openSystemMenu(() => naming.set(true)).finally(() => menu.set(false)));
+    untracked(() => void openSystemMenu(newCollection).finally(() => menu.set(false)));
   });
   const query = signal("");
   const top = () => safeArea().top;
@@ -382,7 +398,7 @@ export function Home(props: {
               role="button"
               accessibilityLabel="New collection"
               testID="new-collection"
-              onPress={() => naming.set(true)}
+              onPress={newCollection}
               class="h-9 w-9 items-center justify-center rounded-full active:opacity-60"
             >
               <Icon name="plus" size={22} color={look().stamp} />
@@ -493,6 +509,7 @@ export function Home(props: {
         class="absolute right-0 left-0 flex-row items-center gap-3 px-4"
         style={{ bottom: bottom(), pointerEvents: "box-none" }}
       >
+        {nativeScrollEdges && <ScrollEdge edge="bottom" />}
         <View class="flex-1">
           <SearchField
             value={query}
@@ -521,7 +538,7 @@ export function Home(props: {
           onClose={() => menu.set(false)}
           onNewCollection={() => {
             menu.set(false);
-            naming.set(true);
+            newCollection();
           }}
         />
       </If>
