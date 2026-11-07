@@ -1,13 +1,16 @@
+import { TextPrompt } from "lofu/native";
 import { keyboardFrame, safeArea, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
 import { glass, look } from "../lib/look";
 import { GlassButton, GlassTint } from "./ui";
 
 /**
- * Asks for a line of text (a new name): a small card of glass over the app,
- * above the keyboard. nsh's `AlertDialog` takes no text, hence this.
- * `run` does the work and may throw: its message shows on the card, which
- * stays open; resolves with whether it was done.
+ * Asks for a line of text (a new name). On iOS, the system's alert with a
+ * text field (`src/prompt.rs`, Liquid Glass on iOS 26); elsewhere a small
+ * card of glass over the app, above the keyboard, since nsh's `AlertDialog`
+ * takes no text. `run` does the work and may throw: its message shows on
+ * the card, which stays open (the alert opens again with it); resolves
+ * with whether it was done.
  */
 interface Ask {
   title: string;
@@ -22,9 +25,40 @@ const asking = signal<Ask | null>(null);
 /** Whether a prompt is open. */
 export const prompting = () => !!asking();
 
+/** The system's alert asks, rather than the app's card. */
+export const systemPrompt = TextPrompt.available();
+
 export function promptText(opts: Omit<Ask, "done">): Promise<boolean> {
+  if (systemPrompt) return askSystem(opts);
   asking()?.done(false);
   return new Promise((done) => asking.set({ ...opts, done }));
+}
+
+/** The system's alert, asked again with the error until `run` succeeds or it's cancelled. */
+async function askSystem(opts: Omit<Ask, "done">): Promise<boolean> {
+  let message = "";
+  let value = opts.value;
+  for (;;) {
+    const answer = JSON.parse(
+      await TextPrompt.ask(
+        opts.title,
+        message,
+        value,
+        opts.placeholder,
+        opts.confirm,
+        look().stamp,
+      ),
+    ) as { text: string } | null;
+    const text = answer?.text.trim();
+    if (!answer || !text) return false;
+    try {
+      await opts.run(text);
+      return true;
+    } catch (e) {
+      message = (e as Error).message;
+      value = answer.text;
+    }
+  }
 }
 
 /** Mounted once, over everything else (`App.tsx`). */

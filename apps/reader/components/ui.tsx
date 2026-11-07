@@ -46,7 +46,13 @@ import starFillIcon from "../assets/icons/star-fill.svg";
 import trashIcon from "../assets/icons/trash.svg";
 import videoIcon from "../assets/icons/video.svg";
 import { glass, hasGlass, look } from "../lib/look";
-import { nativeControls, type SymbolIcon, SystemGlassButton } from "./native";
+import {
+  nativeControls,
+  nativeScrollEdges,
+  ScrollEdge,
+  type SymbolIcon,
+  SystemGlassButton,
+} from "./native";
 
 export const icons = {
   article: articleIcon,
@@ -152,8 +158,12 @@ export function GlassTint(props: { radius?: number }) {
  * page: TopEdge's progressive blur, easing off upwards. The rows stay faintly
  * visible under the glass, which is what lets it read as glass; an opaque
  * fade leaves it nothing to bend.
+ *
+ * Where UIKit draws the edge itself (`nativeScrollEdges`), this draws
+ * nothing: the row of controls holds a `ScrollEdge edge="bottom"` instead.
  */
 export function BottomEdge(props: { height: number }) {
+  if (nativeScrollEdges) return null;
   return (
     <View
       class="absolute right-0 bottom-0 left-0"
@@ -179,6 +189,8 @@ export function TopEdge(props: {
 }) {
   // A transparent header leaves the page's inset at the status bar: add the
   // bar's own height (54 points on iOS 26) and room for the fade.
+  // iOS 26: the system's own edge, under the navigation bar.
+  if (nativeScrollEdges) return <ScrollEdge edge="top" />;
   const insets = safeAreaInsets();
   return (
     <View

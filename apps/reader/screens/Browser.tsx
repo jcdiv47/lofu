@@ -1,4 +1,10 @@
 import { safeAreaInsets, signal, Text, View, WebView, type WebViewRef } from "nsh";
+import {
+  NativeGlassBar,
+  nativeGlassBar,
+  nativeScrollEdges,
+  ScrollEdge,
+} from "../components/native";
 import { GlassButton, GlassGroup, GlassTint, IconButton, RoundGlassButton } from "../components/ui";
 import { openInBrowser } from "../lib/actions";
 import { glass, look } from "../lib/look";
@@ -79,6 +85,20 @@ export function Browser(props: {
       onPress={() => openInBrowser(at().url)}
     />
   );
+
+  /** A press on the phone's native bar (`NativeGlassBar`), by its button's id. */
+  const barTap = (id: string) => {
+    if (id === "web-back") web?.goBack();
+    else if (id === "web-forward") web?.goForward();
+    else if (id === "web-external") openInBrowser(at().url);
+    else if (id === "web-reload") {
+      if (at().loading) web?.stopLoading();
+      else {
+        failed.set(null);
+        web?.reload();
+      }
+    }
+  };
 
   /** The Mac's window toolbar has the page's controls (`lib/toolbar.ts`). */
   const native = props.wide && nativeToolbar;
@@ -226,16 +246,49 @@ export function Browser(props: {
           class="absolute right-0 left-0 items-center"
           style={{ bottom: Math.max(insets().bottom, 12) + 4, pointerEvents: "box-none" }}
         >
-          <View
-            class="h-14 flex-row items-center gap-5 rounded-full px-4"
-            style={{ ...glass(), borderCurve: "continuous" }}
+          {nativeScrollEdges && <ScrollEdge edge="bottom" />}
+          <If
+            when={nativeGlassBar}
+            else={
+              <View
+                class="h-14 flex-row items-center gap-5 rounded-full px-4"
+                style={{ ...glass(), borderCurve: "continuous" }}
+              >
+                <GlassTint />
+                {back()}
+                {forward()}
+                {reload()}
+                {external()}
+              </View>
+            }
           >
-            <GlassTint />
-            {back()}
-            {forward()}
-            {reload()}
-            {external()}
-          </View>
+            {/* The system's glass: it answers the touch as Safari's bar does. */}
+            <NativeGlassBar
+              testID="web-bar"
+              items={[
+                {
+                  id: "web-back",
+                  symbol: "chevron.left",
+                  label: "Back",
+                  disabled: !at().canGoBack,
+                },
+                {
+                  id: "web-forward",
+                  symbol: "chevron.right",
+                  label: "Forward",
+                  disabled: !at().canGoForward,
+                },
+                {
+                  id: "web-reload",
+                  symbol: at().loading ? "xmark" : "arrow.clockwise",
+                  label: at().loading ? "Stop loading" : "Reload",
+                },
+                { id: "web-external", symbol: "safari", label: "Open in browser" },
+              ]}
+              height={56}
+              onTap={(e) => barTap(e.id)}
+            />
+          </If>
         </View>
       </If>
     </View>

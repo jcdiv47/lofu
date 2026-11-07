@@ -27,6 +27,12 @@ import {
 import { findQuote, quoteAt } from "../../../packages/shared/src/anchor";
 import { BookmarkDropdown } from "../components/BookmarkMenu";
 import {
+  nativeControls,
+  nativeScrollEdges,
+  ScrollEdge,
+  SystemGlassButton,
+} from "../components/native";
+import {
   GlassButton,
   GlassGroup,
   GlassTint,
@@ -525,8 +531,17 @@ export function Reader(props: {
     </View>
   );
 
+  /** iOS only: the Mac keeps its own bubble. */
+  const iosGlass = nativeControls && platform.os === "ios";
   const bubble = () => {
     const s = selection();
+    // The system's glass button where there is one: it answers the touch.
+    if (iosGlass) {
+      if (s && !s.empty) return <GlassButton label="Highlight" onPress={addHighlight} />;
+      const hit = underCaret();
+      if (hit) return <GlassButton label="Remove highlight" onPress={() => removeHighlight(hit)} />;
+      return undefined;
+    }
     if (s && !s.empty) {
       return (
         <View class="flex-row rounded-full px-1" style={{ ...glass(), borderCurve: "continuous" }}>
@@ -741,17 +756,34 @@ export function Reader(props: {
           class="absolute right-0 left-0 items-center"
           style={{ bottom: Math.max(safeArea().bottom, 12) + 6, pointerEvents: "box-none" }}
         >
-          <View
-            role={orphans().length ? "button" : undefined}
-            onPress={orphans().length ? () => void showOrphans() : undefined}
-            class="h-8 justify-center rounded-full px-3.5"
-            style={{ ...glass(), borderCurve: "continuous" }}
+          {/* iOS 26: the text fades out under the capsule, as under any bar. */}
+          {nativeScrollEdges && <ScrollEdge edge="bottom" />}
+          <If
+            when={iosGlass}
+            else={
+              <View
+                role={orphans().length ? "button" : undefined}
+                onPress={orphans().length ? () => void showOrphans() : undefined}
+                class="h-8 justify-center rounded-full px-3.5"
+                style={{ ...glass(), borderCurve: "continuous" }}
+              >
+                <GlassTint />
+                <Text testID="highlight-count" style={{ color: look().stamp, fontSize: 13 }}>
+                  {highlights()}
+                </Text>
+              </View>
+            }
           >
-            <GlassTint />
-            <Text testID="highlight-count" style={{ color: look().stamp, fontSize: 13 }}>
-              {highlights()}
-            </Text>
-          </View>
+            <SystemGlassButton
+              title={highlights()}
+              label={orphans().length ? `${highlights()}: show those not found` : highlights()}
+              tint={look().stamp}
+              testID="highlight-count"
+              onPress={() => {
+                if (orphans().length) void showOrphans();
+              }}
+            />
+          </If>
         </View>
       </If>
       <If when={!props.wide && platform.os === "ios"}>

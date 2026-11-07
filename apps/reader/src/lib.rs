@@ -11,12 +11,20 @@ use nsh_core::prelude::*;
 
 #[cfg(any(target_os = "ios", target_os = "macos"))]
 mod controls;
+#[cfg(target_os = "ios")]
+mod edges;
+#[cfg(target_os = "ios")]
+mod glassbar;
+#[cfg(target_os = "ios")]
+mod prompt;
 
 /// UIKit's controls (`controls::ios`), registered on every view.
 #[cfg(target_os = "ios")]
 #[native_components(ios)]
 fn ios_components(components: &nsh_platform_ios::Components) {
     controls::ios::register(components);
+    edges::register(components);
+    glassbar::register(components);
 }
 
 /// AppKit's controls (`controls::macos`), registered on every view.
@@ -33,6 +41,7 @@ fn native(registry: &mut Registry) {
     registry.module::<PopupMenu>();
     registry.module::<Toolbar>();
     registry.module::<Controls>();
+    registry.module::<TextPrompt>();
     registry.module::<ShareExtension>();
     registry.module::<files::Files>();
     registry.module::<files::Secrets>();
@@ -157,6 +166,65 @@ impl Controls {
     /// from iOS 26 and macOS 26.
     pub fn available() -> bool {
         cfg!(any(target_os = "ios", target_os = "macos"))
+    }
+
+    /// Whether `lofu.scrollEdge` (`src/edges.rs`) gives the page the
+    /// system's scroll edge effect: iOS 26 and later.
+    pub fn scroll_edges() -> bool {
+        #[cfg(target_os = "ios")]
+        return edges::available();
+        #[cfg(not(target_os = "ios"))]
+        false
+    }
+}
+
+/// Asks for a line of text (a new name) with the system's alert, which iOS
+/// 26 draws in Liquid Glass (`src/prompt.rs`). nsh's `AlertDialog` takes no
+/// text; elsewhere `components/Prompt.tsx` shows a card of the app's own.
+#[module]
+pub struct TextPrompt;
+
+#[module]
+impl TextPrompt {
+    /// Whether `ask` shows the system's alert here: iOS.
+    pub fn available() -> bool {
+        cfg!(target_os = "ios")
+    }
+
+    /// Shows the alert: `title`, a `message` under it (the last try's error,
+    /// or ""), a field starting with `value` and showing `placeholder`, and
+    /// Cancel and `confirm`, in `tint` (`#rrggbb`; "" for the system's).
+    /// Resolves with JSON: `{ "text": "…" }` when
+    /// confirmed, `null` when cancelled.
+    pub async fn ask(
+        title: String,
+        message: String,
+        value: String,
+        placeholder: String,
+        confirm: String,
+        tint: String,
+    ) -> String {
+        #[cfg(target_os = "ios")]
+        {
+            let text = prompt::ask(prompt::Ask {
+                title,
+                message,
+                value,
+                placeholder,
+                confirm,
+                tint,
+            })
+            .await;
+            match text {
+                Some(text) => serde_json::json!({ "text": text }).to_string(),
+                None => "null".to_owned(),
+            }
+        }
+        #[cfg(not(target_os = "ios"))]
+        {
+            let _ = (title, message, value, placeholder, confirm, tint);
+            "null".to_owned()
+        }
     }
 }
 

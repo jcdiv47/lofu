@@ -10,6 +10,7 @@ import {
   View,
 } from "nsh";
 import { BookmarkCard, BookmarkRow, CARD_COVER } from "../components/BookmarkCard";
+import { nativeScrollEdges, ScrollEdge } from "../components/native";
 import { SearchField } from "../components/SearchField";
 import { SwipeRow, swipeable } from "../components/SwipeRow";
 import { BottomEdge, RoundGlassButton, TopEdge } from "../components/ui";
@@ -290,6 +291,7 @@ export function Library(props: {
         pointerEvents: "box-none",
       }}
     >
+      {nativeScrollEdges && <ScrollEdge edge="bottom" />}
       <View class="flex-1">
         <SearchField
           value={query}
