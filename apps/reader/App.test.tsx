@@ -589,6 +589,38 @@ test("offline: a change waits on the device and is sent once the server is back"
   expect(app.shows("text:Article bb")).toBe(false);
 });
 
+test("offline: a change made while a waiting one is being sent is sent too", async () => {
+  let online = false;
+  const patches: unknown[] = [];
+  const app = await open("./App.tsx", {
+    ...desktop,
+    network: {
+      [`GET ${S}/v1/sync*`]: () => (online ? { body: library } : { error: "offline" }),
+      [`PATCH ${S}/v1/bookmarks/bb`]: (r) => {
+        if (!online) return { error: "offline" };
+        const patch = JSON.parse(r.body ?? "{}");
+        patches.push(patch);
+        // Slow: the next change comes while this one is on its way.
+        return { body: { ...library.bookmarks[1], ...patch }, delay: 1500 };
+      },
+    },
+  });
+  online = true;
+  await app.press("id:sync");
+  await app.waitFor("text:Article bb");
+  online = false;
+  await app.rightClick("id:card-bb");
+  await app.chooseMenuItem("Remove from favorites");
+  await app.waitUntil(() => app.texts().some((t) => t.includes("1 change waiting")));
+  online = true;
+  await app.press("id:sync");
+  await app.waitUntil(() => patches.length === 1);
+  await app.rightClick("id:card-bb");
+  await app.chooseMenuItem("Add to favorites");
+  await app.waitUntil(() => patches.length === 2, { timeout: 8000 });
+  expect(patches).toEqual([{ favorite: false }, { favorite: true }]);
+});
+
 test("desktop: tags are renamed and collections deleted from their menus", async () => {
   const calls: string[] = [];
   // The server's library, as the changes leave it.

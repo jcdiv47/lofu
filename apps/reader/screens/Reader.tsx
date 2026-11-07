@@ -365,7 +365,8 @@ export function Reader(props: {
   effect(() => {
     const note = b().note;
     if (note === shownNote || !last) return;
-    untracked(() => last && show(last));
+    // With the highlights as they are now, not as the article came.
+    untracked(() => last && show({ ...last, highlights: all() }));
   });
 
   /** Keeps the device's copy in step with the highlights shown. */

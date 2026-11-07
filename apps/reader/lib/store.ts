@@ -260,7 +260,10 @@ function saveOutbox() {
 function enqueue(op: Op) {
   const ops = [...outbox()];
   const last = ops[ops.length - 1];
-  if (op.kind === "patch" && last?.kind === "patch" && last.id === op.id) {
+  // The first op is on its way while flushing: it's dropped once sent, so
+  // nothing may be merged into it.
+  const sending = flushing !== null && ops.length === 1;
+  if (op.kind === "patch" && last?.kind === "patch" && last.id === op.id && !sending) {
     // Consecutive edits of one bookmark (reading progress, say) are one.
     ops[ops.length - 1] = { ...last, patch: { ...last.patch, ...op.patch } };
   } else if (op.kind === "removeHighlight" && op.id.startsWith("local-")) {
@@ -290,6 +293,23 @@ async function send(op: Op): Promise<void> {
   switch (op.kind) {
     case "create": {
       const b = normalize(await api.create(op.url, { ...op.fields, id: op.id }));
+      if (b.id !== op.id) {
+        // Already saved: the server's bookmark takes the place of the one
+        // made here, and the changes waiting for it go to the server's.
+        byId.update((m) => {
+          m.delete(op.id);
+          return m;
+        });
+        outbox.set(
+          outbox().map((o) =>
+            "bookmarkId" in o && o.bookmarkId === op.id
+              ? { ...o, bookmarkId: b.id }
+              : o.kind !== "create" && "id" in o && o.id === op.id
+                ? { ...o, id: b.id }
+                : o,
+          ),
+        );
+      }
       byId.update((m) => m.set(b.id, overlay(b) ?? b));
       return;
     }
@@ -800,7 +820,9 @@ export function pendingHighlights(bookmarkId: string, server: Highlight[]): High
       added.push({ id: localId, bookmarkId, quote, prefix, suffix, note: null, color: null });
     }
   }
-  return [...server, ...added].filter(
+  // The device's copy of the article may hold the waiting ones already.
+  const have = new Set(server.map((h) => h.id));
+  return [...server, ...added.filter((h) => !have.has(h.id))].filter(
     (h) => !removed.has(h.id) && !removed.has(sentHighlights.get(h.id) ?? ""),
   );
 }
