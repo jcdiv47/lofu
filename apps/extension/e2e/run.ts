@@ -6,8 +6,9 @@
  *
  * Covers: saving from the popup sends the rendered page (a 403 bot wall the
  * server itself can't fetch), edits autosave, re-opening shows "on shelf"
- * without re-uploading, auto-repair fixes a failed bookmark when its page is
- * visited. Writes screenshots to e2e/screens.
+ * without re-uploading, the Trash button moves the bookmark there and back,
+ * auto-repair fixes a failed bookmark when its page is visited. Writes
+ * screenshots to e2e/screens.
  */
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -264,6 +265,28 @@ try {
   );
   check("re-opening doesn't re-send the page", bookmarkFor(wallUrl)?.seq === seqBefore);
   console.log(`  screenshot: ${await screenshot(again.sessionId, "popup-on-shelf", 360, true)}`);
+
+  // The Trash toggle (the API's `archived`): moves the bookmark there and back.
+  const trashButton = () =>
+    evaluate(
+      again.sessionId,
+      `(() => { const b = document.getElementById('trash');
+        return b.textContent + '|' + b.getAttribute('aria-pressed'); })()`,
+    );
+  check("the Trash button offers to move there", (await trashButton()) === "Move to Trash|false");
+  await evaluate(again.sessionId, "document.getElementById('trash').click(), true");
+  check(
+    "Move to Trash sets archived",
+    Boolean(await until(async () => bookmarkFor(wallUrl)?.archived === true)),
+  );
+  check("the button then says In Trash", (await trashButton()) === "In Trash|true");
+  await evaluate(again.sessionId, "document.activeElement?.blur(), true");
+  console.log(`  screenshot: ${await screenshot(again.sessionId, "popup-in-trash", 360, false)}`);
+  await evaluate(again.sessionId, "document.getElementById('trash').click(), true");
+  check(
+    "pressing it again restores it",
+    Boolean(await until(async () => bookmarkFor(wallUrl)?.archived === false)),
+  );
 
   // 3. Auto-repair: a bookmark the server couldn't read gets fixed on visit.
   const repairUrl = `${fixture}/bot-wall?article=2`;

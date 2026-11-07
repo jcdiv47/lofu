@@ -115,6 +115,10 @@ export async function measureImages(markdown: string): Promise<ImageSizes> {
 
 const b64url = (b: Uint8Array) => Buffer.from(b).toString("base64url");
 
+/** An error is not kept by caches: an upstream hiccup must not stick to a cover. */
+const failure = (message: string, status: number) =>
+  new Response(message, { status, headers: { "cache-control": "no-store" } });
+
 /** Signs and serves `/img/<signature>?u=<url>`. */
 export class ImageProxy {
   constructor(private key: Uint8Array) {}
@@ -142,6 +146,22 @@ export class ImageProxy {
     return `/img/${this.sign(url)}?u=${encodeURIComponent(url)}`;
   }
 
+  /**
+   * The proxy path for a bookmark's cover. Old rows may hold a cover relative
+   * to the page (or protocol-relative), so it is resolved against the page URL
+   * first.
+   */
+  coverPath(cover: string | null, pageUrl: string): string | null {
+    if (!cover) return null;
+    let url: string;
+    try {
+      url = new URL(cover, pageUrl).href;
+    } catch {
+      return null;
+    }
+    return this.path(url);
+  }
+
   verify(sig: string, url: string): boolean {
     const want = Buffer.from(this.sign(url));
     const got = Buffer.from(sig);
@@ -151,7 +171,7 @@ export class ImageProxy {
   /** Fetches the image for a client: no Referer, image types only, never run as a document. */
   async serve(sig: string, url: string | undefined): Promise<Response> {
     if (!url || !/^https?:\/\//i.test(url) || !this.verify(sig, url)) {
-      return new Response("bad signature", { status: 403 });
+      return failure("bad signature", 403);
     }
     let res: Response;
     try {
@@ -161,16 +181,14 @@ export class ImageProxy {
         signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
       });
     } catch (e) {
-      return new Response(`upstream failed: ${(e as Error).message}`, { status: 502 });
+      return failure(`upstream failed: ${(e as Error).message}`, 502);
     }
     const type = res.headers.get("content-type")?.toLowerCase() ?? "";
     const length = Number(res.headers.get("content-length") ?? 0);
     if (!res.ok || !type.startsWith("image/") || length > PROXY_MAX_BYTES) {
       await res.body?.cancel();
-      if (!res.ok) return new Response(`upstream HTTP ${res.status}`, { status: 502 });
-      return new Response(length > PROXY_MAX_BYTES ? "too large" : "not an image", {
-        status: 415,
-      });
+      if (!res.ok) return failure(`upstream HTTP ${res.status}`, 502);
+      return failure(length > PROXY_MAX_BYTES ? "too large" : "not an image", 415);
     }
     const headers: Record<string, string> = {
       "content-type": type,

@@ -20,7 +20,7 @@ const suggest = $<HTMLDivElement>("suggest");
 const collectionSel = $<HTMLSelectElement>("collection");
 const note = $<HTMLTextAreaElement>("note");
 const favBtn = $<HTMLButtonElement>("fav");
-const archiveBtn = $<HTMLButtonElement>("archive");
+const trashBtn = $<HTMLButtonElement>("trash");
 const removeBtn = $<HTMLButtonElement>("remove");
 const sync = $("sync");
 
@@ -92,8 +92,14 @@ function renderBookmark(b: Bookmark) {
   statusLine.title = text;
   statusLine.classList.toggle("warn", warn);
   favBtn.setAttribute("aria-pressed", String(b.favorite));
-  archiveBtn.setAttribute("aria-pressed", String(b.archived));
-  archiveBtn.textContent = b.archived ? "Archived" : "Archive";
+  showTrash(b.archived);
+}
+
+/** `archived` is the Trash (the API field keeps its old name). */
+function showTrash(inTrash: boolean) {
+  trashBtn.setAttribute("aria-pressed", String(inTrash));
+  trashBtn.textContent = inTrash ? "In Trash" : "Move to Trash";
+  trashBtn.title = inTrash ? "Restore from the Trash" : "Move to the Trash";
 }
 
 /** Extraction runs server-side after saving; follow it briefly so the card can report it. */
@@ -242,10 +248,9 @@ favBtn.addEventListener("click", () => {
   favBtn.setAttribute("aria-pressed", String(on));
   patch({ favorite: on });
 });
-archiveBtn.addEventListener("click", () => {
-  const on = archiveBtn.getAttribute("aria-pressed") !== "true";
-  archiveBtn.setAttribute("aria-pressed", String(on));
-  archiveBtn.textContent = on ? "Archived" : "Archive";
+trashBtn.addEventListener("click", () => {
+  const on = trashBtn.getAttribute("aria-pressed") !== "true";
+  showTrash(on);
   patch({ archived: on });
 });
 
@@ -260,7 +265,7 @@ removeBtn.addEventListener("click", async () => {
     if (r.ok && r.bookmark) {
       renderBookmark(r.bookmark);
       setState("saved");
-      removeBtn.textContent = "Remove";
+      removeBtn.textContent = "Delete";
     } else if (!r.ok) flashSync(r.error, true);
     return;
   }
@@ -268,7 +273,7 @@ removeBtn.addEventListener("click", async () => {
   if (!r.ok) return flashSync(r.error, true);
   setState("removed");
   removeBtn.textContent = "Undo";
-  statusLine.textContent = "removed from your shelves";
+  statusLine.textContent = "deleted from your shelves";
 });
 
 $("open-options").addEventListener("click", () => {

@@ -3,11 +3,14 @@ import {
   ApiError,
   Collection,
   CreateCollection,
+  RenameTag,
   SearchQuery,
   SearchResult,
   SyncQuery,
   SyncResponse,
+  TagChange,
   TagCount,
+  TagName,
   UpdateCollection,
 } from "@lofu/shared";
 import type { AppContext } from "../context.ts";
@@ -42,6 +45,31 @@ export function miscRoutes(app: OpenAPIHono, ctx: AppContext) {
       responses: { 200: json(z.array(TagCount), "Tags") },
     }),
     (c) => c.json(bookmarks.tagCounts(), 200),
+  );
+
+  app.openapi(
+    createRoute({
+      method: "post",
+      path: "/v1/tags/rename",
+      summary: "Rename a tag on every bookmark (merges into `to` where it already exists)",
+      request: body(RenameTag),
+      responses: { 200: json(TagChange, "Bookmarks changed") },
+    }),
+    (c) => {
+      const { from, to } = c.req.valid("json");
+      return c.json({ updated: bookmarks.renameTag(from, to) }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "delete",
+      path: "/v1/tags/{name}",
+      summary: "Remove a tag from every bookmark",
+      request: { params: z.object({ name: TagName }) },
+      responses: { 200: json(TagChange, "Bookmarks changed") },
+    }),
+    (c) => c.json({ updated: bookmarks.deleteTag(c.req.valid("param").name) }, 200),
   );
 
   app.openapi(
@@ -100,7 +128,7 @@ export function miscRoutes(app: OpenAPIHono, ctx: AppContext) {
     }),
     (c) => {
       const { since, limit } = c.req.valid("query");
-      return c.json(syncSince(ctx.db, since, limit), 200);
+      return c.json(syncSince(ctx.db, ctx.images, since, limit), 200);
     },
   );
 }

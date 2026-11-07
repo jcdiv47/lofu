@@ -9,15 +9,28 @@
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-const CJK = /[぀-ヿ㐀-鿿가-힯]/;
+const CJK_CHARS = "぀-ヿ㐀-鿿가-힯";
+const CJK = new RegExp(`[${CJK_CHARS}]`);
+/**
+ * Holds at a word start: not right after a letter, digit or underscore of a
+ * spaced script. A CJK character before doesn't count, since CJK text has no
+ * spaces ("用React开发" holds the word "React").
+ */
+const WORD_START = `(?<![\\p{L}\\p{N}\\p{M}_](?<![${CJK_CHARS}]))`;
+/** Terms that begin like a word of a spaced script get matched at word starts only. */
+const startsWord = (t: string) => /^[\p{L}\p{N}_]/u.test(t) && !CJK.test(t.charAt(0));
 
-/** Builds a matcher for the query's terms, or null if there is nothing to match. */
+/**
+ * Builds a matcher for the query's terms, or null if there is nothing to
+ * match. A term matches at a word start ("learn" marks "Learning", "in" not
+ * "Machine"); a term in CJK, which has no spaces, matches anywhere.
+ */
 export function queryMatcher(q: string): RegExp | null {
   const terms = q
     .split(/[\s"'“”‘’(),;:!?]+/u)
     .filter((t) => t.length >= 2 || CJK.test(t))
     .sort((a, b) => b.length - a.length) // prefer the longest alternative
-    .map(escapeRe);
+    .map((t) => (startsWord(t) ? WORD_START : "") + escapeRe(t));
   return terms.length ? new RegExp(terms.join("|"), "giu") : null;
 }
 

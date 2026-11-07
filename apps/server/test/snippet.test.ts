@@ -27,3 +27,33 @@ test("CJK single characters and regex metacharacters", () => {
   expect(queryMatcher("a")).toBeNull();
   expect(makeSnippet("nothing here", queryMatcher("absent")!)).toBeNull();
 });
+
+test("terms mark whole words or word starts, never the inside of a word", () => {
+  expect(makeSnippet("Machine Learning in practice", queryMatcher("in")!)).toBe(
+    "Machine Learning <mark>in</mark> practice",
+  );
+  // Prefixes still count: the query may be the start of a longer word.
+  expect(makeSnippet("Machine Learning, unlearn, learned", queryMatcher("learn")!)).toBe(
+    "Machine <mark>Learn</mark>ing, unlearn, <mark>learn</mark>ed",
+  );
+  expect(makeSnippet("snake_case and Case", queryMatcher("case")!)).toBe(
+    "snake_case and <mark>Case</mark>",
+  );
+  expect(makeSnippet("Grüße überall, Hüber", queryMatcher("über")!)).toBe(
+    "Grüße <mark>über</mark>all, Hüber",
+  );
+  // Only matches inside words: no snippet rather than a misleading one.
+  expect(makeSnippet("Machine only", queryMatcher("in")!)).toBeNull();
+});
+
+test("CJK has no spaces: CJK terms match anywhere, Latin words next to CJK still match", () => {
+  expect(makeSnippet("函数式编程里的副作用", queryMatcher("作用")!)).toBe(
+    "函数式编程里的副<mark>作用</mark>",
+  );
+  expect(makeSnippet("使用React开发组件，不是preact", queryMatcher("react")!)).toBe(
+    "使用<mark>React</mark>开发组件，不是preact",
+  );
+  expect(makeSnippet("新しいコンポーネント", queryMatcher("コンポ")!)).toBe(
+    "新しい<mark>コンポ</mark>ーネント",
+  );
+});

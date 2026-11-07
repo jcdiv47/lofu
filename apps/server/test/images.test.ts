@@ -127,8 +127,29 @@ describe("article images", () => {
     expect((await app.request(`/img/forged?u=${encodeURIComponent(hotlinked.src)}`)).status).toBe(
       403,
     );
-    // Upstream errors and non-images don't pass through as such.
-    expect((await app.request((await images())[2]!.proxy!)).status).toBe(502);
+    // Upstream errors and non-images don't pass through as such, and aren't cached.
+    const missing = await app.request((await images())[2]!.proxy!);
+    expect([missing.status, missing.headers.get("cache-control")]).toEqual([502, "no-store"]);
+  });
+
+  test("covers load through the proxy too, relative ones resolved against the page", async () => {
+    // A hotlink-protected cover (WeChat, CSDN), stored relative as old rows may be.
+    const b = await api("PATCH", `/v1/bookmarks/${id}`, { coverUrl: "/hotlinked.png" });
+    expect(b.data.coverProxy).toBe(sys.ctx.images.path(`${base}/hotlinked.png`));
+    // The reader's page sends its own Referer; the proxy doesn't pass it on.
+    const res = await app.request(b.data.coverProxy, {
+      headers: { referer: "https://reader.test/" },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    expect(res.headers.get("cache-control")).toBe("public, max-age=604800");
+    expect(res.headers.get("cross-origin-resource-policy")).toBe("cross-origin");
+    expect(imageSize(new Uint8Array(await res.arrayBuffer()))).toEqual({
+      width: 1200,
+      height: 300,
+    });
+    const listed = (await api("GET", "/v1/bookmarks")).data.items;
+    expect(listed.find((x: { id: string }) => x.id === id).coverProxy).toBe(b.data.coverProxy);
   });
 
   test("content saved before sizes existed is measured by a backfill", async () => {

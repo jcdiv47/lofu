@@ -22,6 +22,8 @@ export const TagName = z
   .max(64)
   .transform((t) => t.toLowerCase());
 
+const inTrash = "In the Trash (the field keeps its old name, `archived`)";
+
 export const Bookmark = z
   .object({
     id,
@@ -30,13 +32,24 @@ export const Bookmark = z
     excerpt: z.string().nullable(),
     note: z.string().nullable(),
     coverUrl: z.string().nullable(),
+    /**
+     * Where to load the cover from instead, relative to the server: the signed
+     * image proxy (`/img/<signature>?u=<url>`), which fetches it without the
+     * Referer that hotlink protection (WeChat, CSDN) rejects. Computed, never
+     * stored; null when there is no http(s) cover.
+     */
+    coverProxy: z
+      .string()
+      .nullable()
+      .describe("The cover through the server's signed image proxy (a path); null without a cover"),
     faviconUrl: z.string().nullable(),
     domain: z.string(),
     type: BookmarkType,
     tags: z.array(z.string()),
     collectionId: id.nullable(),
     favorite: z.boolean(),
-    archived: z.boolean(),
+    /** In the Trash. Clients call it the Trash; deleting from the Trash deletes for good. */
+    archived: z.boolean().describe(inTrash),
     readProgress: z.number().min(0).max(1),
     wordCount: z.number().int().nullable(),
     lang: z.string().nullable(),
@@ -62,7 +75,7 @@ export const CreateBookmark = z
     tags: z.array(TagName).max(100).optional(),
     collectionId: id.nullable().optional(),
     favorite: z.boolean().optional(),
-    archived: z.boolean().optional(),
+    archived: z.boolean().describe(inTrash).optional(),
     /**
      * Already-rendered page HTML (e.g. from the browser extension). When
      * present the server skips fetching, which is both faster and the only way
@@ -85,7 +98,8 @@ export const UpdateBookmark = z
     tags: z.array(TagName).max(100),
     collectionId: id.nullable(),
     favorite: z.boolean(),
-    archived: z.boolean(),
+    /** true moves the bookmark to the Trash, false restores it. */
+    archived: z.boolean().describe(inTrash),
     readProgress: z.number().min(0).max(1),
     coverUrl: z.string().nullable(),
   })
@@ -106,7 +120,7 @@ const csvParam = z.string().transform((s) =>
 export const ListBookmarksQuery = z.object({
   collectionId: z.string().optional(),
   tags: csvParam.optional(),
-  archived: boolParam.optional(),
+  archived: boolParam.describe("true: only bookmarks in the Trash; false: none of them").optional(),
   favorite: boolParam.optional(),
   type: BookmarkType.optional(),
   contentStatus: ContentStatus.optional(),
@@ -148,7 +162,7 @@ export const SearchQuery = z.object({
   q: z.string().max(1000).default(""),
   collectionId: z.string().optional(),
   tags: csvParam.optional(),
-  archived: boolParam.optional(),
+  archived: boolParam.describe("true: only bookmarks in the Trash; false: none of them").optional(),
   favorite: boolParam.optional(),
   type: BookmarkType.optional(),
   domain: z.string().optional(),
@@ -219,6 +233,21 @@ export const UpdateCollection = z
 export const TagCount = z
   .object({ name: z.string(), count: z.number().int() })
   .meta({ id: "TagCount" });
+
+export const RenameTag = z
+  .object({
+    from: TagName,
+    /** Bookmarks that already have this tag keep one copy of it (a merge). */
+    to: TagName,
+  })
+  .meta({ id: "RenameTag" });
+
+export const TagChange = z
+  .object({
+    /** Bookmarks changed; each got a new `seq`. */
+    updated: z.number().int(),
+  })
+  .meta({ id: "TagChange" });
 
 /**
  * Highlights are anchored with a W3C Web Annotation TextQuoteSelector
