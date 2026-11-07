@@ -74,7 +74,8 @@ mod mac {
 
     use objc2::rc::{Allocated, Retained};
     use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol};
-    use objc2::{MainThreadMarker, MainThreadOnly, class, define_class, msg_send, sel};
+    use objc2::{ClassType, MainThreadMarker, MainThreadOnly, class, define_class, msg_send, sel};
+    use objc2_app_kit::{NSResponder, NSView};
     use objc2_foundation::{NSArray, NSPoint, NSRect, NSSize, NSString};
     use serde_json::Value;
 
@@ -226,6 +227,30 @@ mod mac {
         NSArray::from_retained_slice(&ids)
     }
 
+    define_class!(
+        /// A `space` item's view, which fits the spaces again once AppKit has
+        /// put it in the window: the toolbar lays out the items it takes a
+        /// moment after they're inserted, and in a release build that's
+        /// later than `apply`'s next turn, which left Back over the sidebar.
+        #[unsafe(super(NSView, NSResponder, NSObject))]
+        #[thread_kind = MainThreadOnly]
+        #[name = "LofuToolbarSpace"]
+        struct SpaceView;
+
+        impl SpaceView {
+            #[unsafe(method(viewDidMoveToWindow))]
+            fn did_move_to_window(&self) {
+                // SAFETY: NSView's own method, on the main thread.
+                unsafe {
+                    let _: () = msg_send![super(self), viewDidMoveToWindow];
+                }
+                // After the layout that placed it.
+                // SAFETY: fit_spaces runs on the main thread.
+                dispatch2::DispatchQueue::main().exec_async(|| unsafe { fit_spaces() });
+            }
+        }
+    );
+
     /// The app's id in an item's identifier (`lofu.button.star` → `star`).
     fn id_of(identifier: &str) -> String {
         identifier
@@ -305,7 +330,7 @@ mod mac {
                     let made: Allocated<AnyObject> = msg_send![class!(NSToolbarItem), alloc];
                     let made: Retained<AnyObject> =
                         msg_send![made, initWithItemIdentifier: &*identifier];
-                    let view: Retained<AnyObject> = msg_send![class!(NSView), new];
+                    let view: Retained<AnyObject> = msg_send![SpaceView::class(), new];
                     let _: () = msg_send![
                         &*view,
                         setFrame: NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1.0, 1.0))
