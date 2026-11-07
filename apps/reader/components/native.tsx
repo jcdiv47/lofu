@@ -96,7 +96,10 @@ export function SystemGlassButton(props: {
       label={props.label}
       disabled={props.disabled ?? false}
       style={overlaid ? undefined : props.style}
-      class={overlaid ? "flex-1" : undefined}
+      // `grow`, not `flex-1`: with no size from `style` (a labelled button),
+      // a zero basis collapsed the wrapper, and with it the clear view that
+      // takes the click, so clicks fell through to the button and were lost.
+      class={overlaid ? "grow" : undefined}
       onTap={(at) => props.onPress?.({ pagePosition: at } as PressEvent)}
     />
   );

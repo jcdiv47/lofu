@@ -585,10 +585,19 @@ export function Reader(props: {
             </If>
             <View class="flex-row items-center gap-2.5 pt-2">
               <If when={b().contentStatus === "failed" && !retrying()}>
-                <GlassButton label="Try reading it again" onPress={() => void retry()} />
+                <GlassButton
+                  label="Try reading it again"
+                  testID="retry"
+                  onPress={() => void retry()}
+                />
               </If>
               <If when={b().contentStatus !== "ok" || !editor()}>
-                <GlassButton label="Open original" prominent onPress={() => openOriginal(b())} />
+                <GlassButton
+                  label="Open original"
+                  prominent
+                  testID="open-original"
+                  onPress={() => openOriginal(b())}
+                />
               </If>
             </View>
           </View>
