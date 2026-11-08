@@ -1,7 +1,7 @@
 import { Text } from "nsh";
 import { ContextMenu, Menu, MenuItem, MenuSeparator } from "nsh/base";
 import type { JSX } from "nsh/jsx-runtime";
-import { bookmarkActions, separatedBefore } from "../lib/actions";
+import { type BookmarkMenuOptions, bookmarkActions, hasBrowser, startsGroup } from "../lib/actions";
 import type { Bookmark } from "../lib/api";
 import { look } from "../lib/look";
 import { Icon, type IconName } from "./ui";
@@ -15,11 +15,16 @@ import { Icon, type IconName } from "./ui";
  */
 
 const iconFor: Record<string, (b: Bookmark) => IconName> = {
-  open: () => "forward",
-  original: () => "external",
+  "open-reader": () => "forward",
+  // The globe opens the page in the app; the compass, in the system's browser
+  // (where the original goes on the web build, which has no browser of its own).
+  "open-app": () => (hasBrowser ? "globe" : "compass"),
+  "open-browser": () => "compass",
   copy: () => "link",
   share: () => "share",
   favorite: (b) => (b.favorite ? "starFill" : "star"),
+  "mark-read": () => "check",
+  edit: () => "pencil",
   move: () => "folder",
   restore: () => "restore",
   refetch: () => "refresh",
@@ -40,9 +45,10 @@ const popup = () => ({
 });
 
 /** Made on each opening, so it reads the bookmark a recycled cell shows now. */
-function items(b: Bookmark, open?: () => void) {
-  return bookmarkActions(b, open).flatMap((a, i) => [
-    ...(separatedBefore(a, i)
+function items(b: Bookmark, o?: BookmarkMenuOptions) {
+  const actions = bookmarkActions(b, o);
+  return actions.flatMap((a, i) => [
+    ...(startsGroup(actions, i)
       ? [<MenuSeparator class="mx-2 my-1 h-px" style={{ backgroundColor: look().rule }} />]
       : []),
     <MenuItem
@@ -65,30 +71,30 @@ function items(b: Bookmark, open?: () => void) {
       <Text
         style={{ color: a.destructive ? look().stamp : look().ink, fontSize: 13.5, lineHeight: 18 }}
       >
-        {a.label}
+        {a.id === "move" ? `${a.label}…` : a.label}
       </Text>
     </MenuItem>,
   ]);
 }
 
 /** A card's or row's menu: right click or a held finger on `trigger`. */
-export function BookmarkContextMenu(props: {
-  b: Bookmark;
-  open?: () => void;
-  trigger: JSX.Element;
-}) {
+export function BookmarkContextMenu(props: { b: Bookmark; trigger: JSX.Element }) {
   return (
     <ContextMenu trigger={props.trigger} offset={2} {...popup()}>
-      <>{items(props.b, props.open)}</>
+      <>{items(props.b)}</>
     </ContextMenu>
   );
 }
 
 /** A toolbar button's menu, under the button at its right edge. */
-export function BookmarkDropdown(props: { b: Bookmark; trigger: JSX.Element }) {
+export function BookmarkDropdown(props: {
+  b: Bookmark;
+  trigger: JSX.Element;
+  options?: BookmarkMenuOptions;
+}) {
   return (
     <Menu trigger={props.trigger} placement="bottom" align="end" offset={6} {...popup()}>
-      <>{items(props.b)}</>
+      <>{items(props.b, props.options)}</>
     </Menu>
   );
 }

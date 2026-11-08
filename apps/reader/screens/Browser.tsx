@@ -108,7 +108,7 @@ export function Browser(props: {
   );
   const external = () => (
     <IconButton
-      name="external"
+      name="compass"
       label="Open in browser"
       testID="web-external"
       onPress={() => openInBrowser(at().url)}
@@ -219,7 +219,7 @@ export function Browser(props: {
           </View>
           <If when={!native}>
             <RoundGlassButton
-              name="external"
+              name="compass"
               label="Open in browser"
               testID="web-external"
               onPress={() => openInBrowser(at().url)}

@@ -205,7 +205,7 @@ export function BookmarkCard(props: {
       testID={`card-${b().id}`}
       onPress={props.onOpen}
       onContextMenu={
-        nativeMenus ? (e) => void showBookmarkMenu(b(), props.onOpen, e.pagePosition) : undefined
+        nativeMenus ? (e) => void showBookmarkMenu(b(), { at: e.pagePosition }) : undefined
       }
       class="overflow-hidden rounded-[16px] active:opacity-80"
       style={{
@@ -246,7 +246,7 @@ export function BookmarkCard(props: {
       </View>
     </View>
   );
-  return nativeMenus ? card : <BookmarkContextMenu b={b()} open={props.onOpen} trigger={card} />;
+  return nativeMenus ? card : <BookmarkContextMenu b={b()} trigger={card} />;
 }
 
 /** A row in the phone list: title, excerpt and meta beside a thumbnail. */
@@ -266,10 +266,10 @@ export function BookmarkRow(props: {
       testID={`row-${b().id}`}
       onPress={props.onOpen}
       onLongPress={
-        nativeMenus ? (e) => void showBookmarkMenu(b(), props.onOpen, e.pagePosition) : undefined
+        nativeMenus ? (e) => void showBookmarkMenu(b(), { at: e.pagePosition }) : undefined
       }
       onContextMenu={
-        nativeMenus ? (e) => void showBookmarkMenu(b(), props.onOpen, e.pagePosition) : undefined
+        nativeMenus ? (e) => void showBookmarkMenu(b(), { at: e.pagePosition }) : undefined
       }
       class="flex-row gap-3 px-4 py-3.5"
       activeStyle={{ backgroundColor: look().selected }}
@@ -329,5 +329,5 @@ export function BookmarkRow(props: {
       </If>
     </View>
   );
-  return nativeMenus ? row : <BookmarkContextMenu b={b()} open={props.onOpen} trigger={row} />;
+  return nativeMenus ? row : <BookmarkContextMenu b={b()} trigger={row} />;
 }

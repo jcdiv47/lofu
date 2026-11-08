@@ -245,7 +245,7 @@ impl PopupMenu {
     }
 
     /// Shows `items` (JSON: `[{ id, title, subtitle?, symbol?, destructive?,
-    /// checked? } | { title, subtitle?, symbol?, children } | { separator: true }]`)
+    /// checked? } | { title, subtitle?, symbol?, children, row? } | { separator: true }]`)
     /// under `title`, from `x`, `y` (points in the window). A negative `x`
     /// opens it from the navigation bar's right-hand button. Resolves with the chosen item's id, or "" when it
     /// was dismissed.
@@ -437,27 +437,46 @@ mod menu {
         unsafe { msg_send![class!(UIImage), systemImageNamed: &*name] }
     }
 
-    /// One item: an action, or a submenu when it has `children`.
+    /// Whether `value` is a row: its children drawn in place, side by side.
+    fn is_row(value: &Value) -> bool {
+        value.get("children").is_some() && value.get("row").and_then(Value::as_str).is_some()
+    }
+
+    /// One item: an action, or a submenu when it has `children` (drawn in
+    /// place as a row of tiles when it has `row`: `"medium"` or `"small"`).
     unsafe fn element(value: &Value, tx: &Sender<String>) -> Option<Retained<AnyObject>> {
         unsafe {
-            let title = text(value, "title")?;
             let image = symbol(value);
             if let Some(Value::Array(children)) = value.get("children") {
+                let title = text(value, "title").unwrap_or_else(|| NSString::from_str(""));
+                let row = value.get("row").and_then(Value::as_str);
                 let children = group(children, tx);
                 let menu: Retained<AnyObject> = msg_send![
                     class!(UIMenu),
                     menuWithTitle: &*title,
                     image: image.as_deref(),
                     identifier: Option::<&NSString>::None,
-                    options: 0usize,
+                    // UIMenuOptionsDisplayInline for a row.
+                    options: if row.is_some() { 1usize } else { 0usize },
                     children: &*children
                 ];
                 // What it's set to now ("By name"), under its title.
                 if let Some(subtitle) = text(value, "subtitle") {
                     let _: () = msg_send![&*menu, setSubtitle: &*subtitle];
                 }
+                // UIMenuElementSizeSmall / Medium (iOS 16); before that, a
+                // plain group of the same items.
+                if let Some(row) = row {
+                    let responds: bool =
+                        msg_send![&*menu, respondsToSelector: sel!(setPreferredElementSize:)];
+                    if responds {
+                        let size: isize = if row == "small" { 0 } else { 1 };
+                        let _: () = msg_send![&*menu, setPreferredElementSize: size];
+                    }
+                }
                 return Some(menu);
             }
+            let title = text(value, "title")?;
             let id = value.get("id")?.as_str()?.to_owned();
             let tx = tx.clone();
             let handler = RcBlock::new(move |_: *mut AnyObject| {
@@ -504,10 +523,16 @@ mod menu {
         let empty = NSString::from_str("");
         let inline: Vec<Retained<AnyObject>> = groups
             .iter()
-            .map(|g| {
+            .filter_map(|g| {
+                // A row is a group of its own already.
+                if let [only] = g
+                    && is_row(only)
+                {
+                    return unsafe { element(only, tx) };
+                }
                 let children = NSArray::from_retained_slice(&list(g));
                 // UIMenuOptionsDisplayInline
-                unsafe {
+                Some(unsafe {
                     msg_send![
                         class!(UIMenu),
                         menuWithTitle: &*empty,
@@ -516,7 +541,7 @@ mod menu {
                         options: 1usize,
                         children: &*children
                     ]
-                }
+                })
             })
             .collect();
         NSArray::from_retained_slice(&inline)

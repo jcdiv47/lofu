@@ -9,15 +9,23 @@ import { collections, counts, tags } from "./store";
 export type CollectionSort = "manual" | "name" | "count";
 export type TagSort = "count" | "name";
 export type Section = "collections" | "filters" | "tags";
+/** Where a tap on a bookmark opens it: the saved text, the page in the app, or the system's browser. */
+export type OpenIn = "reader" | "app" | "browser";
 
 interface Prefs {
   collectionSort: CollectionSort;
   tagSort: TagSort;
   collapsed: Section[];
+  openIn: OpenIn;
 }
 
 const KEY = "prefs.v1";
-export const prefs = signal<Prefs>({ collectionSort: "manual", tagSort: "count", collapsed: [] });
+export const prefs = signal<Prefs>({
+  collectionSort: "manual",
+  tagSort: "count",
+  collapsed: [],
+  openIn: "reader",
+});
 
 void Storage.getItem(KEY)
   .then((v) => {

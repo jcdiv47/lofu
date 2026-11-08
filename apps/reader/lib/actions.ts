@@ -4,7 +4,7 @@ import { AlertDialog } from "nsh/base";
 import { isAvailable, Menu } from "nsh/desktop";
 import { promptText } from "../components/Prompt";
 import { api, type Bookmark } from "./api";
-import { prefs, sortedCollections } from "./prefs";
+import { type OpenIn, prefs, sortedCollections } from "./prefs";
 import {
   collectionName,
   collections,
@@ -19,6 +19,7 @@ import {
   renameTag,
   restoreBookmark,
   type Source,
+  setReadProgress,
   sync,
   trashBookmark,
   updateBookmark,
@@ -33,10 +34,16 @@ export const hasBrowser =
   platform.os === "ios" || platform.os === "macos" || platform.os === "android";
 
 let browse: ((b: Bookmark) => void) | null = null;
+let read: ((b: Bookmark) => void) | null = null;
 
 /** The app's stack registers how it shows a page in the app. */
 export function setBrowser(show: ((b: Bookmark) => void) | null) {
   browse = show;
+}
+
+/** The app's stack registers how it opens a bookmark in the reader. */
+export function setReader(show: ((b: Bookmark) => void) | null) {
+  read = show;
 }
 
 let edit: ((b: Bookmark) => void) | null = null;
@@ -74,6 +81,34 @@ export function openOriginal(b: Bookmark) {
   else openInBrowser(b.url);
 }
 
+/** The saved text, in the reader. */
+export const openInReader = (b: Bookmark) => read?.(b);
+
+/**
+ * The ways a bookmark opens, in the order menus list them. Without a
+ * browser of the app's own (the web build) there are two: the original
+ * opens in the system's browser.
+ */
+export const openWays = (): { id: OpenIn; label: string; short: string; symbol: string }[] => [
+  { id: "reader", label: "Open in Reader", short: "Reader", symbol: "doc.plaintext" },
+  {
+    id: "app",
+    label: "Open Original",
+    short: "Original",
+    symbol: hasBrowser ? "globe" : "safari",
+  },
+  ...(hasBrowser
+    ? [{ id: "browser" as const, label: "Open in Browser", short: "Browser", symbol: "safari" }]
+    : []),
+];
+
+/** Opens a bookmark the way given, or the way a tap does (Settings › Open bookmarks in). */
+export function openBookmark(b: Bookmark, how: OpenIn = prefs().openIn) {
+  if (how === "browser" || (how === "app" && !hasBrowser)) openInBrowser(b.url);
+  else if (how === "app") openOriginal(b);
+  else openInReader(b);
+}
+
 /** A point in the window, where a menu or the share picker points from. */
 export type At = { x: number; y: number };
 
@@ -96,13 +131,16 @@ export function shareBookmark(b: Bookmark, at?: At) {
   }
 }
 
-/** Where a bookmark can be moved: Unsorted and the collections, except where it is. */
+/**
+ * Where a bookmark can be moved: Unsorted and the collections, the one it's
+ * in marked `here` (none for the Trash, out of which any of them moves it).
+ */
 export function destinations(b: Bookmark) {
-  const here = inTrash(b) ? undefined : b.collectionId;
+  const at = inTrash(b) ? undefined : b.collectionId;
   return [
     { id: null as string | null, label: "Unsorted" },
     ...sortedCollections().map((c) => ({ id: c.id as string | null, label: c.name })),
-  ].filter((d) => d.id !== here);
+  ].map((d) => ({ ...d, here: d.id === at }));
 }
 
 /** Whether the system's menu can open from a point (`src/lib.rs`): iOS 17.4 on. */
@@ -128,7 +166,17 @@ export type MenuEntry =
       /** Drawn with a checkmark. */
       checked?: boolean;
     }
-  | { title: string; subtitle?: string; symbol?: string; children: MenuEntry[] }
+  | {
+      title: string;
+      subtitle?: string;
+      symbol?: string;
+      children: MenuEntry[];
+      /**
+       * Drawn in place rather than as a submenu, its items side by side as
+       * tiles (`medium`: up to three, symbol over title; `small`: symbols).
+       */
+      row?: "small" | "medium";
+    }
   | { separator: true };
 
 /**
@@ -156,19 +204,26 @@ async function actionSheet(title: string, actions: SheetAction[]): Promise<strin
   return action == null || action === "cancel" ? null : action;
 }
 
-const move = (b: Bookmark, to: string | null) => void moveBookmark(b.id, to).catch(() => {});
+const move = (b: Bookmark, to: string | null) => {
+  if (inTrash(b) || b.collectionId !== to) void moveBookmark(b.id, to).catch(() => {});
+};
+
+/** The places a bookmark can move to, as items of the desktop's menu, where it is checked. */
+const moveItems = (b: Bookmark) =>
+  destinations(b).map((d) => ({
+    label: d.label,
+    checked: d.here,
+    disabled: d.here,
+    onSelect: () => move(b, d.id),
+  }));
 
 /**
  * Asks where to move a bookmark: a menu at the pointer on the desktop and
  * from `at` on iOS, an action sheet on Android, a dialog on the web.
  */
 export async function chooseDestination(b: Bookmark, at?: At) {
-  const places = destinations(b);
   if (isAvailable) {
-    await Menu.popup(
-      places.map((d) => ({ label: d.label, onSelect: () => move(b, d.id) })),
-      at,
-    );
+    await Menu.popup(moveItems(b), at);
     return;
   }
   if (systemMenus) {
@@ -178,18 +233,24 @@ export async function chooseDestination(b: Bookmark, at?: At) {
   }
   const action = await actionSheet(
     "Move to",
-    places.map((d) => ({ id: d.id ?? "", label: d.label })),
+    destinations(b)
+      .filter((d) => !d.here)
+      .map((d) => ({ id: d.id ?? "", label: d.label })),
   );
   if (action == null) return;
   move(b, action || null);
 }
 
-/** The places a bookmark can move to, as menu items with ids `to:<collection>` (`to:` for Unsorted). */
+/**
+ * The places a bookmark can move to, as items of the system's menu with ids
+ * `to:<collection>` (`to:` for Unsorted), where it is checked.
+ */
 const moveEntries = (b: Bookmark): MenuEntry[] =>
   destinations(b).map((d) => ({
     id: `to:${d.id ?? ""}`,
     title: d.label,
     symbol: d.id == null ? "tray" : "folder",
+    checked: d.here,
   }));
 
 /**
@@ -214,37 +275,113 @@ export async function deleteBookmark(b: Bookmark): Promise<boolean> {
   return true;
 }
 
+/**
+ * A menu's groups, drawn apart: how to open it, its link, the bookmark
+ * itself, and Delete.
+ */
+export type ActionGroup = "open" | "link" | "bookmark" | "delete";
+
 export interface BookmarkAction {
   id: string;
   label: string;
+  /** Under its symbol, where the menu sets actions side by side (iOS). */
+  short?: string;
+  /** An SF Symbol, for the system's menu (iOS). */
+  symbol: string;
+  group: ActionGroup;
   run: () => void;
   /** Drawn in red. */
   destructive?: boolean;
 }
 
-/** What can be done to a bookmark from its card, its row or the reader's toolbar. */
-export function bookmarkActions(b: Bookmark, open?: () => void, at?: At): BookmarkAction[] {
+export interface BookmarkMenuOptions {
+  /** Where the menu opens from, and the share picker with it. */
+  at?: At;
+  /** The reader's own menu: no *Open in Reader*, nor *Mark as Read* (it keeps the place itself). */
+  inReader?: boolean;
+  /** Actions left out, which buttons beside the menu already do (the reader's toolbar). */
+  omit?: readonly string[];
+  /** Called once the bookmark is deleted, so a reader showing it can go back. */
+  onGone?: () => void;
+}
+
+/** What the reader's toolbar does itself, left out of its ••• menu. */
+export const toolbarActions = ["favorite", "share", "edit", "delete"] as const;
+
+/** Read to the end. */
+const isRead = (b: Bookmark) => b.readProgress >= 1;
+
+/** What can be done to a bookmark from its card, its row or the reader, in the menus' order. */
+export function bookmarkActions(b: Bookmark, o: BookmarkMenuOptions = {}): BookmarkAction[] {
   const trashed = inTrash(b);
   const actions: (BookmarkAction | false | undefined)[] = [
-    open && { id: "open", label: "Open", run: open },
-    { id: "original", label: "Open original", run: () => openOriginal(b) },
-    { id: "copy", label: "Copy link", run: () => void Clipboard.writeText(b.url) },
-    !!edit && { id: "edit", label: "Edit title, tags and note…", run: () => editBookmark(b) },
-    canShare && { id: "share", label: "Share…", run: () => shareBookmark(b, at) },
+    ...openWays()
+      .filter((w) => !(o.inReader && w.id === "reader"))
+      .map(
+        (w): BookmarkAction => ({
+          id: `open-${w.id}`,
+          label: w.label,
+          short: w.short,
+          symbol: w.symbol,
+          group: "open",
+          run: () => openBookmark(b, w.id),
+        }),
+      ),
+    {
+      id: "copy",
+      label: "Copy Link",
+      symbol: "link",
+      group: "link",
+      run: () => void Clipboard.writeText(b.url),
+    },
+    canShare && {
+      id: "share",
+      label: "Share…",
+      symbol: "square.and.arrow.up",
+      group: "link",
+      run: () => shareBookmark(b, o.at),
+    },
     !trashed && {
       id: "favorite",
-      label: b.favorite ? "Remove from favorites" : "Add to favorites",
+      label: b.favorite ? "Remove from Favorites" : "Add to Favorites",
+      symbol: b.favorite ? "star.slash" : "star",
+      group: "bookmark",
       run: () => void updateBookmark(b.id, { favorite: !b.favorite }).catch(() => {}),
     },
-    { id: "move", label: "Move to…", run: () => void chooseDestination(b, at) },
+    !trashed &&
+      !o.inReader && {
+        id: "mark-read",
+        label: isRead(b) ? "Mark as Unread" : "Mark as Read",
+        symbol: isRead(b) ? "circle" : "checkmark.circle",
+        group: "bookmark",
+        run: () => setReadProgress(b.id, isRead(b) ? 0 : 1),
+      },
+    !!edit && {
+      id: "edit",
+      label: "Edit Title, Tags and Note…",
+      symbol: "pencil",
+      group: "bookmark",
+      run: () => editBookmark(b),
+    },
+    {
+      id: "move",
+      label: "Move to",
+      symbol: "folder",
+      group: "bookmark",
+      run: () => void chooseDestination(b, o.at),
+    },
     trashed && {
       id: "restore",
-      label: "Put back",
+      label: "Put Back",
+      symbol: "arrow.uturn.backward",
+      group: "bookmark",
       run: () => void restoreBookmark(b.id).catch(() => {}),
     },
     b.contentStatus === "failed" && {
       id: "refetch",
-      label: "Try reading it again",
+      label: "Try Reading It Again",
+      symbol: "arrow.clockwise",
+      group: "bookmark",
       run: async () => {
         await api.refetch(b.id).catch(() => {});
         setTimeout(() => void sync(), 4000);
@@ -252,17 +389,22 @@ export function bookmarkActions(b: Bookmark, open?: () => void, at?: At): Bookma
     },
     {
       id: "delete",
-      label: trashed ? "Delete permanently…" : "Delete",
+      label: trashed ? "Delete Permanently…" : "Delete",
+      symbol: "trash",
+      group: "delete",
       destructive: true,
-      run: () => void deleteBookmark(b),
+      run: () =>
+        void deleteBookmark(b).then((gone) => {
+          if (gone) o.onGone?.();
+        }),
     },
   ];
-  return actions.filter((a): a is BookmarkAction => !!a);
+  return actions.filter((a): a is BookmarkAction => !!a && !o.omit?.includes(a.id));
 }
 
-/** Where a menu draws a line: before the bookmark's own settings, and before Delete. */
-export const separatedBefore = (a: BookmarkAction, i: number) =>
-  i > 0 && (a.id === "original" || a.id === "favorite" || a.id === "delete");
+/** Whether a menu draws a line before `list[i]`: where a group starts. */
+export const startsGroup = (list: readonly BookmarkAction[], i: number) =>
+  i > 0 && list[i - 1].group !== list[i].group;
 
 /**
  * Menus the platform draws: a context menu on the desktop apps, the
@@ -272,77 +414,66 @@ export const separatedBefore = (a: BookmarkAction, i: number) =>
  */
 export const nativeMenus = platform.os !== "web";
 
-/** Each action's SF Symbol in the system's menu (iOS). */
-const symbolFor: Record<string, (b: Bookmark) => string> = {
-  original: () => "safari",
-  copy: () => "link",
-  share: () => "square.and.arrow.up",
-  edit: () => "pencil",
-  favorite: (b) => (b.favorite ? "star.slash" : "star"),
-  move: () => "folder",
-  restore: () => "arrow.uturn.backward",
-  refetch: () => "arrow.clockwise",
-  delete: () => "trash",
-};
-
 /**
- * The bookmark's actions as the system's menu (iOS), in three groups: the
- * page (open, copy, share), the bookmark itself (favorite, edit, move…) and
- * Delete. With symbols, the collections as a submenu of *Move to*, and
- * without *Open*, which a tap on the row does. The edit item is short, with
- * what it edits under it, since the menu is narrow.
+ * The bookmark's actions as the system's menu (iOS): the ways to open it as
+ * a row of tiles at the top, then its link, the bookmark itself and Delete,
+ * each a group. The collections are a submenu of *Move to*, the one it's in
+ * checked. The edit item is short, with what it edits under it, since the
+ * menu is narrow.
  */
 function menuEntries(b: Bookmark, actions: BookmarkAction[]): MenuEntry[] {
-  const groups = [
-    ["original", "copy", "share"],
-    ["favorite", "edit", "move", "restore", "refetch"],
-    ["delete"],
-  ];
   const entry = (a: BookmarkAction): MenuEntry =>
     a.id === "move"
-      ? { title: "Move to", symbol: "folder", children: moveEntries(b) }
+      ? { title: a.label, symbol: a.symbol, children: moveEntries(b) }
       : a.id === "edit"
-        ? { id: a.id, title: "Edit", subtitle: "Title, tags and note", symbol: "pencil" }
-        : { id: a.id, title: a.label, symbol: symbolFor[a.id]?.(b), destructive: a.destructive };
-  return groups
-    .map((ids) =>
-      actions
-        .filter((a) => ids.includes(a.id))
-        .sort((x, y) => ids.indexOf(x.id) - ids.indexOf(y.id)),
-    )
-    .filter((g) => g.length > 0)
-    .flatMap((g, i): MenuEntry[] => [
-      ...(i > 0 ? [{ separator: true as const }] : []),
-      ...g.map(entry),
-    ]);
+        ? { id: a.id, title: "Edit", subtitle: "Title, tags and note", symbol: a.symbol }
+        : { id: a.id, title: a.label, symbol: a.symbol, destructive: a.destructive };
+  const opens = actions.filter((a) => a.group === "open");
+  const rest = actions.filter((a) => a.group !== "open");
+  const row: MenuEntry[] =
+    opens.length > 1
+      ? [
+          {
+            // Untitled: an inline menu's title is drawn as a heading.
+            title: "",
+            row: "medium",
+            children: opens.map((a) => ({ id: a.id, title: a.short ?? a.label, symbol: a.symbol })),
+          },
+        ]
+      : opens.map(entry);
+  return [
+    ...row,
+    ...rest.flatMap((a, i): MenuEntry[] => [
+      ...((row.length > 0 && i === 0) || startsGroup(rest, i)
+        ? [{ separator: true as const }]
+        : []),
+      entry(a),
+    ]),
+  ];
 }
 
 /**
  * A native context menu on the desktop, the system's menu from `at` on iOS
  * (from the navigation bar's ••• without it), an action sheet on Android.
  */
-export async function showBookmarkMenu(b: Bookmark, open: (() => void) | undefined, at?: At) {
-  const actions = bookmarkActions(b, open, at);
+export async function showBookmarkMenu(b: Bookmark, o: BookmarkMenuOptions = {}) {
+  const actions = bookmarkActions(b, o);
   if (isAvailable) {
     await Menu.popup(
       actions.flatMap((a, i) => [
-        ...(separatedBefore(a, i) ? [{ type: "separator" as const }] : []),
+        ...(startsGroup(actions, i) ? [{ type: "separator" as const }] : []),
         a.id === "move"
-          ? {
-              label: "Move to",
-              submenu: destinations(b).map((d) => ({
-                label: d.label,
-                onSelect: () => move(b, d.id),
-              })),
-            }
+          ? { label: a.label, submenu: moveItems(b) }
           : { label: a.label, onSelect: a.run },
       ]),
-      at,
+      o.at,
     );
     return;
   }
   if (systemMenus) {
-    const id = await systemMenu(b.title || b.domain, menuEntries(b, actions), at);
+    // Untitled: the menu grows out of the row or the reader, which already say
+    // which bookmark it is, and a long title took the top of the menu.
+    const id = await systemMenu("", menuEntries(b, actions), o.at);
     if (id?.startsWith("to:")) move(b, id.slice(3) || null);
     else actions.find((a) => a.id === id)?.run();
     return;
@@ -351,7 +482,7 @@ export async function showBookmarkMenu(b: Bookmark, open: (() => void) | undefin
     b.title || b.domain,
     actions.map((a) => ({
       id: a.id,
-      label: a.label,
+      label: a.id === "move" ? `${a.label}…` : a.label,
       role: a.destructive ? ("destructive" as const) : undefined,
     })),
   );

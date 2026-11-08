@@ -1,6 +1,7 @@
 import { effect, type InputRef, keyboardFrame, Scroll, signal, Text, untracked, View } from "nsh";
 import { AlertDialog, Input } from "nsh/base";
 import { Icon } from "../components/ui";
+import { hasBrowser, openWays } from "../lib/actions";
 import { api, loadSettings, normalizeServer, saveSettings } from "../lib/api";
 import {
   clearArticles,
@@ -14,6 +15,7 @@ import {
 } from "../lib/articles";
 import { onDisk } from "../lib/files";
 import { fonts, look } from "../lib/look";
+import { type OpenIn, prefs, setPrefs } from "../lib/prefs";
 import { bookmarks, offline } from "../lib/store";
 import { Wordmark } from "./Sidebar";
 
@@ -122,6 +124,7 @@ export function Settings(props: { onDone: () => void; onCancel?: () => void; fir
         <If when={props.onCancel}>
           <View
             role="button"
+            accessibilityLabel="Cancel"
             onPress={() => props.onCancel?.()}
             class="rounded-full px-4 py-2.5 active:opacity-60"
           >
@@ -151,6 +154,7 @@ export function Settings(props: { onDone: () => void; onCancel?: () => void; fir
         <View class="gap-5 p-6">
           <Text style={{ color: look().ink, fontSize: 19, fontWeight: "700" }}>Your server</Text>
           {form}
+          <OpeningBookmarks />
           <If when={onDisk}>
             <OfflineReading />
           </If>
@@ -186,6 +190,60 @@ export function Settings(props: { onDone: () => void; onCancel?: () => void; fir
         </Scroll>
       </View>
     </If>
+  );
+}
+
+/** One of a few choices, checked when it's the one. */
+function Choice(props: { id: string; label: string; checked: boolean; onPress: () => void }) {
+  return (
+    <View
+      role="radio"
+      testID={props.id}
+      accessibilityLabel={props.label}
+      accessibilityState={{ checked: props.checked }}
+      onPress={props.onPress}
+      class="flex-row items-center gap-2.5 rounded-lg px-2 py-1.5 active:opacity-60"
+    >
+      <View style={{ width: 14 }}>
+        <If when={props.checked}>
+          <Icon name="check" size={14} color={look().ink} />
+        </If>
+      </View>
+      <Text style={{ color: look().ink, fontSize: 14.5 }}>{props.label}</Text>
+    </View>
+  );
+}
+
+/** What a tap on a bookmark opens (`openBookmark`); its menu offers the others. */
+function OpeningBookmarks() {
+  const label: Record<OpenIn, string> = {
+    reader: "Reader: the saved text, with highlights",
+    app: hasBrowser ? "Original page, in lofu" : "Original page, in a new tab",
+    browser: "Original page, in your browser",
+  };
+  return (
+    <View class="gap-3 pt-2" style={{ borderTopWidth: 1, borderColor: look().ruleSoft }}>
+      <View class="gap-1 pt-3">
+        <Text style={{ color: look().ink, fontSize: 16, fontWeight: "700" }}>
+          Open bookmarks in
+        </Text>
+        <Text style={{ color: look().inkSoft, fontSize: 13, lineHeight: 18 }}>
+          What a tap on a bookmark opens. Its menu has the others.
+        </Text>
+      </View>
+      <View role="radiogroup" class="gap-0.5">
+        <Each of={openWays()}>
+          {(w) => (
+            <Choice
+              id={`open-in-${w().id}`}
+              label={label[w().id]}
+              checked={prefs().openIn === w().id}
+              onPress={() => setPrefs({ openIn: w().id })}
+            />
+          )}
+        </Each>
+      </View>
+    </View>
   );
 }
 
@@ -256,24 +314,15 @@ function OfflineReading() {
       <View role="radiogroup" class="gap-0.5">
         <Each of={keepModes}>
           {(m) => (
-            <View
-              role="radio"
-              testID={`keep-${m().mode}`}
-              accessibilityLabel={m().label}
-              accessibilityState={{ checked: keepMode() === m().mode }}
+            <Choice
+              id={`keep-${m().mode}`}
+              label={m().label}
+              checked={keepMode() === m().mode}
               onPress={() => {
                 setKeepMode(m().mode);
                 void prefetchArticles(bookmarks());
               }}
-              class="flex-row items-center gap-2.5 rounded-lg px-2 py-1.5 active:opacity-60"
-            >
-              <View style={{ width: 14 }}>
-                <If when={keepMode() === m().mode}>
-                  <Icon name="check" size={14} color={look().ink} />
-                </If>
-              </View>
-              <Text style={{ color: look().ink, fontSize: 14.5 }}>{m().label}</Text>
-            </View>
+            />
           )}
         </Each>
       </View>
