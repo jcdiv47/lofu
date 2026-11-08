@@ -209,6 +209,19 @@ interface ItemProps {
 const tagLine = (b: Bookmark) => b.tags.map((t) => `#${t}`).join("  ");
 const excerptOf = (b: Bookmark) => b.excerpt?.replace(/\s+/g, " ").trim() ?? "";
 
+/** *Highlights* without *Bookmark info*: the count on its own, where the meta line would be. */
+function HighlightCount(props: { b: Bookmark; on: (f: ShowField) => boolean }) {
+  const n = () => highlightCount(props.b.id);
+  return (
+    <If when={props.on("highlights") && n() > 0}>
+      <View class="flex-row items-center gap-0.5">
+        <Icon name="highlighter" size={12} color={look().inkFaint} />
+        <Text style={{ color: look().inkFaint, fontSize: 11.5 }}>{n()}</Text>
+      </View>
+    </If>
+  );
+}
+
 /** The bookmark's note, set apart by a rule in the accent colour. */
 function Note(props: { text: string; lines: number }) {
   return (
@@ -261,7 +274,7 @@ function Details(props: ItemProps & { lines: number }) {
           {tagLine(b())}
         </Text>
       </If>
-      <If when={on("info")}>
+      <If when={on("info")} else={<HighlightCount b={b()} on={on} />}>
         <MetaLine b={b()} showCollection={props.showCollection} highlights={on("highlights")} />
       </If>
     </>
@@ -282,7 +295,7 @@ export function cardBody(show: Shows) {
     show("description") ? 36 : 0,
     show("note") ? 36 : 0,
     show("tags") ? 17 : 0,
-    show("info") ? 17 : 0,
+    show("info") || show("highlights") ? 17 : 0,
   ].filter(Boolean);
   return parts.length ? 24 + parts.reduce((a, x) => a + x, 0) + 6 * (parts.length - 1) : 0;
 }
@@ -548,17 +561,24 @@ export function BookmarkHeadline(props: ItemProps) {
           {displayTitle(b())}
         </Text>
       </If>
-      <If when={props.snippet || (on("description") && excerptOf(b())) || (on("note") && b().note)}>
+      <If when={props.snippet || (on("description") && excerptOf(b()))}>
         <Text
           class="min-w-0 truncate"
           style={{ color: look().inkFaint, fontSize: 13, flexShrink: 2 }}
         >
-          {(props.snippet &&
-            markRuns(props.snippet)
-              .map((r) => r.text)
-              .join("")) ||
-            (on("note") && b().note) ||
-            excerptOf(b())}
+          {props.snippet
+            ? markRuns(props.snippet)
+                .map((r) => r.text)
+                .join("")
+            : excerptOf(b())}
+        </Text>
+      </If>
+      <If when={on("note") && b().note}>
+        <Text
+          class="min-w-0 truncate"
+          style={{ color: look().inkSoft, fontSize: 13, flexShrink: 2 }}
+        >
+          {b().note}
         </Text>
       </If>
       <If when={on("tags") && b().tags.length}>
@@ -567,7 +587,7 @@ export function BookmarkHeadline(props: ItemProps) {
         </Text>
       </If>
       <View class="min-w-[120px] flex-1">
-        <If when={on("info")}>
+        <If when={on("info")} else={<HighlightCount b={b()} on={on} />}>
           <MetaLine b={b()} showCollection={props.showCollection} highlights={on("highlights")} />
         </If>
       </View>
@@ -598,7 +618,8 @@ export function MoodboardTile(props: ItemProps) {
     (on("description") && !!excerptOf(b())) ||
     (on("note") && !!b().note) ||
     (on("tags") && b().tags.length > 0) ||
-    on("info");
+    on("info") ||
+    (on("highlights") && highlightCount(b().id) > 0);
   const tile = (
     <View
       role="button"
