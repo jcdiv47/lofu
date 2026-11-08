@@ -57,6 +57,11 @@ export const Bookmark = z
     publishedAt: z.string().nullable(),
     contentStatus: ContentStatus,
     contentError: z.string().nullable(),
+    sort: z
+      .number()
+      .describe(
+        "Its place in its collection's manual order, ascending; minus the save time (ms) until moved",
+      ),
     createdAt: isoDate,
     updatedAt: isoDate,
     deletedAt: isoDate.nullable(),
@@ -102,6 +107,8 @@ export const UpdateBookmark = z
     archived: z.boolean().describe(inTrash),
     readProgress: z.number().min(0).max(1),
     coverUrl: z.string().nullable(),
+    /** Its place in the manual order: between the two it was dropped between. */
+    sort: z.number(),
   })
   .partial()
   .meta({ id: "UpdateBookmark" });

@@ -861,10 +861,16 @@ test("desktop: the library sorts by date, name or site, each source its own", as
   await app.waitFor("label:Sort by: By name (A-Z)");
   expect(order(app.texts(), ["Article a", "Article bb", "example.com/dddd"])).toBe(true);
 
-  // A collection keeps its own sort.
+  // A collection keeps its own sort, and starts in its manual order.
   await app.press("label:Homelab");
   await app.waitFor("text:Article a");
-  expect(app.shows("label:Sort by: By date ↓")).toBe(true);
+  expect(app.shows("label:Sort by: Manual")).toBe(true);
+  await app.press("id:sort-button");
+  expect((app.menu() ?? []).map((m) => m.label).slice(0, 2)).toEqual([
+    "Sort by",
+    "Manual (Drag'n'drop)",
+  ]);
+  await app.chooseMenuItem("By date ↓");
   await app.press("label:All bookmarks");
   await app.waitFor("label:Sort by: By name (A-Z)");
 });
@@ -883,10 +889,37 @@ test("desktop: the library's view is a list, cards, headlines or a moodboard", a
     "Headlines",
     "Moodboard",
     "Apply to All",
+    "Show in Cards",
+    "Cover",
+    "Title",
+    "Note",
+    "Description",
+    "Highlights",
+    "Tags",
+    "Bookmark info",
+    "Cover > Smallest",
+    "Cover > Small",
+    "Cover > Medium",
+    "Cover > Large",
+    "Cover > Largest",
   ]);
+  // Show in Cards: tags on, the meta line off.
+  await app.chooseMenuItem("Tags");
+  await app.waitFor("text:#rust");
+  expect(app.shows("text:example.com  ·  Homelab  ·  Nov 4")).toBe(true);
+  await app.press("id:view-button");
+  await app.chooseMenuItem("Bookmark info");
+  await app.waitUntil(() => !app.shows("text:example.com  ·  Homelab  ·  Nov 4"));
+
+  await app.press("id:view-button");
   await app.chooseMenuItem("List");
   await app.waitFor("id:row-a");
   expect(app.shows("label:View: List")).toBe(true);
+  await app.press("id:view-button");
+  const listMenu = (app.menu() ?? []).map((m) => m.label);
+  expect(listMenu).toContain("Show in List");
+  expect(listMenu.slice(-3)).toEqual(["Cover position", "Left", "Right"]);
+  await app.chooseMenuItem("Left");
 
   // Another source keeps its own, until one view is applied to all.
   await app.press("label:Homelab");
@@ -923,4 +956,54 @@ test("web: the sort and view menus are the app's own", async () => {
   await app.press("id:sort-name-desc");
   await app.waitFor("label:Sort by: By name (Z-A)");
   expect(order(app.texts(), ["example.com/dddd", "Article bb", "Article a"])).toBe(true);
+
+  // Show in Headlines: a setting leaves the menu open.
+  await app.press("id:view-button");
+  await app.waitFor("text:Show in Headlines");
+  await app.press("id:show-tags");
+  await app.waitFor("text:#rust");
+  expect(app.shows("text:Show in Headlines")).toBe(true);
+});
+
+test("desktop: a collection's manual order is set by dragging a bookmark into place", async () => {
+  const at = (d: string) => `2026-11-0${d}T10:00:00.000Z`;
+  const marks = [
+    bookmark("m1", { collectionId: "c1", createdAt: at("3") }),
+    bookmark("m2", { collectionId: "c1", createdAt: at("2") }),
+    bookmark("m3", { collectionId: "c1", createdAt: at("1") }),
+  ];
+  const patches: [string, { sort?: number }][] = [];
+  const app = await open("./App.tsx", {
+    ...desktop,
+    network: {
+      [`GET ${S}/v1/sync*`]: { body: { ...library, bookmarks: marks } },
+      [`PATCH ${S}/v1/bookmarks/*`]: (r) => {
+        const id = r.url.split("/").pop() ?? "";
+        const patch = JSON.parse(r.body ?? "{}");
+        patches.push([id, patch]);
+        const b = marks.find((m) => m.id === id);
+        return { body: { ...b, ...patch, seq: 2 } };
+      },
+    },
+  });
+  await app.press("label:Homelab");
+  await app.waitFor("id:card-m1");
+  expect(app.shows("label:Sort by: Manual")).toBe(true);
+  await app.press("id:view-button");
+  await app.chooseMenuItem("Headlines");
+  await app.waitFor("id:headline-m1");
+  // Newest first until moved.
+  expect(order(app.texts(), ["Article m1", "Article m2", "Article m3"])).toBe(true);
+
+  // The first row, dropped below the middle of the second: between the second and third.
+  await app.drag("id:headline-m1", { y: 50 });
+  await app.waitUntil(() => patches.length === 1);
+  const key = (d: string) => -Date.parse(at(d));
+  expect(patches[0]).toEqual(["m1", { sort: (key("2") + key("1")) / 2 }]);
+
+  // Sorted by date, nothing is dragged.
+  await app.press("id:sort-button");
+  await app.chooseMenuItem("By date ↓");
+  await app.drag("id:headline-m3", { y: -90 });
+  expect(patches.length).toBe(1);
 });

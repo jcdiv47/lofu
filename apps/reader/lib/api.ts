@@ -22,6 +22,12 @@ export interface Bookmark {
   wordCount: number | null;
   contentStatus: "pending" | "ok" | "failed" | "skipped";
   contentError: string | null;
+  /**
+   * Its place in its collection's manual order, ascending: minus the save
+   * time (ms) until it's dragged. Older servers send none; `manualKey` stands
+   * in for it.
+   */
+  sort?: number;
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
@@ -80,7 +86,7 @@ export interface SearchHit {
 export type BookmarkPatch = Partial<
   Pick<
     Bookmark,
-    "title" | "note" | "tags" | "collectionId" | "favorite" | "archived" | "readProgress"
+    "title" | "note" | "tags" | "collectionId" | "favorite" | "archived" | "readProgress" | "sort"
   >
 >;
 

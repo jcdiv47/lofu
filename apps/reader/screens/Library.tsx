@@ -9,23 +9,29 @@ import {
   signal,
   Text,
   View,
+  type ViewRef,
 } from "nsh";
 import { Menu } from "nsh/desktop";
 import {
   BookmarkCard,
   BookmarkHeadline,
+  BookmarkListRow,
   BookmarkRow,
-  CARD_COVER,
+  cardBody,
+  cardCover,
+  cardWidth,
   MoodboardTile,
 } from "../components/BookmarkCard";
 import {
   currentSort,
   currentView,
   SortButton,
+  sortLabel,
   sortMenu,
   ViewButton,
   viewMenu,
 } from "../components/ListControls";
+import { useManualDrag } from "../components/ManualDrag";
 import { nativeScrollEdges, ScrollEdge } from "../components/native";
 import { SearchField } from "../components/SearchField";
 import { SwipeRow, swipeable } from "../components/SwipeRow";
@@ -33,7 +39,15 @@ import { BottomEdge, RoundGlassButton, TopEdge } from "../components/ui";
 import { setSearchFocus } from "../lib/actions";
 import { api, type Bookmark, SEARCH_PAGE, type SearchHit } from "../lib/api";
 import { look } from "../lib/look";
-import { sortBookmarks, sortFor, viewFor } from "../lib/prefs";
+import {
+  coverSize,
+  prefs,
+  type ShowField,
+  shows,
+  sortBookmarks,
+  sortFor,
+  viewFor,
+} from "../lib/prefs";
 import {
   bookmark,
   bookmarksIn,
@@ -48,9 +62,6 @@ import {
 } from "../lib/store";
 import { focusToolbarSearch, nativeToolbar, useToolbar } from "../lib/toolbar";
 
-const CARD_MIN = 236;
-/** Moodboard's columns are narrower than the cards'. */
-const TILE_MIN = 200;
 const GAP = 18;
 const PAD = 24;
 /** The desktop's toolbar, floating over the grid. */
@@ -146,7 +157,7 @@ export function Library(props: {
               kind: "button" as const,
               id: "sort",
               symbol: currentSort(props.source).symbol,
-              label: `Sort by: ${currentSort(props.source).label}`,
+              label: `Sort by: ${sortLabel(props.source)}`,
               onPress: (at: { x: number; y: number }) =>
                 void Menu.popup(sortMenu(props.source), at.x >= 0 ? at : undefined),
             },
@@ -261,6 +272,17 @@ export function Library(props: {
   const columnsOf = (min: number) =>
     Math.max(1, Math.floor((width() - PAD * 2 + GAP) / (min + GAP)));
   const view = () => viewFor(props.source);
+  /** What the view shows of each bookmark (*Show in …*). */
+  const show = (f: ShowField) => shows(view(), f);
+
+  // Manual order: bookmarks are dragged into place (wide windows, no search).
+  let content: ViewRef | undefined;
+  const manual = useManualDrag({
+    enabled: () => props.wide && !searching() && sortFor(props.source) === "manual",
+    order: () => items().map((i) => i.b),
+    axis: () => (view() === "cards" || view() === "moodboard" ? "x" : "y"),
+    container: () => content,
+  });
 
   // The toolbar floats over the grid: the cards scroll under its glass, and
   // the page fades out beneath it (the scroll edge) so the title stays legible.
@@ -413,7 +435,13 @@ export function Library(props: {
           </>
         }
       >
-        <View class="flex-1" onLayout={(e) => width.set(e.bounds.size.width)}>
+        <View
+          class="flex-1"
+          ref={(r) => {
+            content = r;
+          }}
+          onLayout={(e) => width.set(e.bounds.size.width)}
+        >
           {() => {
             if (!width()) return null;
             const empty = <Empty searching={searching()} source={props.source} />;
@@ -426,7 +454,7 @@ export function Library(props: {
                   <List
                     each={items()}
                     keyExtractor={(i) => i.b.id}
-                    estimatedItemSize={headlines ? 40 : 110}
+                    estimatedItemSize={headlines ? 40 : 100}
                     testID="library-list"
                     class="flex-1"
                     contentStyle={{
@@ -437,23 +465,30 @@ export function Library(props: {
                     empty={empty}
                     onLoadMore={() => void loadMore()}
                   >
-                    {(i) =>
-                      headlines ? (
+                    {(i) => {
+                      // Made once per cell (cells are recycled: it reads the item anew).
+                      const drag = manual.cell(() => i().b);
+                      return headlines ? (
                         <BookmarkHeadline
                           b={i().b}
+                          drag={drag}
+                          show={show}
                           snippet={i().snippet}
                           showCollection={showCollection}
                           onOpen={() => props.onOpen(i().b)}
                         />
                       ) : (
-                        <BookmarkRow
+                        <BookmarkListRow
                           b={i().b}
+                          drag={drag}
+                          show={show}
+                          coverLeft={prefs().coverPosition === "left"}
                           snippet={i().snippet}
                           showCollection={showCollection}
                           onOpen={() => props.onOpen(i().b)}
                         />
-                      )
-                    }
+                      );
+                    }}
                   </List>
                 );
               }
@@ -462,7 +497,7 @@ export function Library(props: {
                 // list of its own laid out in the one scroll view, so tiles
                 // keep their covers' shapes and only those near the
                 // viewport are made.
-                const n = columnsOf(TILE_MIN);
+                const n = columnsOf(cardWidth(coverSize("moodboard")) - 20);
                 const all = items();
                 if (!all.length)
                   return (
@@ -492,14 +527,19 @@ export function Library(props: {
                             contentStyle={{ rowGap: GAP }}
                             onLoadMore={() => void loadMore()}
                           >
-                            {(i) => (
-                              <MoodboardTile
-                                b={i().b}
-                                snippet={i().snippet}
-                                showCollection={showCollection}
-                                onOpen={() => props.onOpen(i().b)}
-                              />
-                            )}
+                            {(i) => {
+                              const drag = manual.cell(() => i().b);
+                              return (
+                                <MoodboardTile
+                                  b={i().b}
+                                  drag={drag}
+                                  show={show}
+                                  snippet={i().snippet}
+                                  showCollection={showCollection}
+                                  onOpen={() => props.onOpen(i().b)}
+                                />
+                              );
+                            }}
                           </List>
                         </View>
                       ))}
@@ -512,8 +552,10 @@ export function Library(props: {
                   <List
                     each={items()}
                     keyExtractor={(i) => i.b.id}
-                    numColumns={columnsOf(CARD_MIN)}
-                    estimatedItemSize={CARD_COVER + 112 + GAP}
+                    numColumns={columnsOf(cardWidth(coverSize("cards")))}
+                    estimatedItemSize={
+                      (show("cover") ? cardCover(coverSize("cards")) : 0) + cardBody(show) + GAP
+                    }
                     testID="library-list"
                     class="flex-1"
                     contentStyle={{
@@ -526,18 +568,25 @@ export function Library(props: {
                     empty={empty}
                     onLoadMore={() => void loadMore()}
                   >
-                    {(i) => (
-                      <BookmarkCard
-                        b={i().b}
-                        snippet={i().snippet}
-                        showCollection={showCollection}
-                        onOpen={() => props.onOpen(i().b)}
-                      />
-                    )}
+                    {(i) => {
+                      const drag = manual.cell(() => i().b);
+                      return (
+                        <BookmarkCard
+                          b={i().b}
+                          drag={drag}
+                          show={show}
+                          coverHeight={cardCover(coverSize("cards"))}
+                          snippet={i().snippet}
+                          showCollection={showCollection}
+                          onOpen={() => props.onOpen(i().b)}
+                        />
+                      );
+                    }}
                   </List>
                 );
             }
           }}
+          {manual.overlay()}
           {toolbar()}
         </View>
       </If>
