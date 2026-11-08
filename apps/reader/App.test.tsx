@@ -825,3 +825,102 @@ test("desktop: tags are renamed and collections deleted from their menus", async
   await app.press("label:Unsorted");
   await app.waitFor("text:Article a");
 });
+
+/** The titles the library shows, in order (one column: a grid's row says its cards in no set order). */
+const order = (texts: string[], titles: string[]) =>
+  titles.map((t) => texts.indexOf(t)).every((k, i, a) => k >= 0 && (i === 0 || a[i - 1] < k));
+
+test("desktop: the library sorts by date, name or site, each source its own", async () => {
+  const app = await open("./App.tsx", {
+    ...desktop,
+    network: { [`GET ${S}/v1/sync*`]: { body: library } },
+  });
+  await app.waitFor("id:card-a");
+  await app.press("id:view-button");
+  await app.chooseMenuItem("List");
+  await app.waitFor("id:row-a");
+  expect(app.shows("label:Sort by: By date ↓")).toBe(true);
+  expect(order(app.texts(), ["Article a", "Article bb"])).toBe(true);
+
+  await app.press("id:sort-button");
+  const labels = (app.menu() ?? []).map((m) => m.label);
+  expect(labels).toEqual([
+    "Sort by",
+    "By date ↑",
+    "By date ↓",
+    "By name (A-Z)",
+    "By name (Z-A)",
+    "Sites (A-Z)",
+    "Sites (Z-A)",
+  ]);
+  await app.chooseMenuItem("By date ↑");
+  await app.waitFor("label:Sort by: By date ↑");
+  expect(order(app.texts(), ["example.com/dddd", "Article bb", "Article a"])).toBe(true);
+  await app.press("id:sort-button");
+  await app.chooseMenuItem("By name (A-Z)");
+  await app.waitFor("label:Sort by: By name (A-Z)");
+  expect(order(app.texts(), ["Article a", "Article bb", "example.com/dddd"])).toBe(true);
+
+  // A collection keeps its own sort.
+  await app.press("label:Homelab");
+  await app.waitFor("text:Article a");
+  expect(app.shows("label:Sort by: By date ↓")).toBe(true);
+  await app.press("label:All bookmarks");
+  await app.waitFor("label:Sort by: By name (A-Z)");
+});
+
+test("desktop: the library's view is a list, cards, headlines or a moodboard", async () => {
+  const app = await open("./App.tsx", {
+    ...desktop,
+    network: { [`GET ${S}/v1/sync*`]: { body: library } },
+  });
+  await app.waitFor("id:card-a");
+  await app.press("id:view-button");
+  expect((app.menu() ?? []).map((m) => m.label)).toEqual([
+    "View",
+    "List",
+    "Cards",
+    "Headlines",
+    "Moodboard",
+    "Apply to All",
+  ]);
+  await app.chooseMenuItem("List");
+  await app.waitFor("id:row-a");
+  expect(app.shows("label:View: List")).toBe(true);
+
+  // Another source keeps its own, until one view is applied to all.
+  await app.press("label:Homelab");
+  await app.waitFor("id:card-a");
+  await app.press("id:view-button");
+  await app.chooseMenuItem("Moodboard");
+  await app.waitFor("id:tile-a");
+  await app.press("id:view-button");
+  await app.chooseMenuItem("Headlines");
+  await app.waitFor("id:headline-a");
+  await app.press("id:view-button");
+  await app.chooseMenuItem("Apply to All");
+  await app.press("label:All bookmarks");
+  await app.waitFor("id:headline-bb");
+});
+
+test("web: the sort and view menus are the app's own", async () => {
+  const app = await open("./App.tsx", {
+    ...saved,
+    platform: "web",
+    width: 1200,
+    height: 800,
+    network: { [`GET ${S}/v1/sync*`]: { body: library } },
+  });
+  await app.waitFor("text:Article a");
+  await app.press("id:view-button");
+  await app.waitFor("text:View");
+  await app.press("id:view-headlines");
+  await app.waitFor("id:headline-a");
+  expect(order(app.texts(), ["Article a", "Article bb"])).toBe(true);
+
+  await app.press("id:sort-button");
+  await app.waitFor("text:Sort by");
+  await app.press("id:sort-name-desc");
+  await app.waitFor("label:Sort by: By name (Z-A)");
+  expect(order(app.texts(), ["example.com/dddd", "Article bb", "Article a"])).toBe(true);
+});
