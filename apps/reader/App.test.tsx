@@ -158,6 +158,58 @@ test("desktop: the sidebar counts and filters", async () => {
   expect(app.shows("text:Article a")).toBe(true);
 });
 
+test("desktop: sections fold away, and collections are put in order by dragging", async () => {
+  const col = (id: string, name: string, sort: number) => ({
+    id,
+    name,
+    parentId: null,
+    sort,
+    color: null,
+    deletedAt: null,
+    seq: 1,
+  });
+  const patches: { id: string; sort: number }[] = [];
+  const app = await open("./App.tsx", {
+    ...saved,
+    platform: "macos",
+    width: 1200,
+    height: 800,
+    network: {
+      [`GET ${S}/v1/sync*`]: {
+        body: {
+          ...library,
+          collections: [col("c1", "Homelab", 0), col("c2", "Learn", 1), col("c3", "Papers", 2)],
+        },
+      },
+      [`PATCH ${S}/v1/collections/*`]: (r) => {
+        const id = r.url.split("/").pop() ?? "";
+        const { sort } = JSON.parse(r.body ?? "{}");
+        patches.push({ id, sort });
+        return { body: { ...col(id, id, sort), seq: 2 } };
+      },
+    },
+  });
+  await app.waitFor("label:Homelab");
+
+  // Clicking a heading folds its section away and back.
+  await app.press("id:section-collections");
+  expect(app.shows("label:Homelab")).toBe(false);
+  expect(app.shows("label:Highlights")).toBe(true);
+  await app.press("id:section-collections");
+  await app.waitFor("label:Homelab");
+
+  // Mid-drag: a line marks where Homelab will land, below Learn.
+  await app.dragAndHold("id:collection-c1", { y: 60 });
+  expect(app.shows("id:drop-line")).toBe(true);
+  await app.drop();
+  expect(app.shows("id:drop-line")).toBe(false);
+  await app.waitUntil(() => patches.length === 2);
+  expect(patches).toEqual([
+    { id: "c2", sort: 0 },
+    { id: "c1", sort: 1 },
+  ]);
+});
+
 test("favoriting from the reader updates at once and on the server", async () => {
   const patches: unknown[] = [];
   const app = await open("./App.tsx", {
