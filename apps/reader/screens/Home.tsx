@@ -39,7 +39,6 @@ import {
   toggleSection,
 } from "../lib/prefs";
 import {
-  type BookmarkType,
   countFor,
   createCollection,
   offline,
@@ -47,27 +46,8 @@ import {
   type Source,
   syncError,
   syncing,
-  typeTitles,
 } from "../lib/store";
-import { syncStatus } from "./Sidebar";
-
-/** The colored glyphs of the list, as iOS's own lists draw them. */
-const tint = {
-  library: "#4f7fc9",
-  folder: "#4f7fc9",
-  favorites: "#e0a030",
-  highlights: "#b8569e",
-  trash: "#8d8577",
-  tag: "#8d8577",
-} as const;
-
-const types: { type: BookmarkType; icon: IconName; color: string }[] = [
-  { type: "article", icon: "article", color: "#e3843a" },
-  { type: "video", icon: "video", color: "#a35bd6" },
-  { type: "image", icon: "image", color: "#3e9e72" },
-  { type: "audio", icon: "audio", color: "#d6566a" },
-  { type: "document", icon: "document", color: "#33a39b" },
-];
+import { filters, syncStatus, tint } from "./Sidebar";
 
 /** The top bar's height under the status bar: iOS 26's bar, or room for the app's round buttons. */
 const BAR = 54;
@@ -208,29 +188,6 @@ export function Home(props: {
       {action}
     </View>
   );
-
-  const filters = () =>
-    [
-      { source: { kind: "favorites" } as Source, icon: "star" as IconName, color: tint.favorites },
-      {
-        source: { kind: "highlights" } as Source,
-        icon: "highlighter" as IconName,
-        color: tint.highlights,
-      },
-      ...types
-        .filter((t) => countFor({ kind: "type", type: t.type }) > 0)
-        .map((t) => ({
-          source: { kind: "type", type: t.type } as Source,
-          icon: t.icon,
-          color: t.color,
-        })),
-    ].map((f) => ({
-      ...f,
-      label:
-        f.source.kind === "type"
-          ? typeTitles[f.source.type]
-          : f.source.kind[0].toUpperCase() + f.source.kind.slice(1),
-    }));
 
   /** A heading for search results: it doesn't fold. */
   const label = (text: string) => (

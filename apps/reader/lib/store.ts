@@ -711,17 +711,23 @@ export async function deleteCollection(id: string) {
   void sync();
 }
 
-/**
- * Moves a collection up or down the list (the server's own order, `sort`):
- * every collection whose place changes is numbered again.
- */
+/** Moves a collection up or down the list by one place. */
 export async function moveCollection(id: string, by: -1 | 1) {
+  const i = collections().findIndex((c) => c.id === id);
+  if (i >= 0) await moveCollectionTo(id, i + by);
+}
+
+/**
+ * Moves a collection to `index` in the list (the server's own order, `sort`),
+ * as dragging it in the sidebar does: every collection whose place changes is
+ * numbered again.
+ */
+export async function moveCollectionTo(id: string, index: number) {
   const list = collections();
   const i = list.findIndex((c) => c.id === id);
-  const j = i + by;
-  if (i < 0 || j < 0 || j >= list.length) return;
+  if (i < 0 || index < 0 || index >= list.length || index === i) return;
   const order = [...list];
-  [order[i], order[j]] = [order[j]!, order[i]!];
+  order.splice(index, 0, ...order.splice(i, 1));
   const changed = order.map((c, k) => ({ c, sort: k })).filter(({ c, sort }) => c.sort !== sort);
   collectionsById.update((m) => {
     for (const { c, sort } of changed) m.set(c.id, { ...c, sort });
