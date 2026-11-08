@@ -221,6 +221,30 @@ describe("bookmarks", () => {
     ).toBe(409);
   });
 
+  test("the manual order starts newest first and a drop moves one between two, bumping seq", async () => {
+    const at = (d: string) => `2026-01-0${d}T10:00:00.000Z`;
+    const [a, b, c] = await Promise.all(
+      ["1", "2", "3"].map(
+        async (d) =>
+          (await api("POST", "/v1/bookmarks", { url: `${base}/manual-${d}`, createdAt: at(d) }))
+            .data,
+      ),
+    );
+    // Minus the save time: ascending is newest first.
+    expect([c.sort, b.sort, a.sort]).toEqual([
+      -Date.parse(at("3")),
+      -Date.parse(at("2")),
+      -Date.parse(at("1")),
+    ]);
+
+    // Drop the oldest between the other two.
+    const moved = await api("PATCH", `/v1/bookmarks/${a.id}`, { sort: (c.sort + b.sort) / 2 });
+    expect(moved.status).toBe(200);
+    expect(moved.data.sort).toBe((c.sort + b.sort) / 2);
+    expect(moved.data.seq).toBeGreaterThan(a.seq);
+    expect((await api("PATCH", `/v1/bookmarks/${a.id}`, { sort: "first" })).status).toBe(400);
+  });
+
   test("highlights round-trip", async () => {
     const h = await api("POST", `/v1/bookmarks/${id}/highlights`, {
       quote: "fermentation curves",

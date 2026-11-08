@@ -127,4 +127,15 @@ export const migrations: string[] = [
   /* 3: image sizes, JSON {url: [width, height]}; NULL until measured (extract/images.ts) */ `
   ALTER TABLE contents ADD COLUMN images TEXT;
   `,
+
+  /*
+   * 4: a bookmark's place in its collection's manual order (Raindrop's
+   * "Manual (Drag'n'drop)"), ascending. It starts at minus the save time, so
+   * the manual order begins newest first and a new bookmark goes on top; a
+   * drag puts one between its neighbours (their midpoint). Seq is left alone:
+   * clients without the field compute the same value from createdAt.
+   */ `
+  ALTER TABLE bookmarks ADD COLUMN sort REAL NOT NULL DEFAULT 0;
+  UPDATE bookmarks SET sort = -created_at;
+  `,
 ];

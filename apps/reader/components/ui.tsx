@@ -28,11 +28,13 @@ import forwardIcon from "../assets/icons/forward.svg";
 import globeIcon from "../assets/icons/globe.svg";
 import gridIcon from "../assets/icons/grid.svg";
 import hashIcon from "../assets/icons/hash.svg";
+import headlinesIcon from "../assets/icons/headlines.svg";
 import highlighterIcon from "../assets/icons/highlighter.svg";
 import imageIcon from "../assets/icons/image.svg";
 import inboxIcon from "../assets/icons/inbox.svg";
 import linkIcon from "../assets/icons/link.svg";
 import listIcon from "../assets/icons/list.svg";
+import moodboardIcon from "../assets/icons/moodboard.svg";
 import moreIcon from "../assets/icons/more.svg";
 import pencilIcon from "../assets/icons/pencil.svg";
 import plusIcon from "../assets/icons/plus.svg";
@@ -42,10 +44,13 @@ import searchIcon from "../assets/icons/search.svg";
 import settingsIcon from "../assets/icons/settings.svg";
 import shareIcon from "../assets/icons/share.svg";
 import sortIcon from "../assets/icons/sort.svg";
+import sortAzIcon from "../assets/icons/sort-az.svg";
+import sortZaIcon from "../assets/icons/sort-za.svg";
 import starIcon from "../assets/icons/star.svg";
 import starFillIcon from "../assets/icons/star-fill.svg";
 import trashIcon from "../assets/icons/trash.svg";
 import videoIcon from "../assets/icons/video.svg";
+import windowIcon from "../assets/icons/window.svg";
 import { glass, hasGlass, look } from "../lib/look";
 import {
   nativeControls,
@@ -65,6 +70,12 @@ export const icons = {
   expand: expandIcon,
   image: imageIcon,
   sort: sortIcon,
+  sortAz: sortAzIcon,
+  sortZa: sortZaIcon,
+  /** A site (a browser window). */
+  window: windowIcon,
+  headlines: headlinesIcon,
+  moodboard: moodboardIcon,
   video: videoIcon,
   alert: alertIcon,
   all: allIcon,

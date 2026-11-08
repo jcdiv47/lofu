@@ -24,6 +24,7 @@ export interface BookmarkRow {
   published_at: string | null;
   content_status: string;
   content_error: string | null;
+  sort: number;
   created_at: number;
   updated_at: number;
   deleted_at: number | null;
@@ -83,6 +84,7 @@ export function toBookmark(r: BookmarkRow, images: ImageProxy): Bookmark {
     publishedAt: r.published_at,
     contentStatus: r.content_status as ContentStatus,
     contentError: r.content_error,
+    sort: r.sort,
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
     deletedAt: isoOrNull(r.deleted_at),

@@ -59,6 +59,7 @@ const UPDATE_COLUMNS = {
   archived: "archived",
   readProgress: "read_progress",
   coverUrl: "cover_url",
+  sort: "sort",
 } as const satisfies Record<keyof UpdateBookmark, string>;
 
 const encodeCursor = (createdAt: number, id: string) =>
@@ -144,8 +145,8 @@ export class BookmarkStore {
         this.db
           .query(
             `INSERT INTO bookmarks (id, url, url_key, title, title_locked, note, excerpt, cover_url,
-               domain, tags, collection_id, favorite, archived, created_at, updated_at, seq)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               domain, tags, collection_id, favorite, archived, sort, created_at, updated_at, seq)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             id,
@@ -161,6 +162,8 @@ export class BookmarkStore {
             input.collectionId ?? null,
             input.favorite ? 1 : 0,
             input.archived ? 1 : 0,
+            // New ones go on top of the manual order, as they come.
+            -createdAt,
             createdAt,
             now,
             seq,

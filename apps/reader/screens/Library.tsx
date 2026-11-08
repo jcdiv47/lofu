@@ -4,12 +4,34 @@ import {
   keyboardFrame,
   List,
   platform,
+  Scroll,
   safeAreaInsets,
   signal,
   Text,
   View,
+  type ViewRef,
 } from "nsh";
-import { BookmarkCard, BookmarkRow, CARD_COVER } from "../components/BookmarkCard";
+import { Menu } from "nsh/desktop";
+import {
+  BookmarkCard,
+  BookmarkHeadline,
+  BookmarkListRow,
+  BookmarkRow,
+  cardBody,
+  cardCover,
+  cardWidth,
+  MoodboardTile,
+} from "../components/BookmarkCard";
+import {
+  currentSort,
+  currentView,
+  SortButton,
+  sortLabel,
+  sortMenu,
+  ViewButton,
+  viewMenu,
+} from "../components/ListControls";
+import { useManualDrag } from "../components/ManualDrag";
 import { nativeScrollEdges, ScrollEdge } from "../components/native";
 import { SearchField } from "../components/SearchField";
 import { SwipeRow, swipeable } from "../components/SwipeRow";
@@ -17,6 +39,15 @@ import { BottomEdge, RoundGlassButton, TopEdge } from "../components/ui";
 import { setSearchFocus } from "../lib/actions";
 import { api, type Bookmark, SEARCH_PAGE, type SearchHit } from "../lib/api";
 import { look } from "../lib/look";
+import {
+  coverSize,
+  prefs,
+  type ShowField,
+  shows,
+  sortBookmarks,
+  sortFor,
+  viewFor,
+} from "../lib/prefs";
 import {
   bookmark,
   bookmarksIn,
@@ -31,7 +62,6 @@ import {
 } from "../lib/store";
 import { focusToolbarSearch, nativeToolbar, useToolbar } from "../lib/toolbar";
 
-const CARD_MIN = 236;
 const GAP = 18;
 const PAD = 24;
 /** The desktop's toolbar, floating over the grid. */
@@ -112,12 +142,34 @@ export function Library(props: {
   /** How many the server found (it counts them roughly). */
   const total = signal(0);
   cleanup(() => setSearchFocus(null));
+  const searching = () => query().trim().length > 0;
   /** The Mac's window toolbar has the search, sync and + (`lib/toolbar.ts`). */
   const native = props.wide && nativeToolbar;
   if (native) {
     setSearchFocus(focusToolbarSearch);
     useToolbar(() => [
       { kind: "flex" },
+      // Sort and view, as Finder's: a symbol whose menu opens under it.
+      ...(searching()
+        ? []
+        : [
+            {
+              kind: "button" as const,
+              id: "sort",
+              symbol: currentSort(props.source).symbol,
+              label: `Sort by: ${sortLabel(props.source)}`,
+              onPress: (at: { x: number; y: number }) =>
+                void Menu.popup(sortMenu(props.source), at.x >= 0 ? at : undefined),
+            },
+          ]),
+      {
+        kind: "button",
+        id: "view",
+        symbol: currentView(props.source).symbol,
+        label: `View: ${currentView(props.source).label}`,
+        onPress: (at) => void Menu.popup(viewMenu(props.source), at.x >= 0 ? at : undefined),
+      },
+      { kind: "gap" },
       {
         kind: "button",
         id: "sync",
@@ -146,7 +198,6 @@ export function Library(props: {
       },
     ]);
   }
-  const searching = () => query().trim().length > 0;
 
   // Search as the user types, on the server (it knows the article text); a
   // later query cancels the display of an earlier one.
@@ -208,13 +259,30 @@ export function Library(props: {
         return b && !b.deletedAt && matches(props.source, b) ? [{ b, snippet: x.snippet }] : [];
       });
     if (searching()) return [];
-    return bookmarksIn(props.source).map((b) => ({ b, snippet: null }));
+    // A search keeps the server's order (the best match first).
+    return sortBookmarks(bookmarksIn(props.source), sortFor(props.source)).map((b) => ({
+      b,
+      snippet: null,
+    }));
   };
   const showCollection = props.source.kind !== "collection";
 
   // Columns follow the width the grid gets.
   const width = signal(0);
-  const columns = () => Math.max(1, Math.floor((width() - PAD * 2 + GAP) / (CARD_MIN + GAP)));
+  const columnsOf = (min: number) =>
+    Math.max(1, Math.floor((width() - PAD * 2 + GAP) / (min + GAP)));
+  const view = () => viewFor(props.source);
+  /** What the view shows of each bookmark (*Show in …*). */
+  const show = (f: ShowField) => shows(view(), f);
+
+  // Manual order: bookmarks are dragged into place (wide windows, no search).
+  let content: ViewRef | undefined;
+  const manual = useManualDrag({
+    enabled: () => props.wide && !searching() && sortFor(props.source) === "manual",
+    order: () => items().map((i) => i.b),
+    axis: () => (view() === "cards" || view() === "moodboard" ? "x" : "y"),
+    container: () => content,
+  });
 
   // The toolbar floats over the grid: the cards scroll under its glass, and
   // the page fades out beneath it (the scroll edge) so the title stays legible.
@@ -246,6 +314,12 @@ export function Library(props: {
           </Text>
         </View>
         <If when={!native}>
+          <View class="flex-row items-center gap-0.5">
+            <If when={!searching()}>
+              <SortButton source={props.source} />
+            </If>
+            <ViewButton source={props.source} />
+          </View>
           <View style={{ width: 280 }}>
             <SearchField
               value={query}
@@ -361,39 +435,158 @@ export function Library(props: {
           </>
         }
       >
-        <View class="flex-1" onLayout={(e) => width.set(e.bounds.size.width)}>
-          {() => {
-            const n = columns();
-            if (!width()) return null;
-            return (
-              <List
-                each={items()}
-                keyExtractor={(i) => i.b.id}
-                numColumns={n}
-                estimatedItemSize={CARD_COVER + 112 + GAP}
-                testID="library-list"
-                class="flex-1"
-                contentStyle={{
-                  paddingHorizontal: PAD,
-                  paddingTop: TOOLBAR + 18,
-                  paddingBottom: PAD,
-                  rowGap: GAP,
-                  columnGap: GAP,
-                }}
-                empty={<Empty searching={searching()} source={props.source} />}
-                onLoadMore={() => void loadMore()}
-              >
-                {(i) => (
-                  <BookmarkCard
-                    b={i().b}
-                    snippet={i().snippet}
-                    showCollection={showCollection}
-                    onOpen={() => props.onOpen(i().b)}
-                  />
-                )}
-              </List>
-            );
+        <View
+          class="flex-1"
+          ref={(r) => {
+            content = r;
           }}
+          onLayout={(e) => width.set(e.bounds.size.width)}
+        >
+          {() => {
+            if (!width()) return null;
+            const empty = <Empty searching={searching()} source={props.source} />;
+            const top = TOOLBAR + 18;
+            switch (view()) {
+              case "list":
+              case "headlines": {
+                const headlines = view() === "headlines";
+                return (
+                  <List
+                    each={items()}
+                    keyExtractor={(i) => i.b.id}
+                    estimatedItemSize={headlines ? 40 : 100}
+                    testID="library-list"
+                    class="flex-1"
+                    contentStyle={{
+                      paddingHorizontal: PAD - (headlines ? 12 : 16),
+                      paddingTop: top - 8,
+                      paddingBottom: PAD,
+                    }}
+                    empty={empty}
+                    onLoadMore={() => void loadMore()}
+                  >
+                    {(i) => {
+                      // Made once per cell (cells are recycled: it reads the item anew).
+                      const drag = manual.cell(() => i().b);
+                      return headlines ? (
+                        <BookmarkHeadline
+                          b={i().b}
+                          drag={drag}
+                          show={show}
+                          snippet={i().snippet}
+                          showCollection={showCollection}
+                          onOpen={() => props.onOpen(i().b)}
+                        />
+                      ) : (
+                        <BookmarkListRow
+                          b={i().b}
+                          drag={drag}
+                          show={show}
+                          coverLeft={prefs().coverPosition === "left"}
+                          snippet={i().snippet}
+                          showCollection={showCollection}
+                          onOpen={() => props.onOpen(i().b)}
+                        />
+                      );
+                    }}
+                  </List>
+                );
+              }
+              case "moodboard": {
+                // Masonry: the items dealt to columns in turn, each column a
+                // list of its own laid out in the one scroll view, so tiles
+                // keep their covers' shapes and only those near the
+                // viewport are made.
+                const n = columnsOf(cardWidth(coverSize("moodboard")) - 20);
+                const all = items();
+                if (!all.length)
+                  return (
+                    <View class="flex-1" style={{ paddingTop: top }}>
+                      {empty}
+                    </View>
+                  );
+                const cols = Array.from({ length: n }, (_, c) => all.filter((_, k) => k % n === c));
+                return (
+                  <Scroll testID="library-list" class="flex-1">
+                    <View
+                      class="flex-row"
+                      style={{
+                        paddingHorizontal: PAD,
+                        paddingTop: top,
+                        paddingBottom: PAD,
+                        gap: GAP,
+                      }}
+                    >
+                      {cols.map((col) => (
+                        <View class="min-w-0 flex-1">
+                          <List
+                            each={col}
+                            viewport="parent"
+                            keyExtractor={(i) => i.b.id}
+                            estimatedItemSize={260}
+                            contentStyle={{ rowGap: GAP }}
+                            onLoadMore={() => void loadMore()}
+                          >
+                            {(i) => {
+                              const drag = manual.cell(() => i().b);
+                              return (
+                                <MoodboardTile
+                                  b={i().b}
+                                  drag={drag}
+                                  show={show}
+                                  snippet={i().snippet}
+                                  showCollection={showCollection}
+                                  onOpen={() => props.onOpen(i().b)}
+                                />
+                              );
+                            }}
+                          </List>
+                        </View>
+                      ))}
+                    </View>
+                  </Scroll>
+                );
+              }
+              default:
+                return (
+                  <List
+                    each={items()}
+                    keyExtractor={(i) => i.b.id}
+                    numColumns={columnsOf(cardWidth(coverSize("cards")))}
+                    estimatedItemSize={
+                      (show("cover") ? cardCover(coverSize("cards")) : 0) + cardBody(show) + GAP
+                    }
+                    testID="library-list"
+                    class="flex-1"
+                    contentStyle={{
+                      paddingHorizontal: PAD,
+                      paddingTop: top,
+                      paddingBottom: PAD,
+                      rowGap: GAP,
+                      columnGap: GAP,
+                    }}
+                    empty={empty}
+                    onLoadMore={() => void loadMore()}
+                  >
+                    {(i) => {
+                      const drag = manual.cell(() => i().b);
+                      return (
+                        <BookmarkCard
+                          b={i().b}
+                          drag={drag}
+                          show={show}
+                          coverHeight={cardCover(coverSize("cards"))}
+                          snippet={i().snippet}
+                          showCollection={showCollection}
+                          onOpen={() => props.onOpen(i().b)}
+                        />
+                      );
+                    }}
+                  </List>
+                );
+            }
+          }}
+          {manual.overlay()}
           {toolbar()}
         </View>
       </If>
