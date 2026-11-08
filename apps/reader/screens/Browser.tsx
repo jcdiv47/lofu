@@ -1,4 +1,4 @@
-import { safeAreaInsets, signal, Text, View, WebView, type WebViewRef } from "nsh";
+import { cleanup, safeAreaInsets, signal, Text, View, WebView, type WebViewRef } from "nsh";
 import {
   NativeGlassBar,
   nativeGlassBar,
@@ -12,6 +12,22 @@ import { contentLeft, nativeToolbar, useToolbar } from "../lib/toolbar";
 
 /** The window toolbar's Close and its back, forward and reload (macOS), before the page's title. */
 const NAV_ROOM = 160;
+
+/**
+ * Silences the page: its videos and sounds, and those of the frames it can
+ * reach. nsh keeps a popped page's web view alive (lent to the image of the
+ * screen that leaves) past the pop on the Mac, so a video went on playing
+ * after Close.
+ */
+const PAUSE_MEDIA = `(() => {
+  const quiet = (d) => {
+    try {
+      d.querySelectorAll("video, audio").forEach((m) => { m.pause(); m.muted = true; });
+      d.querySelectorAll("iframe").forEach((f) => { try { if (f.contentDocument) quiet(f.contentDocument); } catch {} });
+    } catch {}
+  };
+  quiet(document);
+})(); true;`;
 
 const host = (url: string) => {
   try {
@@ -44,6 +60,19 @@ export function Browser(props: {
   const failed = signal<string | null>(null);
   const insets = safeAreaInsets();
   let web: WebViewRef | null = null;
+  let quiet = false;
+  /** Stops what the page plays: before it goes, however it goes. */
+  const silence = () => {
+    if (quiet) return;
+    quiet = true;
+    web?.injectJavaScript(PAUSE_MEDIA);
+  };
+  const leave = () => {
+    silence();
+    props.onClose();
+  };
+  // Back from the menu (⌘[) or the system pops the page without Close.
+  cleanup(silence);
 
   const back = () => (
     <IconButton
@@ -110,7 +139,7 @@ export function Browser(props: {
         id: "close",
         symbol: "xmark",
         label: "Close page",
-        onPress: () => props.onClose(),
+        onPress: leave,
       },
       { kind: "gap" },
       {
@@ -169,12 +198,7 @@ export function Browser(props: {
           }}
         >
           <If when={!native}>
-            <RoundGlassButton
-              name="close"
-              label="Close page"
-              testID="web-close"
-              onPress={props.onClose}
-            />
+            <RoundGlassButton name="close" label="Close page" testID="web-close" onPress={leave} />
             <GlassGroup>
               {back()}
               {forward()}
@@ -210,7 +234,8 @@ export function Browser(props: {
           accessibilityLabel="Original page"
           class="flex-1"
           ref={(r) => {
-            web = r;
+            // Kept through unmount, for `silence`.
+            if (r) web = r;
           }}
           desktop={{ allowsBackForwardNavigationGestures: true }}
           onNavigationStateChange={(e) => at.set(e)}
