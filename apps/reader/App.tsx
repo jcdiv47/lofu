@@ -21,9 +21,12 @@ import {
   deleteBookmark,
   editBookmark,
   focusSearch,
+  openBookmark,
+  openInBrowser,
   openOriginal,
   setBrowser,
   setEditor,
+  setReader,
   shareBookmark,
   showBookmarkMenu,
 } from "./lib/actions";
@@ -55,10 +58,14 @@ type Route =
   | { name: "add"; source: Source }
   | { name: "edit"; bookmark: Bookmark };
 
-/** "Open original" pushes the page onto this stack while it's mounted. */
-function useBrowser(push: (r: Route) => void) {
+/** The reader and "Open Original" push onto this stack while it's mounted. */
+function useOpeners(push: (r: Route) => void) {
+  setReader((b) => push({ name: "reader", bookmark: b }));
   setBrowser((b) => push({ name: "browser", url: b.url, domain: b.domain }));
-  cleanup(() => setBrowser(null));
+  cleanup(() => {
+    setReader(null);
+    setBrowser(null);
+  });
 }
 
 /** How often an open app catches up, besides coming to the front. */
@@ -129,7 +136,7 @@ function Desktop(props: { onReconnect: () => void }) {
   const settingsOpen = signal(false);
   const adding = signal(false);
   const editing = signal<Bookmark | null>(null);
-  useBrowser((r) => nav.push(r));
+  useOpeners((r) => nav.push(r));
   setEditor((b) => editing.set(b));
   cleanup(() => setEditor(null));
   // The window toolbar's leading items line up with the content (`lib/toolbar.ts`).
@@ -204,7 +211,7 @@ function Desktop(props: { onReconnect: () => void }) {
                 <Library
                   source={s}
                   wide
-                  onOpen={(b) => nav.push({ name: "reader", bookmark: b })}
+                  onOpen={(b) => openBookmark(b)}
                   onAdd={() => adding.set(true)}
                 />
               </NavPage>
@@ -218,16 +225,19 @@ function Desktop(props: { onReconnect: () => void }) {
         onOpenChange={(e) => settingsOpen.set(e.open)}
         backdropClass="bg-black/25"
         class="m-auto w-[440px] overflow-hidden rounded-[26px]"
-        style={{ ...glass(), borderCurve: "continuous" }}
+        // Taller than a short window: it scrolls inside it.
+        style={{ ...glass(), borderCurve: "continuous", maxHeight: windowSize().height - 32 }}
       >
         <GlassTint radius={26} />
-        <Settings
-          onCancel={() => settingsOpen.set(false)}
-          onDone={() => {
-            settingsOpen.set(false);
-            props.onReconnect();
-          }}
-        />
+        <Scroll class="shrink" keyboardShouldPersistTaps="handled">
+          <Settings
+            onCancel={() => settingsOpen.set(false)}
+            onDone={() => {
+              settingsOpen.set(false);
+              props.onReconnect();
+            }}
+          />
+        </Scroll>
       </Dialog>
       <Dialog
         open={!!editing()}
@@ -379,6 +389,12 @@ function useMenuBar(app: {
             onSelect: () => b && openOriginal(b),
           },
           {
+            label: "Open in Browser",
+            shortcut: "mod+shift+o",
+            disabled: !b,
+            onSelect: () => b && openInBrowser(b.url),
+          },
+          {
             label: "Share…",
             disabled: !b,
             onSelect: () => b && shareBookmark(b),
@@ -408,7 +424,7 @@ function Phone(props: { onReconnect: () => void }) {
   const nav = createNavStack<Route | { name: "settings" }>([{ name: "sources" }]);
   /** The Library page's "…" menu: the system bar's button opens it on iOS. */
   const homeMenu = signal(false);
-  useBrowser((r) => nav.push(r));
+  useOpeners((r) => nav.push(r));
   setEditor((b) => nav.push({ name: "edit", bookmark: b }));
   cleanup(() => setEditor(null));
   // No header background: iOS 26 draws its bar as Liquid Glass over the page,
@@ -480,13 +496,18 @@ function Phone(props: { onReconnect: () => void }) {
                   source={route.source}
                   wide={false}
                   initialQuery={route.query}
-                  onOpen={(b) => nav.push({ name: "reader", bookmark: b })}
+                  onOpen={(b) => openBookmark(b)}
                   onAdd={() => nav.push({ name: "add", source: route.source })}
                 />
               </NavPage>
             );
           case "reader": {
             const b = () => current(route.bookmark.id) ?? route.bookmark;
+            /** Off the stack, once deleted; only if it's still on top (a menu can outlive it). */
+            const back = () => {
+              const top = nav.routes().at(-1);
+              if (top?.name === "reader" && top.bookmark.id === route.bookmark.id) nav.pop();
+            };
             return (
               <NavPage
                 animation={pageAnimation}
@@ -499,14 +520,14 @@ function Phone(props: { onReconnect: () => void }) {
                   <View
                     role="button"
                     accessibilityLabel="More"
-                    onPress={() => void showBookmarkMenu(b(), undefined)}
+                    onPress={() => void showBookmarkMenu(b(), { inReader: true, onGone: back })}
                   />
                 }
               >
                 <WebBar
                   title={route.bookmark.domain.replace(/^www\./, "")}
                   onBack={() => nav.pop()}
-                  onMore={(at) => void showBookmarkMenu(b(), undefined, at)}
+                  onMore={(at) => void showBookmarkMenu(b(), { at, inReader: true, onGone: back })}
                 />
                 <Reader bookmark={route.bookmark} wide={false} onBack={() => nav.pop()} />
               </NavPage>
@@ -575,12 +596,21 @@ function Phone(props: { onReconnect: () => void }) {
                 style={{ backgroundColor: look().paper }}
               >
                 <WebBar title="Settings" onBack={() => nav.pop()} />
-                <Settings
-                  onDone={() => {
-                    nav.pop();
-                    props.onReconnect();
-                  }}
-                />
+                {/* Taller than a small phone: the server, opening, reading offline. */}
+                <Scroll
+                  class="flex-1"
+                  keyboardDismissMode="on-drag"
+                  keyboardShouldPersistTaps="handled"
+                  contentStyle={{ paddingBottom: keyboardFrame().height }}
+                  style={{ backgroundColor: look().paper }}
+                >
+                  <Settings
+                    onDone={() => {
+                      nav.pop();
+                      props.onReconnect();
+                    }}
+                  />
+                </Scroll>
               </NavPage>
             );
         }

@@ -33,8 +33,9 @@ const pressThrough = platform.os === "macos";
 export const symbols = {
   back: "chevron.left",
   close: "xmark",
-  external: "safari",
+  compass: "safari",
   forward: "chevron.right",
+  globe: "globe",
   more: "ellipsis",
   plus: "plus",
   refresh: "arrow.clockwise",

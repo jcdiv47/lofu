@@ -212,7 +212,7 @@ export function SwipeRow(props: {
             label="More"
             color="#636366"
             testID="swipe-more"
-            onPress={then((at) => void showBookmarkMenu(b(), props.onOpen, at))}
+            onPress={then((at) => void showBookmarkMenu(b(), { at }))}
           />
         </View>
       </If>

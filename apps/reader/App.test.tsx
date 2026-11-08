@@ -485,6 +485,110 @@ test("desktop: the context menu moves, shares and deletes", async () => {
 
 const desktop = { ...saved, platform: "macos" as const, width: 1200, height: 800 };
 
+test("desktop: a bookmark's menu opens it in the reader, the app or the browser", async () => {
+  const log = { patches: [] as [string, unknown][], deletes: [] as string[] };
+  const app = await open("./App.tsx", { ...desktop, network: { ...editable(log), ...readable } });
+  await app.waitFor("text:Article a");
+  await app.rightClick("id:card-a");
+  const menu = app.menu() ?? [];
+  expect(menu.slice(0, 4).map((m) => m.label)).toEqual([
+    "Open in Reader",
+    "Open Original",
+    "Open in Browser",
+    "Copy Link",
+  ]);
+  // Where it is now is checked, and isn't a place to move it to.
+  expect(menu.find((m) => m.label === "Move to > Homelab")).toMatchObject({
+    checked: true,
+    disabled: true,
+  });
+  expect(menu.find((m) => m.label === "Move to > Unsorted")?.disabled).toBe(false);
+  await app.chooseMenuItem("Open in Browser");
+  expect(app.openedUrls()).toEqual(["https://example.com/a"]);
+  expect(app.shows("id:article")).toBe(false);
+
+  await app.rightClick("id:card-a");
+  await app.chooseMenuItem("Open Original");
+  await app.waitFor("id:web");
+  await app.press("label:Close page");
+
+  await app.rightClick("id:card-a");
+  await app.chooseMenuItem("Open in Reader");
+  await app.waitFor("text:Some text to read here.");
+  expect(app.openedUrls()).toEqual(["https://example.com/a"]);
+});
+
+test("desktop: the reader's ••• has the ways to open the page and what its toolbar hasn't", async () => {
+  const app = await open("./App.tsx", { ...desktop, network: readable });
+  await app.press("text:Article a");
+  await app.waitFor("text:Some text to read here.");
+  await app.press("label:More");
+  const labels = (app.menu() ?? []).map((m) => m.label);
+  expect(labels).toContain("Open Original");
+  expect(labels).toContain("Open in Browser");
+  expect(labels).toContain("Copy Link");
+  expect(labels).toContain("Move to > Unsorted");
+  for (const gone of ["Open in Reader", "Add to Favorites", "Share…", "Delete", "Mark as Read"]) {
+    expect(labels).not.toContain(gone);
+  }
+  expect(labels.some((l) => l.startsWith("Edit"))).toBe(false);
+});
+
+test("desktop: a tap opens bookmarks where Settings says", async () => {
+  const app = await open("./App.tsx", { ...desktop, network: readable });
+  await app.waitFor("text:Article a");
+  await app.press("id:settings");
+  await app.waitFor("id:open-in-browser");
+  await app.press("id:open-in-browser");
+  expect(app.storage()["prefs.v1"]).toContain('"openIn":"browser"');
+  await app.press("text:Cancel");
+  await app.press("text:Article a");
+  expect(app.openedUrls()).toEqual(["https://example.com/a"]);
+  expect(app.shows("id:article")).toBe(false);
+});
+
+test("desktop: a bookmark is marked read or unread from its menu", async () => {
+  const log = { patches: [] as [string, unknown][], deletes: [] as string[] };
+  const app = await open("./App.tsx", { ...desktop, network: editable(log) });
+  await app.waitFor("text:Article bb");
+  await app.rightClick("id:card-bb");
+  await app.chooseMenuItem("Mark as Read");
+  await app.waitUntil(() => log.patches.length === 1);
+  expect(log.patches[0]).toEqual(["bb", { readProgress: 1 }]);
+  await app.rightClick("id:card-bb");
+  await app.chooseMenuItem("Mark as Unread");
+  await app.waitUntil(() => log.patches.length === 2);
+  expect(log.patches[1]).toEqual(["bb", { readProgress: 0 }]);
+});
+
+test("phone: deleting from the reader's ••• goes back to the list", async () => {
+  const log = { patches: [] as [string, unknown][], deletes: [] as string[] };
+  // The web's bar of its own: headless, the system's header has no buttons to press.
+  const app = await open("./App.tsx", {
+    ...saved,
+    platform: "web",
+    width: 390,
+    height: 800,
+    network: { ...editable(log), ...readable },
+  });
+  await app.waitFor("id:source-all");
+  await app.press("id:source-all");
+  await app.press("text:Article a");
+  await app.waitFor("text:Some text to read here.");
+  const offered: string[] = [];
+  app.onDialog((d) => {
+    offered.push(...d.buttons);
+    return "Delete";
+  });
+  await app.press("label:More");
+  await app.waitUntil(() => log.patches.length > 0);
+  expect(log.patches).toEqual([["a", { archived: true }]]);
+  expect(offered).not.toContain("Open in Reader");
+  expect(offered).toContain("Open Original");
+  await app.waitUntil(() => !app.shows("id:article"));
+  await app.waitFor("text:Article bb");
+});
+
 test("desktop: a highlight the text has lost still counts, and can be removed", async () => {
   const deleted: string[] = [];
   const app = await open("./App.tsx", {
@@ -531,7 +635,7 @@ test("desktop: a bookmark's title, tags and note are edited, and the note shows 
   });
   await app.waitFor("text:Article a");
   await app.rightClick("id:card-a");
-  await app.chooseMenuItem("Edit title, tags and note…");
+  await app.chooseMenuItem("Edit Title, Tags and Note…");
   await app.waitFor("id:edit-title");
   await app.clear("id:edit-title");
   await app.type("id:edit-title", "A better title");
@@ -576,7 +680,7 @@ test("offline: a change waits on the device and is sent once the server is back"
   await app.waitFor("text:Article bb");
   online = false;
   await app.rightClick("id:card-bb");
-  await app.chooseMenuItem("Remove from favorites");
+  await app.chooseMenuItem("Remove from Favorites");
   // It stays changed, and says it's waiting.
   await app.waitUntil(() => app.texts().some((t) => t.includes("1 change waiting")));
   await app.press("label:Favorites");
@@ -610,13 +714,13 @@ test("offline: a change made while a waiting one is being sent is sent too", asy
   await app.waitFor("text:Article bb");
   online = false;
   await app.rightClick("id:card-bb");
-  await app.chooseMenuItem("Remove from favorites");
+  await app.chooseMenuItem("Remove from Favorites");
   await app.waitUntil(() => app.texts().some((t) => t.includes("1 change waiting")));
   online = true;
   await app.press("id:sync");
   await app.waitUntil(() => patches.length === 1);
   await app.rightClick("id:card-bb");
-  await app.chooseMenuItem("Add to favorites");
+  await app.chooseMenuItem("Add to Favorites");
   await app.waitUntil(() => patches.length === 2, { timeout: 8000 });
   expect(patches).toEqual([{ favorite: false }, { favorite: true }]);
 });

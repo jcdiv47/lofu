@@ -41,14 +41,17 @@ import {
   TopEdge,
 } from "../components/ui";
 import {
+  type BookmarkMenuOptions,
   canShare,
   deleteBookmark,
   editBookmark,
+  hasBrowser,
   nativeMenus,
   notice,
   openOriginal,
   shareBookmark,
   showBookmarkMenu,
+  toolbarActions,
 } from "../lib/actions";
 import { type ArticleImage, api, type Bookmark, type Highlight, OfflineError } from "../lib/api";
 import {
@@ -585,6 +588,16 @@ export function Reader(props: {
     return () => clearTimeout(t);
   });
 
+  /**
+   * The toolbar's •••: the ways to open the page and what the toolbar has
+   * no button for. Deleting from it goes back, as the toolbar's trash does.
+   */
+  const menuOptions = {
+    inReader: true,
+    omit: toolbarActions,
+    onGone: () => props.onBack(),
+  } satisfies BookmarkMenuOptions;
+
   /** The Mac's window toolbar has Back and the bookmark's actions (`lib/toolbar.ts`). */
   const native = props.wide && nativeToolbar;
   if (native) {
@@ -640,7 +653,8 @@ export function Reader(props: {
         {
           kind: "button",
           id: "original",
-          symbol: "safari",
+          // The page in the app; the compass is the system's browser (`Browser.tsx`).
+          symbol: "globe",
           label: "Open original",
           onPress: () => openOriginal(b()),
         },
@@ -649,7 +663,7 @@ export function Reader(props: {
           id: "more",
           symbol: "ellipsis",
           label: "More",
-          onPress: (at) => void showBookmarkMenu(b(), undefined, at),
+          onPress: (at) => void showBookmarkMenu(b(), { ...menuOptions, at }),
         },
       ];
     });
@@ -867,17 +881,28 @@ export function Reader(props: {
                 label="Edit title, tags and note"
                 onPress={() => editBookmark(b())}
               />
-              <IconButton name="external" label="Open original" onPress={() => openOriginal(b())} />
+              <IconButton
+                // In the app (the globe), or where there's none, the system's browser.
+                name={hasBrowser ? "globe" : "compass"}
+                label="Open original"
+                onPress={() => openOriginal(b())}
+              />
               <If
                 when={nativeMenus}
                 else={
-                  <BookmarkDropdown b={b()} trigger={<IconButton name="more" label="More" />} />
+                  <BookmarkDropdown
+                    b={b()}
+                    options={menuOptions}
+                    trigger={<IconButton name="more" label="More" />}
+                  />
                 }
               >
                 <IconButton
                   name="more"
                   label="More"
-                  onPress={() => void showBookmarkMenu(b(), undefined)}
+                  onPress={(e) =>
+                    void showBookmarkMenu(b(), { ...menuOptions, at: e?.pagePosition })
+                  }
                 />
               </If>
             </GlassGroup>

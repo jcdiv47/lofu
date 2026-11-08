@@ -20,11 +20,12 @@ import chevronDownIcon from "../assets/icons/chevron-down.svg";
 import clockIcon from "../assets/icons/clock.svg";
 import closeIcon from "../assets/icons/close.svg";
 import collapseIcon from "../assets/icons/collapse.svg";
+import compassIcon from "../assets/icons/compass.svg";
 import documentIcon from "../assets/icons/document.svg";
 import expandIcon from "../assets/icons/expand.svg";
-import externalIcon from "../assets/icons/external.svg";
 import folderIcon from "../assets/icons/folder.svg";
 import forwardIcon from "../assets/icons/forward.svg";
+import globeIcon from "../assets/icons/globe.svg";
 import gridIcon from "../assets/icons/grid.svg";
 import hashIcon from "../assets/icons/hash.svg";
 import highlighterIcon from "../assets/icons/highlighter.svg";
@@ -71,9 +72,12 @@ export const icons = {
   chevron: chevronIcon,
   clock: clockIcon,
   close: closeIcon,
-  external: externalIcon,
+  /** The system's browser (Safari's compass). */
+  compass: compassIcon,
   folder: folderIcon,
   forward: forwardIcon,
+  /** The original page, shown in the app. */
+  globe: globeIcon,
   grid: gridIcon,
   hash: hashIcon,
   highlighter: highlighterIcon,
