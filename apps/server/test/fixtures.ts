@@ -1,3 +1,5 @@
+import { deflateSync } from "node:zlib";
+
 const paragraph = (i: number) =>
   `<p>Paragraph ${i} about the zymurgy of sourdough starters, fermentation curves and crumb structure. ` +
   `Bakers measure hydration carefully because flour absorbs water at different rates.</p>`;
@@ -65,12 +67,47 @@ ${paragraph(4)}</article></body></html>`;
 const html = (body: string, status = 200) =>
   new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8" } });
 
+/** A real, decodable PNG of `width`×`height`: grey noise (8-bit greyscale), which compresses as poorly as a photo. */
+export function realPng(width: number, height: number): Uint8Array<ArrayBuffer> {
+  const chunk = (type: string, data: Uint8Array) => {
+    const body = Buffer.concat([Buffer.from(type, "latin1"), data]);
+    const out = Buffer.alloc(body.length + 8);
+    out.writeUInt32BE(data.length, 0);
+    body.copy(out, 4);
+    out.writeUInt32BE(Bun.hash.crc32(body), body.length + 4);
+    return out;
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr.set([8, 0, 0, 0, 0], 8); // 8-bit greyscale, no interlace
+  const rows = Buffer.alloc((width + 1) * height);
+  let seed = 1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+      rows[y * (width + 1) + 1 + x] = seed >>> 24;
+    }
+  }
+  const png = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", deflateSync(rows)),
+    chunk("IEND", new Uint8Array()),
+  ]);
+  return new Uint8Array(png);
+}
+
+/** How often the fixture site served each path. */
+export const served = new Map<string, number>();
+
 /** Local site so tests never touch the network. */
 export function startFixtureServer() {
   return Bun.serve({
     port: 0,
     fetch(req) {
       const path = new URL(req.url).pathname;
+      served.set(path, (served.get(path) ?? 0) + 1);
       if (path.startsWith("/article")) {
         return new Response(ARTICLE_HTML, {
           headers: { "content-type": "text/html; charset=utf-8" },
@@ -103,6 +140,12 @@ export function startFixtureServer() {
         });
       }
       if (path === "/pictures") return html(PICTURES_HTML);
+      if (path === "/wide.png") {
+        return new Response(realPng(2720, 340), { headers: { "content-type": "image/png" } });
+      }
+      if (path === "/narrow.png") {
+        return new Response(realPng(400, 300), { headers: { "content-type": "image/png" } });
+      }
       if (path === "/photo.png") {
         return new Response(pngHeader(640, 480), { headers: { "content-type": "image/png" } });
       }

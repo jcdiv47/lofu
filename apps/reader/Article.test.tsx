@@ -1,9 +1,15 @@
-import { createRichEditor, type RichNodeJSON, StarterKit, TableKit } from "nsh/base";
+import {
+  createRichEditor,
+  insertContentAt,
+  type RichNodeJSON,
+  StarterKit,
+  TableKit,
+} from "nsh/base";
 import { expect, test } from "nsh/test";
 import { findQuote, quoteAt } from "../../packages/shared/src/anchor";
-import { indexDoc } from "./lib/docIndex";
+import { indexDoc, nodeSize } from "./lib/docIndex";
 import { isFootnoteNumber, numberFootnotes, raiseFootnotes } from "./lib/footnotes";
-import { compactCells } from "./screens/Reader";
+import { compactCells, paginate } from "./screens/Reader";
 
 /** The document as the reader makes it. */
 const doc = (markdown: string) =>
@@ -94,4 +100,46 @@ test("notes go under the page's own empty notes heading", () => {
 
 test("an article without footnotes is unchanged", () => {
   expect(numberFootnotes("Plain [text] and ^caret.")).toBe("Plain [text] and ^caret.");
+});
+
+test("a long article is shown in pages that add up to the whole, positions unchanged", () => {
+  const sections = Array.from(
+    { length: 60 },
+    (_, i) =>
+      `## Question ${i}\n\n- Watch: [video ${i}](https://x.test/v${i})\n- Cover: **${i}**\n\nText of ${i}.`,
+  );
+  const whole = doc(sections.join("\n\n"));
+  const blocks = whole.content ?? [];
+  const pages = paginate(blocks, 40, 25);
+  expect(pages.length > 3).toBe(true);
+  expect(pages.flat()).toEqual(blocks);
+  for (const page of pages) expect(page.length > 0).toBe(true);
+
+  // Laid out as the reader does: the first page, then the others at the end.
+  const ed = createRichEditor({ content: "", format: "markdown", extensions: [StarterKit] });
+  ed.setContent({ ...whole, content: pages[0] }, "json");
+  let end = (pages[0] ?? []).reduce((n, b) => n + nodeSize(b), 0);
+  for (const page of pages.slice(1)) {
+    ed.run(insertContentAt(end, page, { updateSelection: false }));
+    end += page.reduce((n, b) => n + nodeSize(b), 0);
+  }
+  // The same blocks; the editor may keep an empty paragraph after the last
+  // (StarterKit's trailing node, added while a page ended in a list), which
+  // has no text and moves nothing.
+  const got = ed.getJSON().content ?? [];
+  expect(got.slice(0, blocks.length)).toEqual(blocks);
+  expect(got.slice(blocks.length).every((b) => b.type === "paragraph" && !b.content)).toBe(true);
+  // Every character at the same position as in the whole document.
+  const paged = indexDoc(ed.getJSON(), isFootnoteNumber);
+  const once = indexDoc(whole, isFootnoteNumber);
+  expect(paged.text.slice(0, once.text.length)).toBe(once.text);
+  expect(paged.pos.slice(0, once.pos.length)).toEqual(once.pos);
+
+  // The first page can be asked to reach a position (text already shown stays).
+  const through = end - 20;
+  const [first] = paginate(blocks, 40, 25, through);
+  expect((first ?? []).reduce((n, b) => n + nodeSize(b), 0) >= through).toBe(true);
+  // Short ones are one page.
+  expect(paginate(blocks.slice(0, 3), 40, 25)).toEqual([blocks.slice(0, 3)]);
+  expect(paginate([], 40, 25)).toEqual([[]]);
 });

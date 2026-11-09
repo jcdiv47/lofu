@@ -16,6 +16,10 @@ export const config = {
   host: process.env.LOFU_HOST ?? "127.0.0.1",
   dataDir,
   dbPath: process.env.LOFU_DB_PATH ?? join(dataDir, "lofu.db"),
+  /** The image proxy's files (derived; empty: none kept). */
+  imageCacheDir: process.env.LOFU_IMAGE_CACHE_DIR ?? join(dataDir, "images"),
+  /** The most they take, in MB; the least recently used go first. */
+  imageCacheMb: int("LOFU_IMAGE_CACHE_MB", 2048),
   /** Extraction is CPU-bound (~0.5s for a large page), so it runs on worker threads. */
   extractWorkers: int("LOFU_EXTRACT_WORKERS", Math.max(1, Math.min(4, availableParallelism() - 1))),
   fetchConcurrency: int("LOFU_FETCH_CONCURRENCY", 8),

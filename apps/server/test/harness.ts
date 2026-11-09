@@ -1,4 +1,7 @@
 import { afterAll, beforeAll } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createApp } from "../src/app.ts";
 import { type Config, config } from "../src/config.ts";
 import { wire } from "../src/wire.ts";
@@ -12,9 +15,11 @@ export function setupServer(overrides: Partial<Config> = {}) {
   const site = startFixtureServer();
   const base = `http://localhost:${site.port}`;
   const withSearch = Boolean(process.env.MEILI_URL);
+  const imageCacheDir = mkdtempSync(join(tmpdir(), "lofu-images-"));
   const sys = wire({
     ...config,
     dbPath: ":memory:",
+    imageCacheDir,
     authDisabled: false,
     extractWorkers: 2,
     fetchHostIntervalMs: 0, // every fixture URL is on one host
@@ -60,6 +65,7 @@ export function setupServer(overrides: Partial<Config> = {}) {
     }
     await sys.stop();
     site.stop(true);
+    rmSync(imageCacheDir, { recursive: true, force: true });
   });
 
   return { sys: Object.assign(sys, { app, token }), app, api, base, withSearch };

@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { Db } from "../db/index.ts";
 import { Semaphore } from "../util/semaphore.ts";
 import { BROWSER_USER_AGENT } from "./browser.ts";
+import { ImageCache } from "./imageCache.ts";
 import { type ImageSize, imageSize } from "./imageSize.ts";
 
 /**
@@ -15,7 +16,9 @@ import { type ImageSize, imageSize } from "./imageSize.ts";
  *   page with a placeholder (WeChat: "未经允许不可引用") or a 403 (CSDN). The
  *   server fetches images without a Referer, which those hosts allow. The
  *   reader's `<img>` can't send a bearer token, so proxy URLs are signed:
- *   only URLs the server handed out can be fetched through it.
+ *   only URLs the server handed out can be fetched through it. What it
+ *   fetched is kept on disk (`imageCache.ts`), and article images come
+ *   resized for reading (`ARTICLE_IMAGE_WIDTH`).
  */
 
 /** Sizes by image URL; images that couldn't be measured are left out. */
@@ -119,19 +122,87 @@ const b64url = (b: Uint8Array) => Buffer.from(b).toString("base64url");
 const failure = (message: string, status: number) =>
   new Response(message, { status, headers: { "cache-control": "no-store" } });
 
-/** Signs and serves `/img/<signature>?u=<url>`. */
+/**
+ * The width article images are served at: twice the reader's measure (680
+ * points), so they're sharp on a Retina screen and an iPhone's (whose text
+ * is narrower at 3×). A screenshot of 2560×1600 comes to a fifth of its bytes.
+ */
+export const ARTICLE_IMAGE_WIDTH = 1360;
+/** The widths `/img` resizes to; anything else is refused, so the variants a URL can have stay few. */
+const IMAGE_WIDTHS: readonly number[] = [ARTICLE_IMAGE_WIDTH];
+/** Formats resized (static ones `Bun.Image` decodes everywhere; a GIF may be animated). */
+const RESIZABLE = new Set(["image/jpeg", "image/png", "image/webp"]);
+/** A bigger canvas isn't decoded (a pixel buffer of ~240 MB). */
+const RESIZE_MAX_PIXELS = 60_000_000;
+/** Upstream fetches for the proxy at once: an article of 471 images asks for all of them together. */
+const upstream = new Semaphore(16);
+/** Resizes at once (each runs on Bun's worker threads, a decoded image in memory). */
+const resizes = new Semaphore(4);
+
+/** What the proxy serves for a URL and width. */
+interface Served {
+  type: string;
+  bytes: Uint8Array<ArrayBuffer>;
+}
+
+/** `bytes` at most `width` wide, as WebP; unchanged when already narrower, not resizable, or not smaller. */
+export async function resizeImage(served: Served, width: number): Promise<Served> {
+  if (!RESIZABLE.has(served.type)) return served;
+  const release = await resizes.acquire();
+  try {
+    const opts = { maxPixels: RESIZE_MAX_PIXELS };
+    const meta = await new Bun.Image(served.bytes, opts).metadata();
+    if (meta.width <= width) return served;
+    const bytes = (await new Bun.Image(served.bytes, opts)
+      .resize(width)
+      .webp({ quality: 80 })
+      .bytes()) as Uint8Array<ArrayBuffer>;
+    return bytes.byteLength < served.bytes.byteLength ? { type: "image/webp", bytes } : served;
+  } catch {
+    return served; // Undecodable here: the client may still manage.
+  } finally {
+    release();
+  }
+}
+
+/** The body of `res`, or null past `max` bytes. */
+async function readCapped(res: Response, max: number): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (!res.body) return new Uint8Array();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  const reader = res.body.getReader();
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks, total);
+}
+
+/** Signs and serves `/img/<signature>?u=<url>[&w=<width>]`. */
 export class ImageProxy {
-  constructor(private key: Uint8Array) {}
+  /** Fetches in flight, by cache key: a picture asked for twice at once is fetched once. */
+  private inFlight = new Map<string, Promise<Served | Response>>();
+
+  constructor(
+    private key: Uint8Array,
+    private cache: ImageCache | null = null,
+  ) {}
 
   /** The key made once and kept in `meta` (proxy URLs stay valid across restarts). */
-  static fromDb(db: Db): ImageProxy {
+  static fromDb(db: Db, cache: ImageCache | null = null): ImageProxy {
     const row = db
       .query<{ value: string }, [string]>("SELECT value FROM meta WHERE key = ?")
       .get("image_proxy_key");
-    if (row) return new ImageProxy(Buffer.from(row.value, "base64url"));
+    if (row) return new ImageProxy(Buffer.from(row.value, "base64url"), cache);
     const key = crypto.getRandomValues(new Uint8Array(32));
     db.query("INSERT INTO meta (key, value) VALUES (?, ?)").run("image_proxy_key", b64url(key));
-    return new ImageProxy(key);
+    return new ImageProxy(key, cache);
   }
 
   private sign(url: string): string {
@@ -140,10 +211,13 @@ export class ImageProxy {
     return b64url(h.digest()).slice(0, 22); // 132 bits
   }
 
-  /** The proxy path for `url` (relative to the server), or null for what it doesn't serve. */
-  path(url: string): string | null {
+  /**
+   * The proxy path for `url` (relative to the server), or null for what it
+   * doesn't serve. With a `width`, the picture comes at most that wide.
+   */
+  path(url: string, width?: number): string | null {
     if (!/^https?:\/\//i.test(url)) return null;
-    return `/img/${this.sign(url)}?u=${encodeURIComponent(url)}`;
+    return `/img/${this.sign(url)}?u=${encodeURIComponent(url)}${width ? `&w=${width}` : ""}`;
   }
 
   /**
@@ -168,48 +242,87 @@ export class ImageProxy {
     return got.length === want.length && timingSafeEqual(got, want);
   }
 
-  /** Fetches the image for a client: no Referer, image types only, never run as a document. */
-  async serve(sig: string, url: string | undefined): Promise<Response> {
+  /**
+   * Serves the image for a client: no Referer, image types only, never run as
+   * a document. Kept on disk once fetched (and resized, with a width), so the
+   * next view doesn't wait on the image's site.
+   */
+  async serve(sig: string, url: string | undefined, w?: string): Promise<Response> {
     if (!url || !/^https?:\/\//i.test(url) || !this.verify(sig, url)) {
       return failure("bad signature", 403);
     }
-    let res: Response;
-    try {
-      res = await fetch(url, {
-        headers: IMAGE_HEADERS,
-        redirect: "follow",
-        signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
+    const width = w === undefined ? 0 : Number(w);
+    if (width && !IMAGE_WIDTHS.includes(width)) return failure("unsupported width", 400);
+    const key = new Bun.CryptoHasher("sha256").update(`${width}\n${url}`).digest("hex");
+
+    const hit = this.cache?.get(key);
+    if (hit) return this.respond(hit.type, Bun.file(hit.path), "hit");
+
+    let pending = this.inFlight.get(key);
+    if (!pending) {
+      pending = this.load(url, width).then(async (got) => {
+        if (!(got instanceof Response) && this.cache && ImageCache.keeps(got.type)) {
+          await this.cache.put(key, got.type, got.bytes);
+        }
+        return got;
       });
-    } catch (e) {
-      return failure(`upstream failed: ${(e as Error).message}`, 502);
+      this.inFlight.set(key, pending);
+      void pending.finally(() => this.inFlight.delete(key));
     }
-    const type = res.headers.get("content-type")?.toLowerCase() ?? "";
-    const length = Number(res.headers.get("content-length") ?? 0);
-    if (!res.ok || !type.startsWith("image/") || length > PROXY_MAX_BYTES) {
-      await res.body?.cancel();
-      if (!res.ok) return failure(`upstream HTTP ${res.status}`, 502);
-      return failure(length > PROXY_MAX_BYTES ? "too large" : "not an image", 415);
+    const got = await pending;
+    // A failure's body can be read once: each waiter gets its own.
+    if (got instanceof Response) return got.clone();
+    return this.respond(got.type, got.bytes, "miss");
+  }
+
+  /** The picture from its site, resized to `width` when given. */
+  private async load(url: string, width: number): Promise<Served | Response> {
+    const release = await upstream.acquire();
+    let served: Served;
+    try {
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          headers: IMAGE_HEADERS,
+          redirect: "follow",
+          signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
+        });
+      } catch (e) {
+        return failure(`upstream failed: ${(e as Error).message}`, 502);
+      }
+      const type = res.headers.get("content-type")?.toLowerCase().split(";")[0]?.trim() ?? "";
+      const length = Number(res.headers.get("content-length") ?? 0);
+      if (!res.ok || !type.startsWith("image/") || length > PROXY_MAX_BYTES) {
+        await res.body?.cancel();
+        if (!res.ok) return failure(`upstream HTTP ${res.status}`, 502);
+        return failure(length > PROXY_MAX_BYTES ? "too large" : "not an image", 415);
+      }
+      const bytes = await readCapped(res, PROXY_MAX_BYTES).catch(() => undefined);
+      if (bytes === undefined) return failure("upstream failed: body cut short", 502);
+      if (bytes === null) return failure("too large", 415);
+      served = { type, bytes };
+    } finally {
+      release();
     }
-    const headers: Record<string, string> = {
-      "content-type": type,
-      "cache-control": "public, max-age=604800",
-      "x-content-type-options": "nosniff",
-      // An SVG opened on its own must not run scripts on the server's origin.
-      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
-      "cross-origin-resource-policy": "cross-origin",
-    };
-    // fetch() decodes a compressed body, so the upstream length would be wrong.
-    if (length && !res.headers.has("content-encoding")) headers["content-length"] = String(length);
-    let sent = 0;
-    const capped = res.body?.pipeThrough(
-      new TransformStream<Uint8Array, Uint8Array>({
-        transform(chunk, out) {
-          sent += chunk.byteLength;
-          if (sent > PROXY_MAX_BYTES) out.error(new Error("image too large"));
-          else out.enqueue(chunk);
-        },
-      }),
-    );
-    return new Response(capped ?? null, { status: 200, headers });
+    return width ? resizeImage(served, width) : served;
+  }
+
+  private respond(
+    type: string,
+    body: Uint8Array<ArrayBuffer> | Blob,
+    cache: "hit" | "miss",
+  ): Response {
+    return new Response(body, {
+      status: 200,
+      headers: {
+        "content-type": type,
+        "cache-control": "public, max-age=604800",
+        "x-content-type-options": "nosniff",
+        // An SVG opened on its own must not run scripts on the server's origin.
+        "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        "cross-origin-resource-policy": "cross-origin",
+        "x-lofu-cache": cache,
+      },
+    });
   }
 }
