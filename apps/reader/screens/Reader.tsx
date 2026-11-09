@@ -535,7 +535,8 @@ export function Reader(props: {
       if (fresh.markdown === shown) place(pendingHighlights(id, fresh.highlights));
       else show(await withKeptPictures(id, fresh));
       // Its pictures too, for reading it offline (and from the disk next time).
-      void keepPictures(id, fresh);
+      // The copy still on screen keeps its files until it next opens.
+      void keepPictures(id, fresh, fresh.markdown === shown && kept ? kept : undefined);
     } catch (e) {
       if (kept?.markdown) return;
       status.set(

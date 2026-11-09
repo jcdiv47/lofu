@@ -208,15 +208,22 @@ export async function withKeptPictures(id: string, a: Kept): Promise<Kept> {
 /**
  * Downloads the article's pictures not kept yet, a few at a time, and
  * removes those it no longer shows (their URLs change when the server's
- * address or the size it serves them at does). Resolves with whether it got
- * all it could: a picture its site no longer has (an error status, or not a
+ * address or the size it serves them at does), but for those of `showing`,
+ * the copy a reader has on screen. Resolves with whether it got all it
+ * could: a picture its site no longer has (an error status, or not a
  * picture) is given up on; one that couldn't be reached is tried again later.
  */
-export async function keepPictures(id: string, a: Kept): Promise<boolean> {
+export async function keepPictures(
+  id: string,
+  a: Kept,
+  showing?: Pick<Kept, "images">,
+): Promise<boolean> {
   if (!onDisk) return false;
   const here = new Set(await listText(`${PICTURE}${id}-`));
   const urls = pictureUrls(a);
-  const wanted = new Set(urls.map((u) => pictureFile(id, u)));
+  const wanted = new Set(
+    [...urls, ...(showing ? pictureUrls(showing) : [])].map((u) => pictureFile(id, u)),
+  );
   for (const name of here) {
     if (!wanted.has(name)) await removeText(name);
   }
