@@ -63,7 +63,7 @@ import {
   syncError,
   syncing,
 } from "../lib/store";
-import { focusToolbarSearch, nativeToolbar, useToolbar } from "../lib/toolbar";
+import { type Frame, focusToolbarSearch, nativeToolbar, useToolbar } from "../lib/toolbar";
 
 const GAP = 18;
 const PAD = 24;
@@ -160,9 +160,7 @@ export function Library(props: {
   });
   const query = box.query;
   const searching = () => hasQuery(box.applied());
-  /** Where the Mac's toolbar field is, once it has had the keyboard. */
-  let fieldFrame: { x: number; y: number; width: number; height: number } | null = null;
-  const frameBounds = (f: { x: number; y: number; width: number; height: number }) => ({
+  const frameBounds = (f: Frame) => ({
     origin: { x: f.x, y: f.y },
     size: { width: f.width, height: f.height },
   });
@@ -222,10 +220,11 @@ export function Library(props: {
         id: "filters",
         symbol: "line.3.horizontal.decrease.circle",
         label: "Search settings / filters",
-        onPress: (at) =>
+        // Under the search field, as when it has the keyboard.
+        onPress: (at, search) =>
           box.toggleNarrow(
-            fieldFrame
-              ? frameBounds(fieldFrame)
+            search
+              ? frameBounds(search)
               : { origin: { x: at.x, y: at.y }, size: { width: 0, height: 0 } },
           ),
       },
@@ -237,10 +236,7 @@ export function Library(props: {
         value: query(),
         width: 260,
         onChange: (v) => box.onChange(v),
-        onFocus: (f) => {
-          fieldFrame = f;
-          box.onFocus(frameBounds(f));
-        },
+        onFocus: (f) => box.onFocus(frameBounds(f)),
         onBlur: () => box.onBlur(),
         onKey: (k) => box.key(k),
       },

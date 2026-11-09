@@ -12,6 +12,9 @@ import { nativeControls } from "../components/native";
  */
 export const nativeToolbar = nativeControls && platform.os === "macos" && Toolbar.available();
 
+/** A toolbar item's frame, from the window's top left. */
+export type Frame = { x: number; y: number; width: number; height: number };
+
 export type ToolbarItem =
   | {
       kind: "button";
@@ -23,8 +26,8 @@ export type ToolbarItem =
       tint?: string;
       prominent?: boolean;
       disabled?: boolean;
-      /** `at`: the pointer, from the window's top left. */
-      onPress: (at: { x: number; y: number }) => void;
+      /** `at`: the pointer, from the window's top left; `search`: the search field's frame then, if there is one. */
+      onPress: (at: { x: number; y: number }, search: Frame | null) => void;
     }
   | {
       kind: "search";
@@ -36,7 +39,7 @@ export type ToolbarItem =
       disabled?: boolean;
       onChange: (value: string) => void;
       /** It took the keyboard: its frame, from the window's top left (where suggestions go). */
-      onFocus?: (frame: { x: number; y: number; width: number; height: number }) => void;
+      onFocus?: (frame: Frame) => void;
       onBlur?: () => void;
       /** Return, and while `setSuggesting(true)` the arrows and Escape. */
       onKey?: (key: "up" | "down" | "enter" | "escape") => void;
@@ -80,6 +83,7 @@ async function listen() {
       height?: number;
       value?: string;
       key?: "up" | "down" | "enter" | "escape";
+      search?: Frame | null;
     };
     try {
       e = JSON.parse(raw);
@@ -88,7 +92,8 @@ async function listen() {
     }
     if (toolbarBlocked()) continue;
     const item = handlers.get(e.id);
-    if (e.type === "press" && item?.kind === "button") item.onPress({ x: e.x ?? -1, y: e.y ?? -1 });
+    if (e.type === "press" && item?.kind === "button")
+      item.onPress({ x: e.x ?? -1, y: e.y ?? -1 }, e.search ?? null);
     else if (item?.kind !== "search") continue;
     else if (e.type === "search") item.onChange(e.value ?? "");
     else if (e.type === "searchFocus")
