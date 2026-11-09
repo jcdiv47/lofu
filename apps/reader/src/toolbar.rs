@@ -89,7 +89,7 @@ mod mac {
     use objc2::runtime::{AnyObject, Bool, NSObject, NSObjectProtocol, Sel};
     use objc2::{ClassType, MainThreadMarker, MainThreadOnly, class, define_class, msg_send, sel};
     use objc2_app_kit::{NSControl, NSResponder, NSSearchField, NSTextField, NSView};
-    use objc2_foundation::{NSArray, NSPoint, NSRect, NSSize, NSString};
+    use objc2_foundation::{NSArray, NSPoint, NSRange, NSRect, NSSize, NSString};
     use serde_json::Value;
 
     use super::{SUGGESTING, emit};
@@ -273,7 +273,10 @@ mod mac {
 
     define_class!(
         /// The toolbar's search field, which says when it takes the keyboard
-        /// (a field's delegate hears of editing only once the text changes).
+        /// (a field's delegate hears of editing only once the text changes):
+        /// a click, or the app making it first responder. ⌘F's
+        /// `beginSearchInteraction` hands the keyboard to the field editor
+        /// without either, so `search` says so itself.
         #[unsafe(super(NSSearchField, NSTextField, NSControl, NSView, NSResponder, NSObject))]
         #[thread_kind = MainThreadOnly]
         #[name = "LofuSearchField"]
@@ -286,20 +289,36 @@ mod mac {
                 let took: bool = unsafe { msg_send![super(self), becomeFirstResponder] };
                 if took {
                     // SAFETY: a view, on the main thread.
-                    let (x, y, width, height) = unsafe { frame_in_window(self) };
-                    emit(serde_json::json!({
-                        "type": "searchFocus",
-                        "id": search_id(),
-                        "x": x,
-                        "y": y,
-                        "width": width,
-                        "height": height,
-                    }));
+                    unsafe { emit_focus(self) };
                 }
                 Bool::new(took)
             }
+
+            #[unsafe(method(mouseDown:))]
+            fn mouse_down(&self, event: &AnyObject) {
+                // SAFETY: a view, on the main thread.
+                unsafe { emit_focus(self) };
+                // SAFETY: NSResponder's own method, on the main thread.
+                unsafe {
+                    let _: () = msg_send![super(self), mouseDown: event];
+                }
+            }
         }
     );
+
+    /// Tells the app the search field has the keyboard, and where it is.
+    unsafe fn emit_focus(field: &AnyObject) {
+        // SAFETY: a view, on the main thread.
+        let (x, y, width, height) = unsafe { frame_in_window(field) };
+        emit(serde_json::json!({
+            "type": "searchFocus",
+            "id": search_id(),
+            "x": x,
+            "y": y,
+            "width": width,
+            "height": height,
+        }));
+    }
 
     /// A view's frame from the top left of the window's content (as `pointer`).
     unsafe fn frame_in_window(view: &AnyObject) -> (f64, f64, f64, f64) {
@@ -482,8 +501,18 @@ mod mac {
                     let now: Retained<NSString> = msg_send![&*field, stringValue];
                     // Only when it differs: setting it moves the caret to the end.
                     if now.to_string() != item.value {
-                        let _: () =
-                            msg_send![&*field, setStringValue: &*NSString::from_str(&item.value)];
+                        let value = NSString::from_str(&item.value);
+                        // While it's being typed in (a suggestion picked), through
+                        // the field editor: `setStringValue:` would end the editing
+                        // and take the keyboard away.
+                        let editor: Option<Retained<AnyObject>> = msg_send![&*field, currentEditor];
+                        if let Some(editor) = editor {
+                            let _: () = msg_send![&*editor, setString: &*value];
+                            let end = NSRange::new(value.length(), 0);
+                            let _: () = msg_send![&*editor, setSelectedRange: end];
+                        } else {
+                            let _: () = msg_send![&*field, setStringValue: &*value];
+                        }
                     }
                     let _: () = msg_send![made, setPreferredWidthForSearchField: item.width];
                     let _: () = msg_send![made, setLabel: &*label];
@@ -578,20 +607,34 @@ mod mac {
         });
     }
 
+    /// The toolbar's search item, if it shows one.
+    fn search_item() -> Option<Retained<AnyObject>> {
+        MADE.with(|m| {
+            m.borrow()
+                .iter()
+                .find(|(k, _)| k.starts_with(&format!("{PREFIX}search.")))
+                .map(|(_, v)| v.clone())
+        })
+    }
+
     /// Opens the search field for typing (⌘F).
     pub fn search() {
         dispatch2::DispatchQueue::main().exec_async(|| {
-            let made = MADE.with(|m| {
-                m.borrow()
-                    .iter()
-                    .find(|(k, _)| k.starts_with(&format!("{PREFIX}search.")))
-                    .map(|(_, v)| v.clone())
-            });
-            if let Some(made) = made {
+            if let Some(made) = search_item() {
                 // SAFETY: an NSSearchToolbarItem, on the main thread.
                 unsafe {
                     let _: () = msg_send![&*made, beginSearchInteraction];
                 }
+                // Once the item has opened out (it may be collapsed to a button).
+                dispatch2::DispatchQueue::main().exec_async(|| {
+                    if let Some(made) = search_item() {
+                        // SAFETY: an NSSearchToolbarItem, on the main thread.
+                        unsafe {
+                            let field: Retained<AnyObject> = msg_send![&*made, searchField];
+                            emit_focus(&field);
+                        }
+                    }
+                });
             }
         });
     }

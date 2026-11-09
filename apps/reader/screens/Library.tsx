@@ -171,19 +171,27 @@ export function Library(props: {
     setSearchFocus(focusToolbarSearch);
     useToolbar(() => [
       { kind: "flex" },
-      // Sort and view, as Finder's: a symbol whose menu opens under it.
-      ...(searching()
-        ? []
-        : [
-            {
-              kind: "button" as const,
-              id: "sort",
-              symbol: currentSort(props.source).symbol,
-              label: `Sort by: ${sortLabel(props.source)}`,
-              onPress: (at: { x: number; y: number }) =>
-                void Menu.popup(sortMenu(props.source), at.x >= 0 ? at : undefined),
-            },
-          ]),
+      // Sort and view, as Finder's: a symbol whose menu opens under it. A
+      // search keeps the server's order, *By relevance*, as Raindrop shows it;
+      // the item stays (greyed out), since a toolbar whose items change is
+      // built again, and its search field loses the keyboard.
+      searching()
+        ? {
+            kind: "button" as const,
+            id: "sort",
+            symbol: "sparkle.magnifyingglass",
+            label: "Sort by: By relevance",
+            disabled: true,
+            onPress: () => {},
+          }
+        : {
+            kind: "button" as const,
+            id: "sort",
+            symbol: currentSort(props.source).symbol,
+            label: `Sort by: ${sortLabel(props.source)}`,
+            onPress: (at: { x: number; y: number }) =>
+              void Menu.popup(sortMenu(props.source), at.x >= 0 ? at : undefined),
+          },
       {
         kind: "button",
         id: "view",
