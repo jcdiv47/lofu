@@ -205,10 +205,13 @@ export const api = {
       favorite?: boolean;
       type?: Bookmark["type"];
       archived?: boolean;
+      /** Minutes east of UTC, where the query's `created:` days start. */
+      tz?: number;
     },
     offset = 0,
   ) => {
     const params = [`q=${q(query)}`, `limit=${SEARCH_PAGE}`, `offset=${offset}`];
+    if (filter.tz) params.push(`tz=${filter.tz}`);
     if (filter.archived !== undefined) params.push(`archived=${filter.archived}`);
     if (filter.type) params.push(`type=${q(filter.type)}`);
     if (filter.collectionId) params.push(`collectionId=${q(filter.collectionId)}`);

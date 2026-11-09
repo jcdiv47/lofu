@@ -14,6 +14,7 @@ import allIcon from "../assets/icons/all.svg";
 import articleIcon from "../assets/icons/article.svg";
 import audioIcon from "../assets/icons/audio.svg";
 import backIcon from "../assets/icons/back.svg";
+import calendarIcon from "../assets/icons/calendar.svg";
 import checkIcon from "../assets/icons/check.svg";
 import chevronIcon from "../assets/icons/chevron.svg";
 import chevronDownIcon from "../assets/icons/chevron-down.svg";
@@ -23,6 +24,7 @@ import collapseIcon from "../assets/icons/collapse.svg";
 import compassIcon from "../assets/icons/compass.svg";
 import documentIcon from "../assets/icons/document.svg";
 import expandIcon from "../assets/icons/expand.svg";
+import filterIcon from "../assets/icons/filter.svg";
 import folderIcon from "../assets/icons/folder.svg";
 import forwardIcon from "../assets/icons/forward.svg";
 import globeIcon from "../assets/icons/globe.svg";
@@ -32,17 +34,21 @@ import headlinesIcon from "../assets/icons/headlines.svg";
 import highlighterIcon from "../assets/icons/highlighter.svg";
 import imageIcon from "../assets/icons/image.svg";
 import inboxIcon from "../assets/icons/inbox.svg";
+import infoIcon from "../assets/icons/info.svg";
 import linkIcon from "../assets/icons/link.svg";
 import listIcon from "../assets/icons/list.svg";
 import moodboardIcon from "../assets/icons/moodboard.svg";
 import moreIcon from "../assets/icons/more.svg";
+import noteIcon from "../assets/icons/note.svg";
 import pencilIcon from "../assets/icons/pencil.svg";
 import plusIcon from "../assets/icons/plus.svg";
 import refreshIcon from "../assets/icons/refresh.svg";
 import restoreIcon from "../assets/icons/restore.svg";
+import returnIcon from "../assets/icons/return.svg";
 import searchIcon from "../assets/icons/search.svg";
 import settingsIcon from "../assets/icons/settings.svg";
 import shareIcon from "../assets/icons/share.svg";
+import slidersIcon from "../assets/icons/sliders.svg";
 import sortIcon from "../assets/icons/sort.svg";
 import sortAzIcon from "../assets/icons/sort-az.svg";
 import sortZaIcon from "../assets/icons/sort-za.svg";
@@ -78,6 +84,12 @@ export const icons = {
   moodboard: moodboardIcon,
   video: videoIcon,
   alert: alertIcon,
+  calendar: calendarIcon,
+  filter: filterIcon,
+  info: infoIcon,
+  note: noteIcon,
+  sliders: slidersIcon,
+  enter: returnIcon,
   all: allIcon,
   back: backIcon,
   chevron: chevronIcon,

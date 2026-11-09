@@ -12,6 +12,7 @@ import {
   type ViewRef,
 } from "nsh";
 import { Menu } from "nsh/desktop";
+import { hasQuery } from "../../../packages/shared/src/query";
 import {
   BookmarkCard,
   BookmarkHeadline,
@@ -33,9 +34,10 @@ import {
 } from "../components/ListControls";
 import { useManualDrag } from "../components/ManualDrag";
 import { nativeScrollEdges, ScrollEdge } from "../components/native";
+import { useSearchBox } from "../components/SearchBox";
 import { SearchField } from "../components/SearchField";
 import { SwipeRow, swipeable } from "../components/SwipeRow";
-import { BottomEdge, RoundGlassButton, TopEdge } from "../components/ui";
+import { BottomEdge, IconButton, RoundGlassButton, TopEdge } from "../components/ui";
 import { setSearchFocus } from "../lib/actions";
 import { api, type Bookmark, SEARCH_PAGE, type SearchHit } from "../lib/api";
 import { look } from "../lib/look";
@@ -48,6 +50,7 @@ import {
   sortFor,
   viewFor,
 } from "../lib/prefs";
+import { tzOffset } from "../lib/search";
 import {
   bookmark,
   bookmarksIn,
@@ -134,18 +137,37 @@ export function Library(props: {
   onAdd?: () => void;
   /** A search to start with (typed on the phone's Library page). */
   initialQuery?: string;
+  /** Opens another source (a collection a search suggestion names). */
+  onSource?: (s: Source) => void;
   /** Desktops draw their own toolbar; leading room for the sidebar toggle or traffic lights. */
   toolbarInset?: number;
 }) {
-  const query = signal(props.initialQuery ?? "");
   const hits = signal<SearchHit[] | null>(null);
   /** How many the server found (it counts them roughly). */
   const total = signal(0);
   cleanup(() => setSearchFocus(null));
-  const searching = () => query().trim().length > 0;
   /** The Mac's window toolbar has the search, sync and + (`lib/toolbar.ts`). */
   const native = props.wide && nativeToolbar;
+  let focusField = () => {};
+  const box = useSearchBox({
+    source: () => props.source,
+    live: !props.wide,
+    initial: props.initialQuery,
+    results: () => hits()?.map((h) => h.bookmark) ?? null,
+    onSource: props.onSource,
+    focusField: () => focusField(),
+    nativeField: native,
+  });
+  const query = box.query;
+  const searching = () => hasQuery(box.applied());
+  /** Where the Mac's toolbar field is, once it has had the keyboard. */
+  let fieldFrame: { x: number; y: number; width: number; height: number } | null = null;
+  const frameBounds = (f: { x: number; y: number; width: number; height: number }) => ({
+    origin: { x: f.x, y: f.y },
+    size: { width: f.width, height: f.height },
+  });
   if (native) {
+    focusField = focusToolbarSearch;
     setSearchFocus(focusToolbarSearch);
     useToolbar(() => [
       { kind: "flex" },
@@ -188,13 +210,31 @@ export function Library(props: {
         onPress: () => props.onAdd?.(),
       },
       {
+        kind: "button",
+        id: "filters",
+        symbol: "line.3.horizontal.decrease.circle",
+        label: "Search settings / filters",
+        onPress: (at) =>
+          box.toggleNarrow(
+            fieldFrame
+              ? frameBounds(fieldFrame)
+              : { origin: { x: at.x, y: at.y }, size: { width: 0, height: 0 } },
+          ),
+      },
+      {
         kind: "search",
         id: "search",
         label: "Search",
-        placeholder: "Search titles and text",
+        placeholder: "Search",
         value: query(),
         width: 260,
-        onChange: (v) => query.set(v),
+        onChange: (v) => box.onChange(v),
+        onFocus: (f) => {
+          fieldFrame = f;
+          box.onFocus(frameBounds(f));
+        },
+        onBlur: () => box.onBlur(),
+        onKey: (k) => box.key(k),
       },
     ]);
   }
@@ -203,15 +243,15 @@ export function Library(props: {
   // later query cancels the display of an earlier one.
   let generation = 0;
   effect(() => {
-    const q = query().trim();
+    const q = box.applied().trim();
     const mine = ++generation;
-    if (!q) {
+    if (!hasQuery(q)) {
       hits.set(null);
       return;
     }
     const timer = setTimeout(async () => {
       try {
-        const r = await api.search(q, searchFilter(props.source));
+        const r = await api.search(q, { ...searchFilter(props.source), tz: tzOffset() });
         if (mine === generation) {
           hits.set(r.hits);
           total.set(r.estimatedTotal ?? r.hits.length);
@@ -230,12 +270,12 @@ export function Library(props: {
   let paging = false;
   const loadMore = async () => {
     const h = hits();
-    const q = query().trim();
-    if (!q || !h || paging || h.length >= total() || h.length % SEARCH_PAGE !== 0) return;
+    const q = box.applied().trim();
+    if (!hasQuery(q) || !h || paging || h.length >= total() || h.length % SEARCH_PAGE !== 0) return;
     paging = true;
     const mine = generation;
     try {
-      const r = await api.search(q, searchFilter(props.source), h.length);
+      const r = await api.search(q, { ...searchFilter(props.source), tz: tzOffset() }, h.length);
       if (mine === generation) {
         const seen = new Set(h.map((x) => x.bookmark.id));
         hits.set([...h, ...r.hits.filter((x) => !seen.has(x.bookmark.id))]);
@@ -305,12 +345,24 @@ export function Library(props: {
         <View class="min-w-0 flex-1 flex-row items-baseline gap-2">
           <Text
             class="truncate"
+            testID="library-title"
             style={{ color: look().ink, fontSize: 20, fontWeight: "700", flexShrink: 1 }}
           >
-            {sourceTitle(props.source)}
+            {searching()
+              ? hits()
+                ? `${total()} ${total() === 1 ? "bookmark" : "bookmarks"} found`
+                : "Searching…"
+              : sourceTitle(props.source)}
           </Text>
-          <Text style={{ color: look().inkFaint, fontSize: 13, fontVariant: ["tabular-nums"] }}>
-            {searching() ? (hits() ? `${total()} found` : "") : countFor(props.source) || ""}
+          <Text
+            class="truncate"
+            style={{ color: look().inkFaint, fontSize: 13, fontVariant: ["tabular-nums"] }}
+          >
+            {searching()
+              ? props.source.kind === "all"
+                ? ""
+                : `in ${sourceTitle(props.source)}`
+              : countFor(props.source) || ""}
           </Text>
         </View>
         <If when={!native}>
@@ -320,12 +372,29 @@ export function Library(props: {
             </If>
             <ViewButton source={props.source} />
           </View>
-          <View style={{ width: 280 }}>
+          <View style={{ width: 300 }}>
             <SearchField
               value={query}
-              onChange={(v) => query.set(v)}
-              placeholder="Search titles and text"
-              inputRef={(r) => setSearchFocus(() => r.focus())}
+              onChange={(v) => box.onChange(v)}
+              onSubmit={() => box.key("enter")}
+              placeholder="Search"
+              inputRef={(r) => {
+                focusField = () => r.focus();
+                setSearchFocus(() => r.focus());
+              }}
+              boxRef={(r) => box.setAnchor(r)}
+              onFocus={() => box.onFocus()}
+              onBlur={() => box.onBlur()}
+              trailing={
+                <IconButton
+                  name="sliders"
+                  label="Search settings / filters"
+                  testID="search-filters"
+                  size={15}
+                  active={box.open()}
+                  onPress={() => box.toggleNarrow()}
+                />
+              }
             />
           </View>
           <RoundGlassButton
@@ -369,7 +438,7 @@ export function Library(props: {
       <View class="flex-1">
         <SearchField
           value={query}
-          onChange={(v) => query.set(v)}
+          onChange={(v) => box.onChange(v)}
           placeholder="Search"
           height={SEARCH_H}
         />
@@ -588,6 +657,7 @@ export function Library(props: {
           }}
           {manual.overlay()}
           {toolbar()}
+          {box.panel()}
         </View>
       </If>
     </View>

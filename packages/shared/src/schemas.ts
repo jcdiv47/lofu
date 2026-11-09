@@ -166,7 +166,16 @@ export const BookmarkWithContent = Bookmark.extend({
 }).meta({ id: "BookmarkWithContent" });
 
 export const SearchQuery = z.object({
+  /**
+   * Words, and conditions as the apps' search box writes them: `#tag`,
+   * `type:article`, `notag:true`, `note:true`, `highlights:true`,
+   * `favorite:true`, `created:2026-11` (`<`/`>` before or after), `info:word`
+   * (title or description), `link:word` (address); `-` in front excludes.
+   * See packages/shared/src/query.ts.
+   */
   q: z.string().max(1000).default(""),
+  /** The searcher's time zone, in minutes east of UTC: where `created:` days start. */
+  tz: z.coerce.number().int().min(-840).max(840).default(0),
   collectionId: z.string().optional(),
   tags: csvParam.optional(),
   archived: boolParam.describe("true: only bookmarks in the Trash; false: none of them").optional(),

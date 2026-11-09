@@ -1007,3 +1007,75 @@ test("desktop: a collection's manual order is set by dragging a bookmark into pl
   await app.drag("id:headline-m3", { y: -90 });
   expect(patches.length).toBe(1);
 });
+
+test("desktop: the search box suggests conditions, their values, and recent searches", async () => {
+  const searches: string[] = [];
+  const app = await open("./App.tsx", {
+    ...desktop,
+    network: {
+      ...readable,
+      [`GET ${S}/v1/search*`]: (r: { url: string }) => {
+        const q = new URL(r.url).searchParams.get("q") ?? "";
+        searches.push(q);
+        const hit = q.includes("#rust") ? [{ bookmark: library.bookmarks[0], snippet: null }] : [];
+        return { body: { hits: hit, estimatedTotal: hit.length } };
+      },
+    },
+  });
+  await app.waitFor("text:Article a");
+
+  // Nothing typed: the conditions that narrow the list, with how many each leaves.
+  await app.type("id:search", "");
+  await app.waitFor("id:search-suggestions");
+  expect(app.texts()).toContain("Suggested");
+  expect(app.shows("label:Tag, 1")).toBe(true); // one tag: rust
+  expect(app.shows("label:Without tags, 2")).toBe(true);
+  expect(app.texts()).toContain(
+    "Put - (dash) in front of a condition you want to exclude from search",
+  );
+
+  // Tag puts in `#` and lists the tags; picking one searches.
+  await app.press("id:suggest-tag");
+  expect(app.value("id:search")).toBe("#");
+  await app.waitFor("id:suggest-tag:rust");
+  expect(app.texts()).toContain("Narrow your search");
+  await app.press("id:suggest-tag:rust");
+  expect(app.value("id:search")).toBe("#rust ");
+  await app.waitFor("text:1 bookmark found");
+  expect(searches).toEqual(["#rust"]);
+  expect(app.shows("id:search-suggestions")).toBe(false);
+  expect(app.storage()["search.recent.v1"]).toContain('"query":"#rust"');
+
+  // Typing doesn't search; Return does. A word names collections and tags.
+  await app.clear("id:search");
+  await app.waitFor("text:All bookmarks");
+  await app.type("id:search", "home");
+  await app.waitFor("id:suggest-submit");
+  expect(app.texts()).toContain('Search "home"');
+  expect(app.shows("id:suggest-collection:c1")).toBe(true);
+  expect(searches).toEqual(["#rust"]);
+  await app.press("id:suggest-collection:c1");
+  await app.waitFor("text:Homelab");
+  expect(app.value("id:search")).toBe("");
+
+  // The recent search comes back, and runs again.
+  await app.type("id:search", "");
+  await app.waitFor("id:suggest-recent:#rust");
+  await app.press("id:suggest-recent:#rust");
+  await app.waitFor("text:1 bookmark found");
+  expect(searches).toEqual(["#rust", "#rust"]);
+});
+
+test("desktop: the filter button narrows what the search found", async () => {
+  const app = await open("./App.tsx", { ...desktop, network: readable });
+  await app.waitFor("text:Article a");
+  await app.press("id:search-filters");
+  await app.waitFor("id:search-suggestions");
+  expect(app.texts()).toContain("Narrow your search");
+  // Only what would leave something: no notes here, and words aren't typed.
+  expect(app.shows("id:suggest-note")).toBe(false);
+  expect(app.shows("id:suggest-info")).toBe(false);
+  await app.press("id:suggest-type");
+  expect(app.value("id:search")).toBe("type:");
+  await app.waitFor("id:suggest-type:article");
+});

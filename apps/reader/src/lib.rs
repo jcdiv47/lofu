@@ -73,8 +73,10 @@ impl Toolbar {
     }
 
     /// The next click or search edit, as JSON: `{ type: "press", id, x, y }`
-    /// (the pointer, from the window's top left) or `{ type: "search", id,
-    /// value }`.
+    /// (the pointer, from the window's top left), `{ type: "search", id,
+    /// value }`, `{ type: "searchFocus", id, x, y, width, height }` (the
+    /// field's frame), `{ type: "searchBlur", id }` or `{ type: "searchKey",
+    /// id, key }` (`up`, `down`, `enter`, `escape`).
     pub async fn next() -> String {
         toolbar::next().await
     }
@@ -82,6 +84,13 @@ impl Toolbar {
     /// Puts the keyboard in the toolbar's search field (⌘F).
     pub fn search() {
         toolbar::search()
+    }
+
+    /// Whether the app's suggestions are open under the search field: while
+    /// they are, the field hands it the arrow keys and Escape
+    /// (`{ type: "searchKey" }` from `next`).
+    pub fn suggesting(on: bool) {
+        toolbar::suggesting(on)
     }
 }
 

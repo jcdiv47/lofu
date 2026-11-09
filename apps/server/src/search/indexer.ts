@@ -2,8 +2,11 @@ import type { Db } from "../db/index.ts";
 import type { BookmarkRow } from "../store/rows.ts";
 import type { Meili } from "./meili.ts";
 
-/** Bump when settings change; triggers a settings update (and a reindex by Meilisearch). */
-const SETTINGS_VERSION = "1";
+/**
+ * Bump when settings or the documents' fields change: the settings are sent
+ * again and every bookmark is pushed again (2: `hasNote`, `hasHighlights`).
+ */
+const SETTINGS_VERSION = "2";
 const SETTINGS = {
   searchableAttributes: [
     "title",
@@ -23,6 +26,8 @@ const SETTINGS = {
     "favorite",
     "archived",
     "createdAt",
+    "hasNote",
+    "hasHighlights",
   ],
   sortableAttributes: ["createdAt"],
   pagination: { maxTotalHits: 5000 },
@@ -47,6 +52,9 @@ export interface SearchDoc {
   archived: boolean;
   createdAt: number;
   highlights: string[];
+  /** For the search box's `note:true` and `highlights:true` (see packages/shared/src/query.ts). */
+  hasNote: boolean;
+  hasHighlights: boolean;
   content: string;
 }
 
@@ -95,6 +103,8 @@ export class Indexer {
         SETTINGS,
       );
       await this.meili.waitForTask(t.taskUid, 600_000);
+      // Documents made before may lack a field the new settings filter on.
+      if (applied) this.resetCursor();
       this.setMeta(key, SETTINGS_VERSION);
     }
   }
@@ -236,6 +246,8 @@ export class Indexer {
         archived: r.archived === 1,
         createdAt: r.created_at,
         highlights: highlights.get(r.id) ?? [],
+        hasNote: !!r.note?.trim(),
+        hasHighlights: highlights.has(r.id),
         content: texts.get(r.id) ?? "",
       }));
       const t = await this.meili.request<{ taskUid: number }>(

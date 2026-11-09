@@ -39,6 +39,8 @@ test("signs in, browses sources, searches and reads", async () => {
     await app.keyboard.press("mod+f");
     await app.wait(300);
     for (const c of "write-ahead log") await app.keyboard.press(c === " " ? "space" : c);
+    // A wide window searches once Return commits it, as Raindrop's.
+    await app.keyboard.press("enter");
   } else {
     await app.type("id:search", "write-ahead log");
   }
