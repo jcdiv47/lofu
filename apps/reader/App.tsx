@@ -78,6 +78,13 @@ const INSET = 8;
 const TOOLBAR = 52;
 
 /**
+ * The tallest a centred dialog may be. The Mac's toolbar is drawn in the title
+ * bar above nsh's root view, so a dialog that reached into it would slide
+ * under its buttons: it keeps clear of the toolbar, and as far from the foot.
+ */
+const dialogMaxHeight = () => windowSize().height - 2 * (TOOLBAR + 12);
+
+/**
  * The Mac's sidebar is the system's own (`src/sidebar.rs`), drawn by AppKit
  * in Liquid Glass under nsh's root view; the app draws its rows over it.
  */
@@ -253,7 +260,7 @@ function Desktop(props: { onReconnect: () => void }) {
         backdropClass="bg-black/25"
         class="m-auto w-[440px] overflow-hidden rounded-[26px]"
         // Taller than a short window: it scrolls inside it.
-        style={{ ...glass(), borderCurve: "continuous", maxHeight: windowSize().height - 32 }}
+        style={{ ...glass(), borderCurve: "continuous", maxHeight: dialogMaxHeight() }}
       >
         <GlassTint radius={26} />
         <Scroll class="shrink" keyboardShouldPersistTaps="handled">
