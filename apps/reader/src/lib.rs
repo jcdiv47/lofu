@@ -72,8 +72,9 @@ impl Toolbar {
         toolbar::set(items)
     }
 
-    /// The next click or search edit, as JSON: `{ type: "press", id, x, y }`
-    /// (the pointer, from the window's top left), `{ type: "search", id,
+    /// The next click or search edit, as JSON: `{ type: "press", id, x, y,
+    /// search }` (the pointer, from the window's top left, and the search
+    /// field's frame, or null), `{ type: "search", id,
     /// value }`, `{ type: "searchFocus", id, x, y, width, height }` (the
     /// field's frame), `{ type: "searchBlur", id }` or `{ type: "searchKey",
     /// id, key }` (`up`, `down`, `enter`, `escape`).

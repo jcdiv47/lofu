@@ -199,11 +199,22 @@ mod mac {
                 // SAFETY: an NSToolbarItem sent its action.
                 let identifier: Retained<NSString> = unsafe { msg_send![sender, itemIdentifier] };
                 let (x, y) = unsafe { pointer() };
+                // Where the search field is now: what a panel opened from a
+                // button beside it (the filters) goes under.
+                let search = search_item().map(|made| {
+                    // SAFETY: an NSSearchToolbarItem, on the main thread.
+                    let (x, y, width, height) = unsafe {
+                        let field: Retained<AnyObject> = msg_send![&*made, searchField];
+                        frame_in_window(&field)
+                    };
+                    serde_json::json!({ "x": x, "y": y, "width": width, "height": height })
+                });
                 emit(serde_json::json!({
                     "type": "press",
                     "id": id_of(&identifier.to_string()),
                     "x": x,
                     "y": y,
+                    "search": search,
                 }));
             }
 
