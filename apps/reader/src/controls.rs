@@ -64,6 +64,8 @@ struct ButtonProps {
     weight: Option<String>,
     label: Option<String>,
     disabled: bool,
+    /// macOS: `regular` or `large`; by default a toolbar's (extra large).
+    control_size: Option<String>,
 }
 
 impl ButtonProps {
@@ -78,6 +80,7 @@ impl ButtonProps {
             "weight" => self.weight = string(value),
             "label" => self.label = string(value),
             "disabled" => self.disabled = boolean(value, false),
+            "controlSize" => self.control_size = string(value),
             _ => return false,
         }
         true
@@ -588,8 +591,15 @@ pub mod macos {
                     // NSBezelStyleGlass on macOS 26, else the push button's.
                     let _: () = msg_send![b, setBezelStyle: if glass { 16usize } else { 1usize }];
                 }
-                // NSControlSizeExtraLarge on macOS 26 (a toolbar's), else large.
-                let _: () = msg_send![b, setControlSize: if glass { 4usize } else { 3usize }];
+                // NSControlSize: regular, large, or by default extra large on
+                // macOS 26 (a toolbar's), else large.
+                let size: usize = match p.control_size.as_deref() {
+                    Some("regular") => 0,
+                    Some("large") => 3,
+                    _ if glass => 4,
+                    _ => 3,
+                };
+                let _: () = msg_send![b, setControlSize: size];
                 let title = NSString::from_str(p.title.as_deref().unwrap_or(""));
                 let _: () = msg_send![b, setTitle: &*title];
                 if let Some(symbol) = &p.symbol {

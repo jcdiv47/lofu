@@ -58,10 +58,21 @@ const NativeGlassButton = nativeComponent<
     weight?: "regular" | "medium" | "semibold" | "bold";
     label?: string;
     disabled?: boolean;
+    controlSize?: "regular" | "large";
   },
   { tap: { x: number; y: number } }
 >("lofu.glassButton", {
-  props: ["symbol", "title", "variant", "tint", "size", "weight", "label", "disabled"],
+  props: [
+    "symbol",
+    "title",
+    "variant",
+    "tint",
+    "size",
+    "weight",
+    "label",
+    "disabled",
+    "controlSize",
+  ],
   events: ["tap"],
 });
 
@@ -80,6 +91,8 @@ export function SystemGlassButton(props: {
   size?: number;
   weight?: "regular" | "medium" | "semibold" | "bold";
   disabled?: boolean;
+  /** macOS: smaller than a toolbar's, for buttons inside a page or dialog. */
+  controlSize?: "regular" | "large";
   testID?: string;
   style?: ViewStyle;
 }) {
@@ -96,6 +109,7 @@ export function SystemGlassButton(props: {
       weight={props.weight}
       label={props.label}
       disabled={props.disabled ?? false}
+      controlSize={props.controlSize}
       style={overlaid ? undefined : props.style}
       // `grow`, not `flex-1`: with no size from `style` (a labelled button),
       // a zero basis collapsed the wrapper, and with it the clear view that

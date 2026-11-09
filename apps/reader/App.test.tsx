@@ -590,10 +590,12 @@ test("desktop: a tap opens bookmarks where Settings says", async () => {
   const app = await open("./App.tsx", { ...desktop, network: readable });
   await app.waitFor("text:Article a");
   await app.press("id:settings");
-  await app.waitFor("id:open-in-browser");
-  await app.press("id:open-in-browser");
+  // A pop-up button in its row, with the system's menu.
+  await app.waitFor("id:open-in");
+  await app.press("id:open-in");
+  await app.chooseMenuItem("Original page, in your browser");
   expect(app.storage()["prefs.v1"]).toContain('"openIn":"browser"');
-  await app.press("text:Cancel");
+  await app.press("id:settings-done");
   await app.press("text:Article a");
   expect(app.openedUrls()).toEqual(["https://example.com/a"]);
   expect(app.shows("id:article")).toBe(false);

@@ -32,6 +32,12 @@ const light = {
   glassFallback: "#f3ece0d9",
   glassEdge: "#ffffff80",
   glassShadow: "0px 1px 1px rgb(60 45 25 / 0.06), 0px 6px 22px rgb(60 45 25 / 0.12)",
+  /** A dialog's tint: enough of the paper over the glass that its text reads over any page. */
+  sheetTint: "#f3ece0b8",
+  /** Settings' groups of rows on the glass, their rules, and the fields and pop-ups in them. */
+  groupFill: "#ffffffa6",
+  groupEdge: "#3c2d1914",
+  control: "#ffffffb8",
   /** The scroll edge under floating bars: the page fading out under the glass. */
   edgeFade:
     "linear-gradient(to bottom, rgb(243 236 224 / 1) 0%, rgb(243 236 224 / 0.97) 62%, rgb(243 236 224 / 0) 100%)",
@@ -60,6 +66,10 @@ const dark: typeof light = {
   glassFallback: "#2f2b25e6",
   glassEdge: "#ffffff1f",
   glassShadow: "0px 1px 1px rgb(0 0 0 / 0.25), 0px 8px 24px rgb(0 0 0 / 0.35)",
+  sheetTint: "#1f1c18c4",
+  groupFill: "#ffffff12",
+  groupEdge: "#ffffff14",
+  control: "#ffffff17",
   edgeFade:
     "linear-gradient(to bottom, rgb(27 25 21 / 1) 0%, rgb(27 25 21 / 0.97) 62%, rgb(27 25 21 / 0) 100%)",
 };

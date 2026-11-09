@@ -1,11 +1,26 @@
-import { effect, type InputRef, keyboardFrame, Scroll, signal, Text, untracked, View } from "nsh";
+import {
+  effect,
+  type InputRef,
+  type JSX,
+  keyboardFrame,
+  platform,
+  Scroll,
+  signal,
+  Text,
+  untracked,
+  View,
+  type ViewRef,
+} from "nsh";
 import { AlertDialog, Input } from "nsh/base";
+import { isAvailable as desktopApp, Menu } from "nsh/desktop";
+import { nativeControls, SystemGlassButton } from "../components/native";
 import { Icon } from "../components/ui";
 import { hasBrowser, openWays } from "../lib/actions";
 import { api, loadSettings, normalizeServer, saveSettings } from "../lib/api";
 import {
   clearArticles,
   downloading,
+  type KeepMode,
   keepMode,
   keepModes,
   keptBytes,
@@ -147,16 +162,93 @@ export function Settings(props: { onDone: () => void; onCancel?: () => void; fir
     </View>
   );
 
+  /** The saved server and token: Connect has something to do once they're edited. */
+  const saved = signal({ server: "", token: "" });
+  void loadSettings().then((s) => saved.set(s));
+  const edited = () =>
+    normalizeServer(server()) !== saved().server || token().trim() !== saved().token;
+
+  /** A field in a row of the Server group. */
+  const rowField = (
+    id: "server" | "token",
+    value: () => string,
+    set: (v: string) => void,
+    placeholder: string,
+  ) => (
+    <Input
+      testID={id}
+      value={value()}
+      placeholder={placeholder}
+      autoCapitalize="none"
+      autoCorrect={false}
+      keyboardType={id === "server" ? "url" : "default"}
+      returnKeyType={id === "server" ? "next" : "go"}
+      ref={(r) => {
+        if (id === "token") tokenInput = r;
+      }}
+      masked={id === "token"}
+      onChange={({ value: v }) => {
+        set(v);
+        error.set("");
+      }}
+      onSubmit={() => (id === "server" ? tokenInput?.focus() : void connect())}
+      class="flex-1 rounded-[7px] px-2.5"
+      style={{
+        height: 28,
+        color: look().ink,
+        fontSize: 13.5,
+        fontFamily: id === "token" ? fonts.mono : undefined,
+        backgroundColor: look().control,
+        placeholderColor: look().inkFaint,
+      }}
+    />
+  );
+
   return (
     <If
       when={props.first}
       else={
-        <View class="gap-5 p-6">
-          <Text style={{ color: look().ink, fontSize: 19, fontWeight: "700" }}>Your server</Text>
-          {form}
+        <View class="gap-5 p-5">
+          <If when={props.onCancel}>
+            <Text style={{ color: look().ink, fontSize: 17, fontWeight: "700" }}>Settings</Text>
+          </If>
+          <Group
+            title="Server"
+            footer={
+              <View class="flex-row items-center gap-3">
+                <Text
+                  testID={error() ? "settings-error" : undefined}
+                  class="flex-1"
+                  style={{
+                    color: error() ? look().stamp : look().inkSoft,
+                    fontSize: 12,
+                    lineHeight: 16,
+                  }}
+                >
+                  {error() || "The lofu server on your network or tailnet."}
+                </Text>
+                <Button
+                  label={busy() ? "Connecting…" : "Connect"}
+                  testID="connect"
+                  disabled={busy() || !edited()}
+                  onPress={() => void connect()}
+                />
+              </View>
+            }
+          >
+            <Row label="Address" first>
+              {rowField("server", server, (v) => server.set(v), "https://homebox.tail1234.ts.net")}
+            </Row>
+            <Row label="API token">{rowField("token", token, (v) => token.set(v), "lofu_…")}</Row>
+          </Group>
           <OpeningBookmarks />
           <If when={onDisk}>
             <OfflineReading />
+          </If>
+          <If when={props.onCancel}>
+            <View class="flex-row justify-end">
+              <Button label="Done" testID="settings-done" onPress={() => props.onCancel?.()} />
+            </View>
           </If>
         </View>
       }
@@ -193,23 +285,173 @@ export function Settings(props: { onDone: () => void; onCancel?: () => void; fir
   );
 }
 
-/** One of a few choices, checked when it's the one. */
-function Choice(props: { id: string; label: string; checked: boolean; onPress: () => void }) {
+/**
+ * The Mac's system menus: a choice is a pop-up button in its row, as in
+ * System Settings. Elsewhere (phones, the web) the choices are rows of
+ * their own, the current one checked.
+ */
+const popUps = desktopApp;
+/** The system's glass buttons, where the Mac has them (`components/native.tsx`). */
+const systemButtons = nativeControls && platform.os === "macos";
+/** The rows' text: the Mac's is smaller, as its controls are. */
+const body = popUps ? 13.5 : 15;
+
+/** A titled group of rows on a rounded panel, with a note or buttons under it. */
+function Group(props: { title: string; footer?: JSX.Element; children: JSX.Element }) {
+  return (
+    <View class="gap-1.5">
+      <Text style={{ color: look().inkSoft, fontSize: 12.5, fontWeight: "600", paddingLeft: 4 }}>
+        {props.title}
+      </Text>
+      <View
+        class="overflow-hidden rounded-[12px]"
+        style={{
+          backgroundColor: look().groupFill,
+          borderWidth: 1,
+          borderColor: look().groupEdge,
+          borderCurve: "continuous",
+        }}
+      >
+        {props.children}
+      </View>
+      <If when={props.footer}>
+        <View style={{ paddingHorizontal: 4, paddingTop: 2 }}>{props.footer}</View>
+      </If>
+    </View>
+  );
+}
+
+/** A note under a group. */
+function Note(props: { children: string }) {
+  return (
+    <Text style={{ color: look().inkSoft, fontSize: 12, lineHeight: 16 }}>{props.children}</Text>
+  );
+}
+
+/** A row of a group: its name on the left, its control on the right. */
+function Row(props: { label: string; first?: boolean; children: JSX.Element }) {
   return (
     <View
-      role="radio"
-      testID={props.id}
-      accessibilityLabel={props.label}
-      accessibilityState={{ checked: props.checked }}
-      onPress={props.onPress}
-      class="flex-row items-center gap-2.5 rounded-lg px-2 py-1.5 active:opacity-60"
+      class="flex-row items-center gap-3 px-3.5"
+      style={{ minHeight: 44, borderTopWidth: props.first ? 0 : 1, borderColor: look().groupEdge }}
     >
-      <View style={{ width: 14 }}>
-        <If when={props.checked}>
-          <Icon name="check" size={14} color={look().ink} />
-        </If>
-      </View>
-      <Text style={{ color: look().ink, fontSize: 14.5 }}>{props.label}</Text>
+      <Text style={{ color: look().ink, fontSize: body, minWidth: 72 }}>{props.label}</Text>
+      <View class="flex-1 flex-row items-center justify-end">{props.children}</View>
+    </View>
+  );
+}
+
+/** A button: the system's glass one on the Mac, the app's own capsule elsewhere. */
+function Button(props: { label: string; testID: string; onPress: () => void; disabled?: boolean }) {
+  if (systemButtons)
+    return (
+      <SystemGlassButton
+        title={props.label}
+        label={props.label}
+        controlSize="large"
+        testID={props.testID}
+        disabled={props.disabled}
+        onPress={props.onPress}
+      />
+    );
+  return (
+    <View
+      role="button"
+      testID={props.testID}
+      accessibilityLabel={props.label}
+      accessibilityState={{ disabled: !!props.disabled }}
+      onPress={() => {
+        if (!props.disabled) props.onPress();
+      }}
+      class="rounded-full px-4 py-2 active:opacity-60"
+      style={{
+        backgroundColor: look().control,
+        borderWidth: 1,
+        borderColor: look().groupEdge,
+        opacity: props.disabled ? 0.5 : 1,
+      }}
+    >
+      <Text style={{ color: look().ink, fontSize: 13.5, fontWeight: "500" }}>{props.label}</Text>
+    </View>
+  );
+}
+
+type Option<T extends string> = { value: T; label: string };
+
+/**
+ * One of a few choices. On the Mac, a pop-up button whose system menu has
+ * them all, the current one checked; elsewhere, a row each (`Choices`).
+ */
+function PopUp<T extends string>(props: {
+  testID: string;
+  label: string;
+  options: () => Option<T>[];
+  value: () => T;
+  onChange: (v: T) => void;
+}) {
+  let ref: ViewRef | undefined;
+  const current = () => props.options().find((o) => o.value === props.value());
+  return (
+    <View
+      ref={(r) => {
+        ref = r;
+      }}
+      role="button"
+      testID={props.testID}
+      accessibilityLabel={`${props.label}: ${current()?.label ?? ""}`}
+      onPress={async () => {
+        const m = await ref?.measure();
+        await Menu.popup(
+          props.options().map((o) => ({
+            label: o.label,
+            checked: o.value === props.value(),
+            onSelect: () => props.onChange(o.value),
+          })),
+          m ? { x: m.pagePosition.x, y: m.pagePosition.y + m.bounds.size.height + 4 } : undefined,
+        );
+      }}
+      class="flex-row items-center gap-1.5 rounded-[7px] py-1 pl-2.5 pr-1.5 active:opacity-60"
+      style={{ backgroundColor: look().control }}
+    >
+      <Text style={{ color: look().ink, fontSize: 13.5 }}>{current()?.label ?? ""}</Text>
+      <Icon name="upDown" size={11} color={look().inkSoft} />
+    </View>
+  );
+}
+
+/** The choices as rows of their group, the current one checked (phones, the web). */
+function Choices<T extends string>(props: {
+  id: (v: T) => string;
+  options: () => Option<T>[];
+  value: () => T;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <View role="radiogroup">
+      <Each of={props.options()}>
+        {(o, i) => (
+          <View
+            role="radio"
+            testID={props.id(o().value)}
+            accessibilityLabel={o().label}
+            accessibilityState={{ checked: props.value() === o().value }}
+            onPress={() => props.onChange(o().value)}
+            class="flex-row items-center gap-3 px-3.5 active:opacity-60"
+            style={{
+              minHeight: 44,
+              borderTopWidth: i() === 0 ? 0 : 1,
+              borderColor: look().groupEdge,
+            }}
+          >
+            <Text class="flex-1" style={{ color: look().ink, fontSize: body }}>
+              {o().label}
+            </Text>
+            <If when={props.value() === o().value}>
+              <Icon name="check" size={15} color={look().stamp} />
+            </If>
+          </View>
+        )}
+      </Each>
     </View>
   );
 }
@@ -217,33 +459,29 @@ function Choice(props: { id: string; label: string; checked: boolean; onPress: (
 /** What a tap on a bookmark opens (`openBookmark`); its menu offers the others. */
 function OpeningBookmarks() {
   const label: Record<OpenIn, string> = {
-    reader: "Reader: the saved text, with highlights",
+    reader: "Reader, with highlights",
     app: hasBrowser ? "Original page, in lofu" : "Original page, in a new tab",
     browser: "Original page, in your browser",
   };
+  const options = () => openWays().map((w) => ({ value: w.id, label: label[w.id] }));
+  const value = () => prefs().openIn;
+  const set = (v: OpenIn) => setPrefs({ openIn: v });
   return (
-    <View class="gap-3 pt-2" style={{ borderTopWidth: 1, borderColor: look().ruleSoft }}>
-      <View class="gap-1 pt-3">
-        <Text style={{ color: look().ink, fontSize: 16, fontWeight: "700" }}>
-          Open bookmarks in
-        </Text>
-        <Text style={{ color: look().inkSoft, fontSize: 13, lineHeight: 18 }}>
-          What a tap on a bookmark opens. Its menu has the others.
-        </Text>
-      </View>
-      <View role="radiogroup" class="gap-0.5">
-        <Each of={openWays()}>
-          {(w) => (
-            <Choice
-              id={`open-in-${w().id}`}
-              label={label[w().id]}
-              checked={prefs().openIn === w().id}
-              onPress={() => setPrefs({ openIn: w().id })}
-            />
-          )}
-        </Each>
-      </View>
-    </View>
+    <Group
+      title="Opening bookmarks"
+      footer={
+        <Note>{`What ${popUps ? "a click" : "a tap"} on a bookmark opens. Its menu has the others.`}</Note>
+      }
+    >
+      <If
+        when={popUps}
+        else={<Choices id={(v) => `open-in-${v}`} options={options} value={value} onChange={set} />}
+      >
+        <Row label="Open in" first>
+          <PopUp testID="open-in" label="Open in" options={options} value={value} onChange={set} />
+        </Row>
+      </If>
+    </Group>
   );
 }
 
@@ -268,8 +506,8 @@ function OfflineReading() {
     const d = downloading();
     if (d) return `Downloading ${d.done} of ${d.total}…`;
     const n = keptCount();
-    if (!n) return "No articles on this device yet.";
-    return `${n} article${n === 1 ? "" : "s"} on this device · ${megabytes(bytes())}`;
+    if (!n) return "No articles yet";
+    return `${n} article${n === 1 ? "" : "s"} · ${megabytes(bytes())}`;
   };
 
   const remove = async () => {
@@ -288,61 +526,55 @@ function OfflineReading() {
     if (action === "remove") await clearArticles();
   };
 
-  const button = (label: string, id: string, onPress: () => void, disabled: () => boolean) => (
-    <View
-      role="button"
-      testID={id}
-      accessibilityState={{ disabled: disabled() }}
-      onPress={() => {
-        if (!disabled()) onPress();
-      }}
-      class="rounded-full px-4 py-2 active:opacity-60"
-      style={{ borderWidth: 1, borderColor: look().rule, opacity: disabled() ? 0.5 : 1 }}
-    >
-      <Text style={{ color: look().ink, fontSize: 13.5, fontWeight: "500" }}>{label}</Text>
-    </View>
-  );
+  const options = () => keepModes.map((m) => ({ value: m.mode, label: m.label }));
+  const set = (mode: KeepMode) => {
+    setKeepMode(mode);
+    void prefetchArticles(bookmarks());
+  };
+  const here = platform.os === "macos" ? "this Mac" : "this device";
 
   return (
-    <View class="gap-3 pt-2" style={{ borderTopWidth: 1, borderColor: look().ruleSoft }}>
-      <View class="gap-1 pt-3">
-        <Text style={{ color: look().ink, fontSize: 16, fontWeight: "700" }}>Reading offline</Text>
-        <Text style={{ color: look().inkSoft, fontSize: 13, lineHeight: 18 }}>
-          Every article you open is kept here, with its pictures. These are downloaded ahead too:
-        </Text>
-      </View>
-      <View role="radiogroup" class="gap-0.5">
-        <Each of={keepModes}>
-          {(m) => (
-            <Choice
-              id={`keep-${m().mode}`}
-              label={m().label}
-              checked={keepMode() === m().mode}
-              onPress={() => {
-                setKeepMode(m().mode);
-                void prefetchArticles(bookmarks());
-              }}
+    <Group
+      title="Reading offline"
+      footer={
+        <View class="gap-3">
+          <Note>Every article you open is kept here, with its pictures.</Note>
+          <View class="flex-row flex-wrap justify-end gap-2">
+            <Button
+              label={`Remove from ${here === "this Mac" ? "This Mac" : "This Device"}…`}
+              testID="offline-remove"
+              disabled={!!downloading() || keptCount() === 0}
+              onPress={() => void remove()}
             />
-          )}
-        </Each>
-      </View>
-      <Text testID="offline-status" style={{ color: look().inkFaint, fontSize: 12.5 }}>
-        {status()}
-      </Text>
-      <View class="flex-row flex-wrap gap-2">
-        {button(
-          "Download now",
-          "offline-download",
-          () => void prefetchArticles(bookmarks(), true),
-          () => !!downloading() || offline() || keepMode() === "opened",
-        )}
-        {button(
-          "Remove from this device",
-          "offline-remove",
-          () => void remove(),
-          () => !!downloading() || keptCount() === 0,
-        )}
-      </View>
-    </View>
+            <Button
+              label="Download Now"
+              testID="offline-download"
+              disabled={!!downloading() || offline() || keepMode() === "opened"}
+              onPress={() => void prefetchArticles(bookmarks(), true)}
+            />
+          </View>
+        </View>
+      }
+    >
+      <If
+        when={popUps}
+        else={<Choices id={(v) => `keep-${v}`} options={options} value={keepMode} onChange={set} />}
+      >
+        <Row label="Download ahead" first>
+          <PopUp
+            testID="keep"
+            label="Download ahead"
+            options={options}
+            value={keepMode}
+            onChange={set}
+          />
+        </Row>
+      </If>
+      <Row label={`On ${here}`}>
+        <Text testID="offline-status" style={{ color: look().inkSoft, fontSize: body }}>
+          {status()}
+        </Text>
+      </Row>
+    </Group>
   );
 }
