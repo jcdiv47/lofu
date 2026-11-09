@@ -1,3 +1,4 @@
+import { Keyboard } from "lofu/native";
 import {
   cleanup,
   effect,
@@ -13,6 +14,7 @@ import {
   AlertDialog,
   chain,
   createRichEditor,
+  link,
   RichEditor,
   RichEditorPlugin,
   type RichEditorRef,
@@ -210,6 +212,9 @@ interface Placed {
   to: number;
 }
 
+/** The article editor's label, which `Keyboard.keepAway` finds it by. */
+const ARTICLE = "Article";
+
 /**
  * The article in a read-only RichEditor (it still selects and copies).
  * Highlights are inline decorations placed by their text quote; selecting
@@ -335,7 +340,10 @@ export function Reader(props: {
       format: "markdown",
       editable: false,
       extensions: [StarterKit, TableKit.configure({ table: { resizable: false } })],
-      plugins: [plugin],
+      // StarterKit's link is the mark alone: opening a pressed link (the
+      // editor being read-only, any press) is this plugin's. It opens in
+      // the system's browser.
+      plugins: [plugin, link({ openOnClick: true, autolink: false, linkOnPaste: false })],
     });
     hasFootnotes = content.includes("\uE000");
     last = a;
@@ -722,10 +730,14 @@ export function Reader(props: {
             editor={ed()}
             ref={(r) => {
               view = r;
+              // Once its views are up: a press focuses its text view, which
+              // would raise iOS's keyboard (Keyboard in src/lib.rs).
+              setTimeout(() => Keyboard.keepAway(ARTICLE), 0);
             }}
             editable={false}
             testID="article"
-            accessibilityLabel="Article"
+            accessibilityLabel={ARTICLE}
+            onFocus={() => Keyboard.keepAway(ARTICLE)}
             class="flex-1"
             onSelectionChange={({ selection: s }) => {
               if (!restoring) selection.set(s);
@@ -753,6 +765,7 @@ export function Reader(props: {
               marks: {
                 code: "font-mono text-[15px]",
                 bold: "font-bold",
+                link: `text-[${look().stamp}] underline`,
                 // Footnote numbers: the editor can't raise text, so small and in the accent.
                 superscript: `text-[12px] font-semibold text-[${look().stamp}]`,
               },

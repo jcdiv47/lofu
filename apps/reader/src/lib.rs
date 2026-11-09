@@ -42,6 +42,7 @@ fn native(registry: &mut Registry) {
     registry.module::<Toolbar>();
     registry.module::<Controls>();
     registry.module::<TextPrompt>();
+    registry.module::<Keyboard>();
     registry.module::<ShareExtension>();
     registry.module::<files::Files>();
     registry.module::<files::Secrets>();
@@ -185,6 +186,84 @@ impl Controls {
         return edges::available();
         #[cfg(not(target_os = "ios"))]
         false
+    }
+}
+
+/// The software keyboard, kept away from a read-only `RichEditor` (iOS).
+/// The editor takes presses through a hidden text view of nsh's at the
+/// caret, which it focuses on every press, editable or not; UIKit then
+/// raises the keyboard for it. An empty `inputView` keeps the keyboard down
+/// while the text view stays first responder, so selecting, the edit menu
+/// and ⌘C still work.
+#[module]
+pub struct Keyboard;
+
+#[module]
+impl Keyboard {
+    /// Gives every text view in the view labelled `label` (an editor's
+    /// `accessibilityLabel`) an empty input view. Again for the same views
+    /// does nothing; call it after the editor mounts and when it takes the
+    /// focus, should nsh have made its text view again.
+    pub fn keep_away(label: String) {
+        #[cfg(target_os = "ios")]
+        quiet::keep_away(label);
+        #[cfg(not(target_os = "ios"))]
+        let _ = label;
+    }
+}
+
+#[cfg(target_os = "ios")]
+mod quiet {
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    use objc2_foundation::{NSArray, NSString};
+
+    pub fn keep_away(label: String) {
+        dispatch2::DispatchQueue::main().exec_async(move || {
+            // SAFETY: on the main thread, with UIKit's own classes.
+            unsafe {
+                if let Some(window) = super::window::key() {
+                    walk(&window, &label, false);
+                }
+            }
+        });
+    }
+
+    /// Text views under `view`, those inside a view labelled `label` given
+    /// an empty input view.
+    unsafe fn walk(view: &AnyObject, label: &str, inside: bool) {
+        unsafe {
+            let own: Option<Retained<NSString>> = msg_send![view, accessibilityLabel];
+            let inside = inside || own.is_some_and(|l| l.to_string() == label);
+            if inside && msg_send![view, isKindOfClass: class!(UITextView)] {
+                quiet(view);
+            }
+            let subviews: Retained<NSArray<AnyObject>> = msg_send![view, subviews];
+            for v in subviews.iter() {
+                walk(&v, label, inside);
+            }
+        }
+    }
+
+    unsafe fn quiet(text: &AnyObject) {
+        unsafe {
+            let current: Option<Retained<AnyObject>> = msg_send![text, inputView];
+            if current.is_some() {
+                return;
+            }
+            let empty: Retained<AnyObject> = msg_send![class!(UIView), new];
+            let _: () = msg_send![text, setInputView: &*empty];
+            // iPad: no shortcuts bar over the missing keyboard either.
+            let item: Retained<AnyObject> = msg_send![text, inputAssistantItem];
+            let none = NSArray::<AnyObject>::new();
+            let _: () = msg_send![&*item, setLeadingBarButtonGroups: &*none];
+            let _: () = msg_send![&*item, setTrailingBarButtonGroups: &*none];
+            let first: bool = msg_send![text, isFirstResponder];
+            if first {
+                let _: () = msg_send![text, reloadInputViews];
+            }
+        }
     }
 }
 
