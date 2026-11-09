@@ -257,12 +257,12 @@ function Desktop(props: { onReconnect: () => void }) {
         open={settingsOpen()}
         animation="fade"
         onOpenChange={(e) => settingsOpen.set(e.open)}
-        backdropClass="bg-black/25"
-        class="m-auto w-[440px] overflow-hidden rounded-[26px]"
+        backdropClass="bg-black/40"
+        class="m-auto w-[500px] overflow-hidden rounded-[26px]"
         // Taller than a short window: it scrolls inside it.
         style={{ ...glass(), borderCurve: "continuous", maxHeight: dialogMaxHeight() }}
       >
-        <GlassTint radius={26} />
+        <GlassTint radius={26} color={look().sheetTint} />
         <Scroll class="shrink" keyboardShouldPersistTaps="handled">
           <Settings
             onCancel={() => settingsOpen.set(false)}

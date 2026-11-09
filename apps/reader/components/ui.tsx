@@ -55,6 +55,7 @@ import sortZaIcon from "../assets/icons/sort-za.svg";
 import starIcon from "../assets/icons/star.svg";
 import starFillIcon from "../assets/icons/star-fill.svg";
 import trashIcon from "../assets/icons/trash.svg";
+import upDownIcon from "../assets/icons/updown.svg";
 import videoIcon from "../assets/icons/video.svg";
 import windowIcon from "../assets/icons/window.svg";
 import { glass, hasGlass, look } from "../lib/look";
@@ -71,6 +72,8 @@ export const icons = {
   audio: audioIcon,
   check: checkIcon,
   chevronDown: chevronDownIcon,
+  /** A pop-up button's arrows. */
+  upDown: upDownIcon,
   collapse: collapseIcon,
   document: documentIcon,
   expand: expandIcon,
@@ -164,7 +167,7 @@ export function IconButton(props: {
 }
 
 /** The paper's tint over the system's glass, as its first child (see `glass`). */
-export function GlassTint(props: { radius?: number }) {
+export function GlassTint(props: { radius?: number; color?: string }) {
   return (
     <If when={hasGlass}>
       <View
@@ -172,7 +175,7 @@ export function GlassTint(props: { radius?: number }) {
         style={{
           borderRadius: props.radius ?? 999,
           borderCurve: "continuous",
-          backgroundColor: look().glassTint,
+          backgroundColor: props.color ?? look().glassTint,
           pointerEvents: "none",
         }}
       />
