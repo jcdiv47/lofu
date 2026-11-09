@@ -1,3 +1,4 @@
+import { Sidebar } from "lofu/native";
 import {
   cleanup,
   effect,
@@ -32,7 +33,7 @@ import {
 } from "./lib/actions";
 import type { Bookmark } from "./lib/api";
 import { loadSettings, shareLogin } from "./lib/api";
-import { glass, look } from "./lib/look";
+import { glass, hasGlass, look } from "./lib/look";
 import {
   bookmark as current,
   reset,
@@ -76,6 +77,12 @@ const SIDEBAR = 240;
 const INSET = 8;
 const TOOLBAR = 52;
 
+/**
+ * The Mac's sidebar is the system's own (`src/sidebar.rs`), drawn by AppKit
+ * in Liquid Glass under nsh's root view; the app draws its rows over it.
+ */
+const nativeSidebar = hasGlass && platform.os === "macos" && Sidebar.available();
+
 if (isAvailable) Window.setTitleBar({ style: "hidden", height: TOOLBAR });
 
 /** Sidebar beside the content: desktops and tablets with room for it. */
@@ -117,7 +124,13 @@ function App() {
   };
 
   return (
-    <View class="flex-1" style={{ backgroundColor: look().paper }}>
+    <View
+      class="flex-1"
+      // The system's sidebar lies under the root: the desktop's layout paints its own paper.
+      style={{
+        backgroundColor: nativeSidebar && ready() === "app" && wide() ? undefined : look().paper,
+      }}
+    >
       {() => {
         const r = ready();
         if (!r) return null;
@@ -153,6 +166,10 @@ function Desktop(props: { onReconnect: () => void }) {
     const top = nav.routes().at(-1);
     return top?.name === "reader" ? (current(top.bookmark.id) ?? top.bookmark) : null;
   };
+  if (nativeSidebar) {
+    Sidebar.show(SIDEBAR + INSET);
+    cleanup(() => Sidebar.hide());
+  }
   useMenuBar({
     select,
     reading,
@@ -165,20 +182,29 @@ function Desktop(props: { onReconnect: () => void }) {
   return (
     <View class="flex-1 flex-row">
       <View
-        class="overflow-hidden rounded-[18px]"
-        style={{
-          ...glass(),
-          width: SIDEBAR,
-          margin: INSET,
-          marginRight: 0,
-          borderCurve: "continuous",
-        }}
+        // The system's sidebar is flush with the window's edges, as Finder's;
+        // the app's own floats inset on its glass.
+        class={nativeSidebar ? undefined : "overflow-hidden rounded-[18px]"}
+        style={
+          nativeSidebar
+            ? { width: SIDEBAR + INSET, paddingLeft: INSET / 2, paddingRight: INSET / 2 }
+            : {
+                ...glass(),
+                width: SIDEBAR,
+                margin: INSET,
+                marginRight: 0,
+                borderCurve: "continuous",
+              }
+        }
       >
-        <GlassTint radius={18} />
+        {nativeSidebar ? null : <GlassTint radius={18} />}
         <View
           desktop={{ windowDrag: true }}
           class="flex-row items-center justify-end px-4"
-          style={{ height: TOOLBAR - INSET, paddingLeft: Math.max(0, titleBar().left - INSET) }}
+          style={{
+            height: nativeSidebar ? TOOLBAR : TOOLBAR - INSET,
+            paddingLeft: Math.max(0, titleBar().left - INSET),
+          }}
         >
           <Wordmark size={21} />
         </View>
@@ -188,7 +214,7 @@ function Desktop(props: { onReconnect: () => void }) {
           onSettings={() => settingsOpen.set(true)}
         />
       </View>
-      <View class="flex-1">
+      <View class="flex-1" style={{ backgroundColor: look().paper }}>
         <NavStack state={nav} class="flex-1">
           {(route) => {
             if (route.name === "browser") {

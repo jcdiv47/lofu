@@ -40,6 +40,7 @@ fn native(registry: &mut Registry) {
     registry.module::<Share>();
     registry.module::<PopupMenu>();
     registry.module::<Toolbar>();
+    registry.module::<Sidebar>();
     registry.module::<Controls>();
     registry.module::<TextPrompt>();
     registry.module::<Keyboard>();
@@ -49,7 +50,33 @@ fn native(registry: &mut Registry) {
 }
 
 mod files;
+mod sidebar;
 mod toolbar;
+
+/// The window's sidebar on macOS (`src/sidebar.rs`): the system's own,
+/// which AppKit draws in Liquid Glass on macOS 26, under nsh's root view.
+#[module]
+pub struct Sidebar;
+
+#[module]
+impl Sidebar {
+    /// Whether the window can have the system's sidebar here (macOS).
+    pub fn available() -> bool {
+        cfg!(target_os = "macos")
+    }
+
+    /// Puts the system's sidebar, `width` points wide, under the window's
+    /// content: the app draws the sidebar's rows over it, on a transparent
+    /// background.
+    pub fn show(width: f64) {
+        sidebar::show(width)
+    }
+
+    /// Takes the system's sidebar away.
+    pub fn hide() {
+        sidebar::hide()
+    }
+}
 
 /// The window's toolbar on macOS (`src/toolbar.rs`): a real `NSToolbar`,
 /// which AppKit draws in Liquid Glass on macOS 26.
