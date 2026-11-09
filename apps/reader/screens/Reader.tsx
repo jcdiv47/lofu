@@ -1,8 +1,10 @@
 import { Keyboard } from "lofu/native";
 import {
   cleanup,
+  createAnimatedValue,
   effect,
   platform,
+  reduceMotion,
   safeArea,
   signal,
   Text,
@@ -361,6 +363,7 @@ export function Reader(props: {
     index = indexDoc(ed.getJSON(), isFootnoteNumber);
     if (noted.note) index = withoutRange(index, noted.note.from, noted.note.to);
     shown = markdown;
+    hideForRestore();
     editor.set(ed);
     status.set("");
     place(pendingHighlights(props.bookmark.id, a.highlights));
@@ -454,29 +457,82 @@ export function Reader(props: {
     void saveProgress();
   });
 
-  /** Back where the reader left off: to the end, then up to the place, so it
-   * lands at the top of the view (scrolling into view moves the least). */
+  /** Back where the reader left off, without showing the way there: the
+   * article stays hidden until it is at the place, then fades in (at once
+   * when the system asks for less motion). The place lands just under the
+   * bars. `scrollIntoView` moves the least, so the caret goes where the
+   * view's bottom edge should be, and the view follows it there. */
   let restored = false;
-  const restoreProgress = () => {
+  let restoreFrame: number | null = null;
+  let revealTimer: ReturnType<typeof setTimeout> | null = null;
+  const fade = createAnimatedValue(1);
+  cleanup(() => {
+    if (restoreFrame != null) cancelAnimationFrame(restoreFrame);
+    if (revealTimer != null) clearTimeout(revealTimer);
+  });
+  const willRestore = () => {
     const p = b().readProgress;
-    if (restored || !(p > 0.02 && p < 0.98) || !index.text.length) return;
+    return !restored && p > 0.02 && p < 0.98 && index.text.length > 0;
+  };
+  /** Hides the article for `restoreProgress` (before it is first shown). */
+  const hideForRestore = () => {
+    if (willRestore()) fade.set(0);
+  };
+  let revealed = false;
+  const reveal = () => {
+    if (revealed) return;
+    revealed = true;
+    if (restoreFrame != null) cancelAnimationFrame(restoreFrame);
+    if (revealTimer != null) clearTimeout(revealTimer);
+    restoreFrame = null;
+    revealTimer = null;
+    if (untracked(reduceMotion)) fade.set(1);
+    else void fade.timing(1, { duration: 150, easing: "easeOut" });
+    setTimeout(() => {
+      restoring = false;
+      selection.set(null);
+    }, 100);
+  };
+  /** After `frames` frames (the editor scrolls once it has laid out). */
+  const afterFrames = (frames: number, then: () => void) => {
+    restoreFrame = requestAnimationFrame(() =>
+      frames <= 1 ? then() : afterFrames(frames - 1, then),
+    );
+  };
+  const restoreProgress = () => {
+    if (!willRestore()) return;
+    const p = b().readProgress;
     restored = true;
     restoring = true;
-    setTimeout(() => {
+    // Shown whatever happens: never a blank page for long.
+    revealTimer = setTimeout(reveal, 1000);
+    const end = index.pos[index.pos.length - 1];
+    const at = index.pos[Math.min(index.pos.length - 1, Math.floor(p * index.text.length))];
+    /** Each frame until the editor has laid the text out, then to the place. */
+    const attempt = async () => {
+      restoreFrame = null;
       const ed = untracked(editor);
-      const end = index.pos[index.pos.length - 1];
-      const at = index.pos[Math.min(index.pos.length - 1, Math.floor(p * index.text.length))];
-      if (ed && end != null && at != null) {
-        ed.run(chain([setTextSelection(end), scrollIntoView()]));
-        setTimeout(() => {
-          ed.run(chain([setTextSelection(at), scrollIntoView()]));
-          setTimeout(() => {
-            restoring = false;
-            selection.set(null);
-          }, 300);
-        }, 60);
-      } else restoring = false;
-    }, 250);
+      if (!ed || end == null || at == null) return reveal();
+      const box = (pos: number) => ed.coordsAtPos(pos) as { y: number; height: number } | null;
+      const place = box(at);
+      const last = box(end);
+      const m = await host?.measure().catch(() => null);
+      const height = m?.bounds.size.height ?? 0;
+      // Shown already (it took too long): don't move what's being read.
+      if (revealed) return;
+      if (!place || !last || height <= 0) {
+        restoreFrame = requestAnimationFrame(() => void attempt());
+        return;
+      }
+      // Where the view's top goes: no further than the caret can take it,
+      // the last line at the view's bottom (not the padding under it).
+      const bottom = last.y + last.height;
+      const target = Math.max(0, Math.min(place.y - chromeTop() - 8, bottom - height));
+      const pos = ed.posAtCoords({ x: sidePad() + 4, y: target + height - 1 });
+      if (target > 0 && pos != null) ed.run(chain([setTextSelection(pos), scrollIntoView()]));
+      afterFrames(2, reveal);
+    };
+    restoreFrame = requestAnimationFrame(() => void attempt());
   };
 
   const underCaret = () => {
@@ -739,6 +795,7 @@ export function Reader(props: {
             accessibilityLabel={ARTICLE}
             onFocus={() => Keyboard.keepAway(ARTICLE)}
             class="flex-1"
+            style={{ opacity: fade }}
             onSelectionChange={({ selection: s }) => {
               if (!restoring) selection.set(s);
             }}
