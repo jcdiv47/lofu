@@ -3,6 +3,7 @@ import type { AppContext } from "./context.ts";
 import { openDb } from "./db/index.ts";
 import { Browser, findChromium } from "./extract/browser.ts";
 import { Fetcher } from "./extract/fetch.ts";
+import { ImageCache } from "./extract/imageCache.ts";
 import { ImageProxy } from "./extract/images.ts";
 import { MARKDOWN_VERSION, PLAIN_EXTRACTORS } from "./extract/markdown.ts";
 import { PdfExtractor } from "./extract/pdf.ts";
@@ -33,7 +34,12 @@ export function wire(config: Config) {
     jobEnqueued: () => runner?.kick(),
   };
 
-  const images = ImageProxy.fromDb(db);
+  const images = ImageProxy.fromDb(
+    db,
+    config.imageCacheDir
+      ? new ImageCache(config.imageCacheDir, config.imageCacheMb * 1024 * 1024)
+      : null,
+  );
   const jobs = new JobStore(db, hooks);
   const bookmarks = new BookmarkStore(db, jobs, hooks, images);
   const collections = new CollectionStore(db, hooks);

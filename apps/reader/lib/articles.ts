@@ -206,15 +206,28 @@ export async function withKeptPictures(id: string, a: Kept): Promise<Kept> {
 }
 
 /**
- * Downloads the article's pictures not kept yet, a few at a time. Resolves
- * with whether it got all it could: a picture its site no longer has (an
- * error status, or not a picture) is given up on; one that couldn't be
- * reached is tried again later.
+ * Downloads the article's pictures not kept yet, a few at a time, and
+ * removes those it no longer shows (their URLs change when the server's
+ * address or the size it serves them at does), but for those of `showing`,
+ * the copy a reader has on screen. Resolves with whether it got all it
+ * could: a picture its site no longer has (an error status, or not a
+ * picture) is given up on; one that couldn't be reached is tried again later.
  */
-export async function keepPictures(id: string, a: Kept): Promise<boolean> {
+export async function keepPictures(
+  id: string,
+  a: Kept,
+  showing?: Pick<Kept, "images">,
+): Promise<boolean> {
   if (!onDisk) return false;
   const here = new Set(await listText(`${PICTURE}${id}-`));
-  const todo = pictureUrls(a).filter((u) => !here.has(pictureFile(id, u)));
+  const urls = pictureUrls(a);
+  const wanted = new Set(
+    [...urls, ...(showing ? pictureUrls(showing) : [])].map((u) => pictureFile(id, u)),
+  );
+  for (const name of here) {
+    if (!wanted.has(name)) await removeText(name);
+  }
+  const todo = urls.filter((u) => !here.has(pictureFile(id, u)));
   let unreachable = false;
   await inTurn(todo, PICTURES_AT_ONCE, async (url) => {
     if (unreachable) return;

@@ -16,6 +16,7 @@ import {
   AlertDialog,
   chain,
   createRichEditor,
+  insertContentAt,
   link,
   RichEditor,
   RichEditorPlugin,
@@ -148,6 +149,53 @@ export function placeImages(
     }
   });
   return out;
+}
+
+/** A long document's first page, in nodes (each a native view): a few screens. */
+const FIRST_PAGE = 300;
+/** The pages after it, in nodes. */
+const PAGE = 150;
+/** A page is added when the text shown ends less than this many screens below the view. */
+const AHEAD_SCREENS = 2;
+/** How often a page is added when where the reader is can't be told. */
+const SLOW_PAGE_MS = 1500;
+/** Characters of text shown after the place an article reopens at, before it's revealed. */
+const RESTORE_AHEAD = 3000;
+
+const nodeCount = (n: RichNodeJSON): number =>
+  1 + (n.content ?? []).reduce((sum, c) => sum + nodeCount(c), 0);
+/** The size of blocks in document positions. */
+const sizeOf = (blocks: RichNodeJSON[]) => blocks.reduce((sum, b) => sum + nodeSize(b), 0);
+
+/**
+ * Top-level blocks in pages of about `first` nodes, then `size` (a block is
+ * never split; each page has one at least). The first page also reaches
+ * `through`, a document position. One page when it all fits.
+ */
+export function paginate(
+  blocks: RichNodeJSON[],
+  first: number,
+  size: number,
+  through = 0,
+): RichNodeJSON[][] {
+  const pages: RichNodeJSON[][] = [];
+  let page: RichNodeJSON[] = [];
+  let nodes = 0;
+  let pos = 0;
+  for (const b of blocks) {
+    const n = nodeCount(b);
+    const full = pages.length ? nodes + n > size : nodes + n > first && pos >= through;
+    pos += nodeSize(b);
+    if (page.length && full) {
+      pages.push(page);
+      page = [];
+      nodes = 0;
+    }
+    page.push(b);
+    nodes += n;
+  }
+  if (page.length || !pages.length) pages.push(page);
+  return pages;
 }
 
 /**
@@ -287,12 +335,14 @@ export function Reader(props: {
     if (!ed) return;
     ed.setDecorations(
       "highlights",
-      placed().map((p) => ({
-        from: p.from,
-        to: p.to,
-        kind: "inline" as const,
-        attrs: { class: look().highlightClass },
-      })),
+      placed()
+        .filter((p) => isShown(p.to))
+        .map((p) => ({
+          from: p.from,
+          to: p.to,
+          kind: "inline" as const,
+          attrs: { class: look().highlightClass },
+        })),
     );
   };
 
@@ -308,7 +358,11 @@ export function Reader(props: {
       const range = toDocRange(index, hit.start, hit.end);
       // Dev check that the text index and the editor agree on positions.
       // (Skipped with footnotes: their numbers are shown but not quoted.)
-      const drawn = hasFootnotes ? undefined : editor()?.textBetween(range.from, range.to, " ");
+      // (And for text not shown yet: a long article comes a page at a time.)
+      const drawn =
+        hasFootnotes || !isShown(range.to)
+          ? undefined
+          : editor()?.textBetween(range.from, range.to, " ");
       const norm = (t: string) => t.replace(/\s+/g, " ").trim();
       if (drawn !== undefined && norm(drawn) !== norm(h.quote)) {
         console.warn(
@@ -325,6 +379,101 @@ export function Reader(props: {
       highlights.map((h) => h.id),
     );
     decorate();
+  };
+
+  // ---- Pages ------------------------------------------------------------
+  // nsh's editor makes a native view of every node of its document at once,
+  // and lays them all out again on every change, so a long article (a README
+  // of 6,600 nodes and 471 pictures) held the window still for seconds before
+  // its first line showed. A long document is shown a page at a time
+  // instead: the first at once, the next added at the end as the reader nears
+  // it (the editor reports no scrolling: where the shown text ends on the
+  // page is asked a few times a second). Until the pointer or a finger has
+  // been over the text that can't be told, and pages are added slowly.
+  // Adding at the end moves nothing before it, so the text index and the
+  // highlights are those of the whole document throughout.
+
+  /** Where the text shown ends (a document position); infinite once it all is. */
+  let shownTo = Number.POSITIVE_INFINITY;
+  /** The pages still to add, to which editor, and the position to add them up to whatever the view. */
+  let pending: { ed: RichEditorSession; pages: RichNodeJSON[][]; wanted: number } | null = null;
+  let pageTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastPage = 0;
+  cleanup(() => {
+    pending = null;
+    if (pageTimer != null) clearTimeout(pageTimer);
+  });
+  /** Whether the text up to `pos` is shown yet. */
+  const isShown = (pos: number) => pos <= shownTo;
+
+  const addPage = () => {
+    const page = pending?.pages.shift();
+    if (!pending || !page) return;
+    // At the end of the text shown: before the empty paragraph the editor
+    // may keep after a list (StarterKit's trailing node).
+    pending.ed.run(insertContentAt(shownTo, page, { updateSelection: false }));
+    shownTo += sizeOf(page);
+    lastPage = Date.now();
+    if (!pending.pages.length) {
+      pending = null;
+      shownTo = Number.POSITIVE_INFINITY;
+    }
+    decorate();
+  };
+
+  /** Whether the end of the text shown is within a few screens of the view's bottom (null: can't tell). */
+  const nearEnd = async (ed: RichEditorSession): Promise<boolean | null> => {
+    const m = await host?.measure().catch(() => null);
+    let end: { y: number } | null = null;
+    try {
+      end = ed.pageCoordsAtPos(shownTo - 1) as { y: number } | null;
+    } catch {}
+    if (!m || !end) return null;
+    const height = m.bounds.size.height;
+    return end.y < m.pagePosition.y + height * (1 + AHEAD_SCREENS);
+  };
+
+  /** Adds pages as the reader nears the end, until there are none. */
+  const fill = async () => {
+    pageTimer = null;
+    const p = pending;
+    if (!p) return;
+    const want =
+      p.wanted > shownTo || ((await nearEnd(p.ed)) ?? Date.now() - lastPage > SLOW_PAGE_MS);
+    if (p !== pending) return;
+    if (want) addPage();
+    // Right after a page, look again once it's drawn.
+    if (pending) pageTimer = setTimeout(() => void fill(), want ? 16 : 200);
+  };
+
+  /**
+   * Puts `doc` in the editor: whole when it is short, else its first page,
+   * the rest as the reader nears it. The first page reaches `through` (a
+   * position), so text already shown stays. `changed`: whether `doc` differs
+   * from what the editor holds.
+   */
+  const present = (ed: RichEditorSession, doc: RichNodeJSON, changed: boolean, through = 0) => {
+    if (pageTimer != null) clearTimeout(pageTimer);
+    pending = null;
+    const [first = [], ...rest] = paginate(doc.content ?? [], FIRST_PAGE, PAGE, through);
+    if (!rest.length) {
+      shownTo = Number.POSITIVE_INFINITY;
+      if (changed) ed.setContent(doc, "json");
+      return;
+    }
+    ed.setContent({ ...doc, content: first }, "json");
+    shownTo = sizeOf(first);
+    pending = { ed, pages: rest, wanted: 0 };
+    lastPage = Date.now();
+    pageTimer = setTimeout(() => void fill(), 200);
+  };
+
+  /** Shows the text up to `pos`, a page a frame, whatever the view. */
+  const showThrough = (pos: number) => {
+    if (!pending || isShown(pos)) return;
+    pending.wanted = Math.max(pending.wanted, pos);
+    if (pageTimer != null) clearTimeout(pageTimer);
+    pageTimer = setTimeout(() => void fill(), 0);
   };
 
   /** The article as shown: compared with the server's when that comes. */
@@ -350,18 +499,20 @@ export function Reader(props: {
     hasFootnotes = content.includes("\uE000");
     last = a;
     shownNote = b().note;
-    const noted = withNote(ed.getJSON(), shownNote);
+    const parsed = ed.getJSON();
+    const noted = withNote(parsed, shownNote);
+    let doc = parsed;
     if (a.images.length > 0 || hasFootnotes || content.includes("|") || noted.note) {
-      const doc = compactCells(raiseFootnotes(noted.doc));
+      doc = compactCells(raiseFootnotes(noted.doc));
       if (a.images.length > 0) {
         sized = { doc, images: a.images, width: textWidth() };
-        ed.setContent(placeImages(doc, a.images, sized.width), "json");
-      } else {
-        ed.setContent(doc, "json");
+        doc = placeImages(doc, a.images, sized.width);
       }
     }
-    index = indexDoc(ed.getJSON(), isFootnoteNumber);
+    // The whole text, though a long article is shown a page at a time.
+    index = indexDoc(doc, isFootnoteNumber);
     if (noted.note) index = withoutRange(index, noted.note.from, noted.note.to);
+    present(ed, doc, doc !== parsed);
     shown = markdown;
     hideForRestore();
     editor.set(ed);
@@ -384,7 +535,8 @@ export function Reader(props: {
       if (fresh.markdown === shown) place(pendingHighlights(id, fresh.highlights));
       else show(await withKeptPictures(id, fresh));
       // Its pictures too, for reading it offline (and from the disk next time).
-      void keepPictures(id, fresh);
+      // The copy still on screen keeps its files until it next opens.
+      void keepPictures(id, fresh, fresh.markdown === shown && kept ? kept : undefined);
     } catch (e) {
       if (kept?.markdown) return;
       status.set(
@@ -438,7 +590,9 @@ export function Reader(props: {
     // much longer than the screen never got past its first percent.)
     const last = index.pos[index.pos.length - 1];
     const end =
-      last == null ? null : (ed.pageCoordsAtPos(last) as { y: number; height: number } | null);
+      last == null || !isShown(last)
+        ? null
+        : (ed.pageCoordsAtPos(last) as { y: number; height: number } | null);
     if (end && end.y + end.height <= viewBottom) return 1;
     const bottom = ed.posAtPageCoords({ x, y: viewBottom });
     const len = index.text.length;
@@ -504,29 +658,51 @@ export function Reader(props: {
     const p = b().readProgress;
     restored = true;
     restoring = true;
-    // Shown whatever happens: never a blank page for long.
+    // Shown whatever happens: never a blank page for long. (A long article
+    // is shown a page at a time: the place, and a few screens after it,
+    // come first.)
     revealTimer = setTimeout(reveal, 1000);
     const end = index.pos[index.pos.length - 1];
-    const at = index.pos[Math.min(index.pos.length - 1, Math.floor(p * index.text.length))];
+    const k = Math.min(index.pos.length - 1, Math.floor(p * index.text.length));
+    const at = index.pos[k];
+    const after = index.pos[Math.min(index.pos.length - 1, k + RESTORE_AHEAD)];
+    if (after != null && !isShown(after)) {
+      if (revealTimer != null) clearTimeout(revealTimer);
+      revealTimer = setTimeout(reveal, 5000);
+      showThrough(after);
+    }
+    let waited = false;
     /** Each frame until the editor has laid the text out, then to the place. */
     const attempt = async () => {
       restoreFrame = null;
       const ed = untracked(editor);
       if (!ed || end == null || at == null) return reveal();
+      if (after != null && !isShown(after)) {
+        waited = true;
+        restoreFrame = requestAnimationFrame(() => void attempt());
+        return;
+      }
+      if (waited) {
+        // Its pages are in: from here, as long as a short article gets.
+        waited = false;
+        if (revealTimer != null) clearTimeout(revealTimer);
+        revealTimer = setTimeout(reveal, 1000);
+      }
       const box = (pos: number) => ed.coordsAtPos(pos) as { y: number; height: number } | null;
       const place = box(at);
-      const last = box(end);
+      // The text's end, once it's all shown (until then more comes after).
+      const last = isShown(end) ? box(end) : null;
       const m = await host?.measure().catch(() => null);
       const height = m?.bounds.size.height ?? 0;
       // Shown already (it took too long): don't move what's being read.
       if (revealed) return;
-      if (!place || !last || height <= 0) {
+      if (!place || (isShown(end) && !last) || height <= 0) {
         restoreFrame = requestAnimationFrame(() => void attempt());
         return;
       }
       // Where the view's top goes: no further than the caret can take it,
       // the last line at the view's bottom (not the padding under it).
-      const bottom = last.y + last.height;
+      const bottom = last ? last.y + last.height : Number.POSITIVE_INFINITY;
       const target = Math.max(0, Math.min(place.y - chromeTop() - 8, bottom - height));
       const pos = ed.posAtCoords({ x: sidePad() + 4, y: target + height - 1 });
       if (target > 0 && pos != null) ed.run(chain([setTextSelection(pos), scrollIntoView()]));
@@ -646,7 +822,8 @@ export function Reader(props: {
       const ed = untracked(editor);
       if (!ed || !sized || sized.width === w) return;
       sized.width = w;
-      ed.setContent(placeImages(sized.doc, sized.images, w), "json");
+      // Pages still to come are added sized anew; what's shown stays shown.
+      present(ed, placeImages(sized.doc, sized.images, w), true, shownTo);
       decorate();
     }, 150);
     return () => clearTimeout(t);

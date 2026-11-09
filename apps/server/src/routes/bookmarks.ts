@@ -12,7 +12,7 @@ import {
   UpdateHighlight,
 } from "@lofu/shared";
 import type { AppContext } from "../context.ts";
-import { markdownImages } from "../extract/images.ts";
+import { ARTICLE_IMAGE_WIDTH, markdownImages } from "../extract/images.ts";
 import { resolveLink } from "../extract/links.ts";
 import { body, IdParam, json, notFound } from "./util.ts";
 
@@ -88,7 +88,7 @@ export function bookmarkRoutes(app: OpenAPIHono, ctx: AppContext) {
           src,
           width: sizes[src]?.[0] ?? null,
           height: sizes[src]?.[1] ?? null,
-          proxy: ctx.images.path(src),
+          proxy: ctx.images.path(src, ARTICLE_IMAGE_WIDTH),
         }));
       }
       return c.json({ ...b, content, contentFormat: format, images }, 200);

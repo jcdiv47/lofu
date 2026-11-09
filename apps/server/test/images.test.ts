@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { ImageCache } from "../src/extract/imageCache.ts";
 import { imageSize } from "../src/extract/imageSize.ts";
-import { markdownImages, measureImage } from "../src/extract/images.ts";
+import { ARTICLE_IMAGE_WIDTH, markdownImages, measureImage } from "../src/extract/images.ts";
 import { JobStore } from "../src/store/jobs.ts";
-import { pngHeader } from "./fixtures.ts";
+import { pngHeader, served } from "./fixtures.ts";
 import { setupServer } from "./harness.ts";
 
 const bytes = (...parts: (number[] | string)[]) =>
@@ -93,7 +97,7 @@ describe("article images", () => {
   const images = async () =>
     (await api("GET", `/v1/bookmarks/${id}?content=markdown`)).data.images as Image[];
 
-  test("are measured after extraction and listed with the Markdown", async () => {
+  test("are measured after extraction and listed with the Markdown, sized for reading", async () => {
     id = (await api("POST", "/v1/bookmarks", { url: `${base}/pictures` })).data.id;
     await sys.runner.idle();
     const list = await images();
@@ -103,6 +107,44 @@ describe("article images", () => {
       ["/missing.png", null, null],
     ]);
     expect((await api("GET", `/v1/bookmarks/${id}?content=html`)).data.images).toBeNull();
+    expect(list[0]!.proxy).toBe(sys.ctx.images.path(list[0]!.src, ARTICLE_IMAGE_WIDTH));
+    expect(list[0]!.proxy).toEndWith(`&w=${ARTICLE_IMAGE_WIDTH}`);
+  });
+
+  test("a wide picture comes resized as WebP, fetched from its site once", async () => {
+    const proxy = sys.ctx.images.path(`${base}/wide.png`, ARTICLE_IMAGE_WIDTH)!;
+    const before = served.get("/wide.png") ?? 0;
+    // Asked for twice at once (a reader asks for all of an article's at once).
+    const [first, twin] = await Promise.all([app.request(proxy), app.request(proxy)]);
+    expect([first.status, twin.status]).toEqual([200, 200]);
+    expect(first.headers.get("content-type")).toBe("image/webp");
+    expect(first.headers.get("x-lofu-cache")).toBe("miss");
+    const bytes = new Uint8Array(await first.arrayBuffer());
+    expect(await new Bun.Image(bytes).metadata()).toEqual({
+      width: ARTICLE_IMAGE_WIDTH,
+      height: 170,
+      format: "webp",
+    });
+    expect((await twin.arrayBuffer()).byteLength).toBe(bytes.byteLength);
+    // From the disk afterwards.
+    const again = await app.request(proxy);
+    expect(again.headers.get("x-lofu-cache")).toBe("hit");
+    expect(again.headers.get("content-type")).toBe("image/webp");
+    expect(new Uint8Array(await again.arrayBuffer())).toEqual(bytes);
+    expect(served.get("/wide.png")).toBe(before + 1);
+
+    // Without a width, the original (kept on its own).
+    const original = await app.request(sys.ctx.images.path(`${base}/wide.png`)!);
+    expect(original.headers.get("content-type")).toBe("image/png");
+    expect((await new Bun.Image(await original.arrayBuffer()).metadata()).width).toBe(2720);
+  });
+
+  test("a narrow picture is left as it is; other widths are refused", async () => {
+    const res = await app.request(sys.ctx.images.path(`${base}/narrow.png`, ARTICLE_IMAGE_WIDTH)!);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    expect((await new Bun.Image(await res.arrayBuffer()).metadata()).width).toBe(400);
+    const odd = sys.ctx.images.path(`${base}/narrow.png`)!.concat("&w=123");
+    expect((await app.request(odd)).status).toBe(400);
   });
 
   test("load through the signed proxy, without a token or a Referer", async () => {
@@ -169,4 +211,32 @@ describe("article images", () => {
     await sys.runner.idle();
     expect((await images())[0]!.width).toBe(640);
   });
+});
+
+test("the image cache keeps the most recently used within its size, across restarts", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "lofu-cache-test-"));
+  try {
+    const kb = new Uint8Array(1000);
+    const cache = new ImageCache(dir, 2500);
+    await cache.put("a", "image/png", kb);
+    await cache.put("b", "image/webp", kb);
+    cache.get("a"); // used: "b" is now the oldest
+    await cache.put("c", "image/jpeg", kb);
+    expect([cache.get("a")?.type, cache.get("b"), cache.get("c")?.type]).toEqual([
+      "image/png",
+      null,
+      "image/jpeg",
+    ]);
+    expect(cache.size).toBe(2000);
+    expect(readdirSync(dir).sort()).toEqual(["a.png", "c.jpg"]);
+    // Types it can't name aren't kept; a write cut short is cleared on opening.
+    await cache.put("d", "image/x-unknown", kb);
+    writeFileSync(join(dir, "e.png.123.tmp"), kb);
+    const reopened = new ImageCache(dir, 2500);
+    expect(reopened.size).toBe(2000);
+    expect(reopened.get("c")?.path).toBe(join(dir, "c.jpg"));
+    expect(readdirSync(dir).sort()).toEqual(["a.png", "c.jpg"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

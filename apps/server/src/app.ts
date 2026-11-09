@@ -55,7 +55,9 @@ export function createApp(ctx: AppContext) {
 
   // Article images for readers' <img>, which can't send a token: the URL's
   // signature is the authorization (extract/images.ts).
-  app.get("/img/:sig", (c) => ctx.images.serve(c.req.param("sig"), c.req.query("u")));
+  app.get("/img/:sig", (c) =>
+    ctx.images.serve(c.req.param("sig"), c.req.query("u"), c.req.query("w")),
+  );
 
   app.use("/v1/*", compress({ threshold: 2048 }));
   // Clients may gzip large uploads (the browser extension sends rendered
