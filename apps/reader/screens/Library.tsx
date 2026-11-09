@@ -34,6 +34,7 @@ import {
 } from "../components/ListControls";
 import { useManualDrag } from "../components/ManualDrag";
 import { nativeScrollEdges, ScrollEdge } from "../components/native";
+import { pullRefresh } from "../components/PullRefresh";
 import { useSearchBox } from "../components/SearchBox";
 import { SearchField } from "../components/SearchField";
 import { SwipeRow, swipeable } from "../components/SwipeRow";
@@ -159,6 +160,7 @@ export function Library(props: {
     nativeField: native,
   });
   const query = box.query;
+  const pull = pullRefresh(() => sync());
   const searching = () => hasQuery(box.applied());
   const frameBounds = (f: Frame) => ({
     origin: { x: f.x, y: f.y },
@@ -474,8 +476,9 @@ export function Library(props: {
               estimatedItemSize={110}
               testID="library-list"
               class="flex-1"
-              refreshing={syncing()}
-              onRefresh={() => void sync()}
+              refreshing={pull.refreshing()}
+              onRefresh={pull.onRefresh}
+              onScrollDragEnd={pull.onScrollDragEnd}
               keyboardDismissMode="on-drag"
               keyboardShouldPersistTaps="handled"
               contentStyle={{ paddingTop: 4, paddingBottom: SEARCH_H + 40 }}
