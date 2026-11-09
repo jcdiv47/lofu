@@ -164,6 +164,14 @@ export async function launch(opts: {
     async type(text: string) {
       for (const ch of text) await s("Input.dispatchKeyEvent", { type: "char", text: ch });
     },
+    /** A key that types nothing: `Enter`, `Escape`, `ArrowDown`, `ArrowUp`, `Backspace`. */
+    async press(key: "Enter" | "Escape" | "ArrowDown" | "ArrowUp" | "Backspace") {
+      const code = { Enter: 13, Escape: 27, ArrowDown: 40, ArrowUp: 38, Backspace: 8 }[key];
+      const e = { key, code: key, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code };
+      await s("Input.dispatchKeyEvent", { type: "rawKeyDown", ...e });
+      if (key === "Enter") await s("Input.dispatchKeyEvent", { type: "char", text: "\r", ...e });
+      await s("Input.dispatchKeyEvent", { type: "keyUp", ...e });
+    },
     /** Box of the first rendered text containing `text`, waiting up to `ms` for it. */
     async waitForText(text: string, ms = 10_000) {
       const end = Date.now() + ms;
@@ -260,6 +268,8 @@ export async function openByTitle(page: Awaited<ReturnType<typeof launch>>, titl
   );
   await page.click(field.x, field.y);
   await page.type(title);
+  // Wide windows search once the search is committed, as Raindrop's.
+  await page.press("Enter");
   await page.waitForText("found");
   await Bun.sleep(500); // the hits render
   await page.clickText(title);

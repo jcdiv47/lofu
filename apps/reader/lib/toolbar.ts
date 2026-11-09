@@ -35,6 +35,11 @@ export type ToolbarItem =
       width?: number;
       disabled?: boolean;
       onChange: (value: string) => void;
+      /** It took the keyboard: its frame, from the window's top left (where suggestions go). */
+      onFocus?: (frame: { x: number; y: number; width: number; height: number }) => void;
+      onBlur?: () => void;
+      /** Return, and while `setSuggesting(true)` the arrows and Escape. */
+      onKey?: (key: "up" | "down" | "enter" | "escape") => void;
     }
   /** Leading room: the next item starts `x` points from the window's left edge. */
   | { kind: "space"; id: string; x: number }
@@ -66,7 +71,16 @@ async function listen() {
   listening = true;
   for (;;) {
     const raw = await Toolbar.next();
-    let e: { type: string; id: string; x?: number; y?: number; value?: string };
+    let e: {
+      type: string;
+      id: string;
+      x?: number;
+      y?: number;
+      width?: number;
+      height?: number;
+      value?: string;
+      key?: "up" | "down" | "enter" | "escape";
+    };
     try {
       e = JSON.parse(raw);
     } catch {
@@ -75,7 +89,12 @@ async function listen() {
     if (toolbarBlocked()) continue;
     const item = handlers.get(e.id);
     if (e.type === "press" && item?.kind === "button") item.onPress({ x: e.x ?? -1, y: e.y ?? -1 });
-    else if (e.type === "search" && item?.kind === "search") item.onChange(e.value ?? "");
+    else if (item?.kind !== "search") continue;
+    else if (e.type === "search") item.onChange(e.value ?? "");
+    else if (e.type === "searchFocus")
+      item.onFocus?.({ x: e.x ?? 0, y: e.y ?? 0, width: e.width ?? 0, height: e.height ?? 0 });
+    else if (e.type === "searchBlur") item.onBlur?.();
+    else if (e.type === "searchKey" && e.key) item.onKey?.(e.key);
   }
 }
 
@@ -87,6 +106,9 @@ function show(items: ToolbarItem[]) {
     if (toolbarBlocked() && "id" in i) rest.disabled = true;
     delete rest.onPress;
     delete rest.onChange;
+    delete rest.onFocus;
+    delete rest.onBlur;
+    delete rest.onKey;
     return rest;
   });
   Toolbar.set(JSON.stringify(drawn));
@@ -118,3 +140,8 @@ export function useToolbar(items: () => ToolbarItem[]) {
 
 /** Puts the keyboard in the toolbar's search field. */
 export const focusToolbarSearch = () => Toolbar.search();
+
+/** Whether the app's suggestions are open under the toolbar's search field (it then hands over the arrows and Escape). */
+export const setToolbarSuggesting = (on: boolean) => {
+  if (nativeToolbar) Toolbar.suggesting(on);
+};

@@ -35,8 +35,21 @@ fn emit(event: serde_json::Value) {
     let _ = tx.send(event.to_string());
 }
 
+/// Whether the app shows suggestions under the search field: the field
+/// then hands it the arrow keys, Return and Escape instead of using them.
+static SUGGESTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Tells the toolbar whether the app's suggestions are open under its search field.
+pub fn suggesting(on: bool) {
+    SUGGESTING.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// The next click or search edit, as JSON: `{ type: "press", id, x, y }`
-/// (the pointer, from the window's top left) or `{ type: "search", id, value }`;
+/// (the pointer, from the window's top left), `{ type: "search", id, value }`,
+/// `{ type: "searchFocus", id, x, y, width, height }` (the field took the
+/// keyboard; its frame, from the window's top left), `{ type: "searchBlur",
+/// id }`, or `{ type: "searchKey", id, key }` (`up`, `down`, `enter`,
+/// `escape`; the arrows and Escape only while `suggesting`);
 /// "" after a second without one. The app asks again at once; the timeout
 /// lets a JS context that's gone (a hot reload) stop waiting, instead of
 /// holding the queue and taking the next event from the one that's live.
@@ -73,13 +86,13 @@ mod mac {
     use std::collections::HashMap;
 
     use objc2::rc::{Allocated, Retained};
-    use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol};
+    use objc2::runtime::{AnyObject, Bool, NSObject, NSObjectProtocol, Sel};
     use objc2::{ClassType, MainThreadMarker, MainThreadOnly, class, define_class, msg_send, sel};
-    use objc2_app_kit::{NSResponder, NSView};
+    use objc2_app_kit::{NSControl, NSResponder, NSSearchField, NSTextField, NSView};
     use objc2_foundation::{NSArray, NSPoint, NSRect, NSSize, NSString};
     use serde_json::Value;
 
-    use super::emit;
+    use super::{SUGGESTING, emit};
 
     const FLEX: &str = "NSToolbarFlexibleSpaceItem";
     const GAP: &str = "NSToolbarSpaceItem";
@@ -207,6 +220,36 @@ mod mac {
                     "value": value.to_string(),
                 }));
             }
+
+            /// The search field's editing ended: it lost the keyboard.
+            #[unsafe(method(controlTextDidEndEditing:))]
+            fn did_end_editing(&self, _notification: &AnyObject) {
+                emit(serde_json::json!({ "type": "searchBlur", "id": search_id() }));
+            }
+
+            /// The keys the app's suggestions take: the arrows and Escape
+            /// while they're open, and Return always (the field's action
+            /// doesn't say it was Return).
+            #[unsafe(method(control:textView:doCommandBySelector:))]
+            fn do_command(&self, _control: &AnyObject, _text_view: &AnyObject, command: Sel) -> Bool {
+                let suggesting = SUGGESTING.load(std::sync::atomic::Ordering::Relaxed);
+                let key = if command == sel!(moveUp:) {
+                    "up"
+                } else if command == sel!(moveDown:) {
+                    "down"
+                } else if command == sel!(insertNewline:) {
+                    "enter"
+                } else if command == sel!(cancelOperation:) {
+                    "escape"
+                } else {
+                    return Bool::NO;
+                };
+                if key != "enter" && !suggesting {
+                    return Bool::NO;
+                }
+                emit(serde_json::json!({ "type": "searchKey", "id": search_id(), "key": key }));
+                Bool::new(suggesting)
+            }
         }
 
         unsafe impl NSObjectProtocol for Delegate {}
@@ -217,6 +260,67 @@ mod mac {
             let this = Self::alloc(mtm).set_ivars(());
             // SAFETY: NSObject's designated initializer.
             unsafe { msg_send![super(this), init] }
+        }
+    }
+
+    /// The id of the search item the app gave.
+    fn search_id() -> String {
+        ITEMS.with(|items| {
+            items.borrow().iter().find(|i| i.kind == "search").map(|i| i.id.clone())
+        })
+        .unwrap_or_default()
+    }
+
+    define_class!(
+        /// The toolbar's search field, which says when it takes the keyboard
+        /// (a field's delegate hears of editing only once the text changes).
+        #[unsafe(super(NSSearchField, NSTextField, NSControl, NSView, NSResponder, NSObject))]
+        #[thread_kind = MainThreadOnly]
+        #[name = "LofuSearchField"]
+        struct SearchField;
+
+        impl SearchField {
+            #[unsafe(method(becomeFirstResponder))]
+            fn become_first_responder(&self) -> Bool {
+                // SAFETY: NSResponder's own method, on the main thread.
+                let took: bool = unsafe { msg_send![super(self), becomeFirstResponder] };
+                if took {
+                    // SAFETY: a view, on the main thread.
+                    let (x, y, width, height) = unsafe { frame_in_window(self) };
+                    emit(serde_json::json!({
+                        "type": "searchFocus",
+                        "id": search_id(),
+                        "x": x,
+                        "y": y,
+                        "width": width,
+                        "height": height,
+                    }));
+                }
+                Bool::new(took)
+            }
+        }
+    );
+
+    /// A view's frame from the top left of the window's content (as `pointer`).
+    unsafe fn frame_in_window(view: &AnyObject) -> (f64, f64, f64, f64) {
+        unsafe {
+            let bounds: NSRect = msg_send![view, bounds];
+            let at: NSRect = msg_send![view, convertRect: bounds, toView: Option::<&AnyObject>::None];
+            let window: Option<Retained<AnyObject>> = msg_send![view, window];
+            let content: Option<Retained<AnyObject>> =
+                window.and_then(|w| msg_send![&*w, contentView]);
+            let height = content
+                .map(|c| {
+                    let f: NSRect = msg_send![&*c, frame];
+                    f.size.height
+                })
+                .unwrap_or(0.0);
+            (
+                at.origin.x,
+                height - at.origin.y - at.size.height,
+                at.size.width,
+                at.size.height,
+            )
         }
     }
 
@@ -317,7 +421,9 @@ mod mac {
                     let made: Allocated<AnyObject> = msg_send![class!(NSSearchToolbarItem), alloc];
                     let made: Retained<AnyObject> =
                         msg_send![made, initWithItemIdentifier: &*identifier];
-                    let field: Retained<AnyObject> = msg_send![&*made, searchField];
+                    let field: Retained<AnyObject> = msg_send![SearchField::class(), new];
+                    let _: () = msg_send![&*made, setSearchField: &*field];
+                    let _: () = msg_send![&*field, setDelegate: target];
                     let _: () = msg_send![&*field, setTarget: target];
                     let _: () = msg_send![&*field, setAction: sel!(searched:)];
                     // Each edit is sent (the app waits a moment before searching).

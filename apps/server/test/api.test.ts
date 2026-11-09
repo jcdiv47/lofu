@@ -271,6 +271,47 @@ describe.if(withSearch)("search", () => {
     const filtered = await api("GET", "/v1/search?q=zymurgy&tags=nonexistent");
     expect(filtered.data.hits).toHaveLength(0);
   });
+
+  test("the search box's conditions: tags, types, flags, dates, and excluding", async () => {
+    const made = await Promise.all(
+      [
+        { url: `${base}/query/a`, tags: ["qlab", "qnet"], note: "remember this" },
+        { url: `${base}/query/b`, tags: ["qlab"] },
+        { url: `${base}/query/c` },
+      ].map(async (b) => (await api("POST", "/v1/bookmarks", b)).data.id as string),
+    );
+    await sys.runner.idle();
+    await sys.indexer!.flush();
+    const ids = async (q: string, extra = "") =>
+      (
+        await api("GET", `/v1/search?q=${encodeURIComponent(q)}&snippets=false&limit=200${extra}`)
+      ).data.hits
+        .map((h: any) => h.bookmark.id as string)
+        .filter((id: string) => made.includes(id))
+        .sort();
+    const [a, b, c] = made;
+    expect(await ids("#qlab")).toEqual([a, b].sort());
+    expect(await ids("#QLAB -#qnet")).toEqual([b]);
+    expect(await ids("#qlab note:true")).toEqual([a]);
+    expect(await ids("#qlab -note:true")).toEqual([b]);
+    expect(await ids("notag:true link:query")).toEqual([c]);
+    // Saved today, wherever the searcher is: a day that includes now.
+    const now = new Date();
+    const day = `${now.getUTCFullYear()}-${now.getUTCMonth() + 1}-${now.getUTCDate()}`;
+    expect(await ids(`#qlab created:${day}`)).toEqual([a, b].sort());
+    expect(await ids(`#qlab created:<${day}`)).toEqual([]);
+    expect(await ids(`#qlab created:${now.getUTCFullYear() - 1}`)).toEqual([]);
+    // A day further east has already begun: the same instant is the next day there.
+    expect(await ids(`#qlab created:>${day}`, "&tz=840")).toEqual(
+      now.getUTCHours() >= 10 ? [a, b].sort() : [],
+    );
+    // `info:` and `link:` hold to their own fields, each on its own, excluded too.
+    expect(await ids("link:query/c")).toEqual([c]);
+    expect(await ids("#qlab -link:query/a")).toEqual([b]);
+    expect(await ids("link:query info:nothing-has-this")).toEqual([]);
+    // An unfinished condition narrows nothing.
+    expect(await ids("#qlab type:")).toEqual([a, b].sort());
+  });
 });
 
 describe("tags", () => {

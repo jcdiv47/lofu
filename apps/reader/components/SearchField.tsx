@@ -1,4 +1,4 @@
-import { type InputRef, View } from "nsh";
+import { type InputRef, type JSX, View, type ViewRef } from "nsh";
 import { Input } from "nsh/base";
 import { glass, look } from "../lib/look";
 import { NativeSearchField, nativeSearchField } from "./native";
@@ -21,6 +21,12 @@ export function SearchField(props: {
   onSubmit?: (v: string) => void;
   /** The app's own field (not the system's): for focusing it from a shortcut. */
   inputRef?: (r: InputRef) => void;
+  /** The capsule (the app's own field): what suggestions are placed under. */
+  boxRef?: (r: ViewRef) => void;
+  onFocus?: () => void;
+  onBlur?: () => void;
+  /** Before the clear button (the app's own field): the filter button. */
+  trailing?: JSX.Element;
 }) {
   const big = (props.height ?? 0) > 40;
   if (nativeSearchField) {
@@ -43,6 +49,7 @@ export function SearchField(props: {
   }
   return (
     <View
+      ref={(r) => props.boxRef?.(r)}
       class={`flex-row items-center rounded-full ${big ? "gap-2.5 px-4" : "gap-2 px-3.5"}`}
       style={{ ...glass(), borderCurve: "continuous", height: props.height ?? 40 }}
     >
@@ -59,6 +66,8 @@ export function SearchField(props: {
         returnKeyType="search"
         onChange={({ value }) => props.onChange(value)}
         onSubmit={({ text }) => props.onSubmit?.(text)}
+        onFocus={() => props.onFocus?.()}
+        onBlur={() => props.onBlur?.()}
         class="flex-1"
         style={{
           color: look().ink,
@@ -66,6 +75,7 @@ export function SearchField(props: {
           placeholderColor: look().inkFaint,
         }}
       />
+      {props.trailing}
       <If when={props.value()}>
         <View
           role="button"

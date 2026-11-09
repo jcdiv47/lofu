@@ -211,6 +211,7 @@ function Desktop(props: { onReconnect: () => void }) {
                 <Library
                   source={s}
                   wide
+                  onSource={select}
                   onOpen={(b) => openBookmark(b)}
                   onAdd={() => adding.set(true)}
                 />
