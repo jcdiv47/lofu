@@ -305,6 +305,10 @@ describe.if(withSearch)("search", () => {
     expect(await ids(`#qlab created:>${day}`, "&tz=840")).toEqual(
       now.getUTCHours() >= 10 ? [a, b].sort() : [],
     );
+    // `info:` and `link:` hold to their own fields, each on its own, excluded too.
+    expect(await ids("link:query/c")).toEqual([c]);
+    expect(await ids("#qlab -link:query/a")).toEqual([b]);
+    expect(await ids("link:query info:nothing-has-this")).toEqual([]);
     // An unfinished condition narrows nothing.
     expect(await ids("#qlab type:")).toEqual([a, b].sort());
   });

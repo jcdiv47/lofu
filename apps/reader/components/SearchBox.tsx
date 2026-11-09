@@ -165,8 +165,10 @@ export function useSearchBox(o: {
   /** The filter button: the conditions that narrow what's shown, or closes them. */
   const toggleNarrow = (at?: ViewRef | Bounds) => {
     if (at) anchor.set(at);
-    if (open() && mode() === "narrow") close();
-    else show("narrow");
+    if (open() && mode() === "narrow") return close();
+    // It narrows the results shown: a search typed but not run is put back.
+    query.set(applied());
+    show("narrow");
   };
 
   // The arrows move through the rows (Return reaches the field's submit,

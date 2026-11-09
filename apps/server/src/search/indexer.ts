@@ -28,6 +28,10 @@ const SETTINGS = {
     "createdAt",
     "hasNote",
     "hasHighlights",
+    // `info:` and `link:` match within them (`CONTAINS`).
+    "title",
+    "excerpt",
+    "url",
   ],
   sortableAttributes: ["createdAt"],
   pagination: { maxTotalHits: 5000 },
@@ -96,6 +100,9 @@ export class Indexer {
       });
       await this.meili.waitForTask(t.taskUid);
     }
+    // The search box's `info:` and `link:` are `CONTAINS` filters, still
+    // experimental in Meilisearch (instance-wide; setting it again is a no-op).
+    await this.meili.request("PATCH", "/experimental-features", { containsFilter: true });
     if (applied?.value !== SETTINGS_VERSION) {
       const t = await this.meili.request<{ taskUid: number }>(
         "PATCH",

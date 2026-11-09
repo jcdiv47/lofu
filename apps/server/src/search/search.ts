@@ -24,8 +24,8 @@ export interface SearchParams {
 
 const quote = (s: string) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 
-/** A condition of the search box as a Meilisearch filter, or null when only words can say it. */
-function filterOf(t: Term, tz: number): string | null {
+/** A condition of the search box as a Meilisearch filter. */
+function filterOf(t: Term, tz: number): string {
   let f: string;
   switch (t.kind) {
     case "tag":
@@ -56,30 +56,13 @@ function filterOf(t: Term, tz: number): string | null {
       break;
     }
     case "info":
+      f = `title CONTAINS ${quote(t.text)} OR excerpt CONTAINS ${quote(t.text)}`;
+      break;
     case "link":
-      return null;
+      f = `url CONTAINS ${quote(t.text)}`;
+      break;
   }
-  return t.not ? `NOT (${f})` : f;
-}
-
-/**
- * The query Meilisearch gets for the search box's text: its words, and the
- * words of `info:` and `link:`, which also narrow the fields searched (to
- * the title and description, or the address) when nothing else is searched
- * for. An excluded one (`-info:word`) excludes the word everywhere.
- */
-function textOf(text: string, terms: Term[]) {
-  const words = text ? [text] : [];
-  const on = new Set<string>();
-  for (const t of terms) {
-    if (t.kind !== "info" && t.kind !== "link") continue;
-    const phrase = /\s/.test(t.text) ? `"${t.text}"` : t.text;
-    words.push(t.not ? `-${phrase}` : phrase);
-    if (t.not) continue;
-    if (t.kind === "info") on.add("title").add("excerpt");
-    else on.add("url").add("domain");
-  }
-  return { q: words.join(" "), on: text || !on.size ? null : [...on] };
+  return t.not ? `NOT (${f})` : `(${f})`;
 }
 
 /**
@@ -97,13 +80,8 @@ export class Searcher {
   ) {}
 
   async search(p: SearchParams) {
-    const parsed = parseQuery(p.q);
-    const { q, on } = textOf(parsed.text, parsed.terms);
-    const filter: string[] = [];
-    for (const t of parsed.terms) {
-      const f = filterOf(t, p.tz ?? 0);
-      if (f) filter.push(f);
-    }
+    const { text: q, terms } = parseQuery(p.q);
+    const filter = terms.map((t) => filterOf(t, p.tz ?? 0));
     if (p.collectionId === "unsorted") filter.push("collectionId IS NULL");
     else if (p.collectionId) filter.push(`collectionId = ${quote(p.collectionId)}`);
     for (const t of p.tags ?? []) filter.push(`tags = ${quote(t)}`);
@@ -119,7 +97,6 @@ export class Searcher {
       offset: p.offset,
       attributesToRetrieve: ["id"],
     };
-    if (on) body.attributesToSearchOn = on;
     // Conditions alone have no relevance to rank by: the newest first.
     if (p.sort === "newest" || (p.sort === "relevance" && !q)) body.sort = ["createdAt:desc"];
     else if (p.sort === "oldest") body.sort = ["createdAt:asc"];
