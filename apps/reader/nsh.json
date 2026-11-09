@@ -3,5 +3,6 @@
   "id": "app.lofu.reader",
   "version": "1.0.0",
   "build": 1,
-  "rust": "."
+  "rust": ".",
+  "icon": "../../design/logo/logo.png"
 }

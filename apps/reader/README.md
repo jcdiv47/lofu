@@ -37,6 +37,8 @@ Building now compiles `src/lib.rs` into the app's runner, so it needs Rust and t
 
 The first launch asks for the server address and a token, and checks them before saving. `nsh package App.tsx --target macos` makes a `.app`; `--target ios-simulator --run` installs one in the simulator. For a phone, `IPHONEOS_DEPLOYMENT_TARGET=17.0 nsh package App.tsx --target ios --sign "Apple Development: …" --profile <app.lofu.reader's .mobileprovision>`, then `xcrun devicectl device install app --device <udid> .nsh/out/lofu.ipa`: without the deployment target the runner links for iOS 10, which lacks the `___chkstk_darwin` QuickJS needs.
 
+The app's icon is `design/logo/logo.png`, which `nsh.json` names: every `nsh package` target takes it from there, the web build's favicon and touch icon too. The browser extension's icons come from the same folder (`bun run --cwd apps/extension icons`).
+
 ### With the share extension (iOS)
 
 nsh can't build app extensions, so `share/package.ts` packages the app with `nsh package`, builds the extension with xcodegen and xcodebuild, puts it in `lofu.app/PlugIns/` and signs the app again, with the shared Keychain group added to its entitlements:
