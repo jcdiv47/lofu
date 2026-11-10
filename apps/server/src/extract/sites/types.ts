@@ -15,6 +15,7 @@ export interface SiteElement {
   querySelectorAll(selector: string): Iterable<SiteElement>;
   append(...nodes: (SiteElement | string)[]): void;
   replaceChildren(...nodes: (SiteElement | string)[]): void;
+  replaceWith(...nodes: (SiteElement | string)[]): void;
 }
 
 export interface SiteDocument {
@@ -38,6 +39,12 @@ export interface SiteTransform {
   meta?: SiteMeta;
   /** The page is an error/login wall, not content (reported like a captcha). */
   blocked?: string;
+  /**
+   * The transform rebuilt the whole post from the site's data, so a short
+   * text (a one-line caption over pictures) is kept rather than taken for an
+   * empty JavaScript shell and rendered again in the browser.
+   */
+  complete?: boolean;
 }
 
 export interface SiteContext {

@@ -14,7 +14,8 @@ import { type ImageSize, imageSize } from "./imageSize.ts";
  *   A job reads the first bytes of each image after extraction.
  * - **A proxy.** Hotlink protection answers a request from another site's
  *   page with a placeholder (WeChat: "未经允许不可引用") or a 403 (CSDN). The
- *   server fetches images without a Referer, which those hosts allow. The
+ *   server fetches images without a Referer, which those hosts allow (or,
+ *   for hosts that insist on one, with their own site's: `REFERERS`). The
  *   reader's `<img>` can't send a bearer token, so proxy URLs are signed:
  *   only URLs the server handed out can be fetched through it. What it
  *   fetched is kept on disk (`imageCache.ts`), and article images come
@@ -49,6 +50,20 @@ const IMAGE_HEADERS = {
   "accept-language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
 };
 
+/**
+ * Hosts that refuse a browser without their own site as the Referer, and that
+ * site. Weibo's image CDN answers 403 to any browser user agent without one.
+ */
+const REFERERS: Record<string, string> = { "sinaimg.cn": "https://weibo.com/" };
+
+function imageHeaders(url: string): Record<string, string> {
+  const host = new URL(url).hostname;
+  for (const [domain, referer] of Object.entries(REFERERS)) {
+    if (host === domain || host.endsWith(`.${domain}`)) return { ...IMAGE_HEADERS, referer };
+  }
+  return IMAGE_HEADERS;
+}
+
 /** An error page is not an image, even when it holds an inline `<svg>` icon. */
 const isImageType = (type: string | null) =>
   !type || type.startsWith("image/") || type.startsWith("application/octet-stream");
@@ -71,7 +86,7 @@ export async function measureImage(url: string): Promise<ImageSize | null> {
   const release = await probes.acquire();
   try {
     const res = await fetch(url, {
-      headers: { ...IMAGE_HEADERS, range: `bytes=0-${PROBE_MAX_BYTES - 1}` },
+      headers: { ...imageHeaders(url), range: `bytes=0-${PROBE_MAX_BYTES - 1}` },
       redirect: "follow",
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
@@ -283,7 +298,7 @@ export class ImageProxy {
       let res: Response;
       try {
         res = await fetch(url, {
-          headers: IMAGE_HEADERS,
+          headers: imageHeaders(url),
           redirect: "follow",
           signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
         });

@@ -197,7 +197,7 @@ export function extractHandler(deps: {
       if (failure) throw new PermanentError(`blocked by site: ${out.blocked}; ${failure}`);
       return;
     }
-    if (out.textLength < MIN_TEXT_CHARS) {
+    if (out.textLength < MIN_TEXT_CHARS && !out.complete) {
       // Probably a client-rendered app: try a real browser before giving up.
       const failure = allowBrowser && browser ? await viaBrowser(row) : EMPTY_PAGE_ERROR;
       // Keep the metadata (title, image) even when the body is empty.

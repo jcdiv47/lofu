@@ -149,7 +149,7 @@ export function bookmarkRoutes(app: OpenAPIHono, ctx: AppContext) {
     createRoute({
       method: "post",
       path: "/v1/bookmarks/{id}/refetch",
-      summary: "Re-fetch and re-extract the page",
+      summary: "Re-fetch and re-extract the page (its title, excerpt and cover too)",
       request: { params: IdParam },
       responses: { 202: json(Bookmark, "Queued"), 404: notFound },
     }),
