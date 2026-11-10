@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Fetcher, FetchResult, TextResponse } from "../src/extract/fetch.ts";
 import { github } from "../src/extract/sites/github.ts";
 import { siteFor } from "../src/extract/sites/index.ts";
+import { weibo, weiboPostId } from "../src/extract/sites/weibo.ts";
 import { ARTICLE_HTML } from "./fixtures.ts";
 import { setupServer } from "./harness.ts";
 
@@ -187,6 +188,133 @@ describe("xiaohongshu", () => {
     expect(b.contentStatus).toBe("failed");
     expect(b.contentError).toContain("needs a login");
     expect(b.contentError).toContain("extension");
+  });
+});
+
+describe("weibo", () => {
+  const pic = (id: string) => ({
+    url: `https://wx1.sinaimg.cn/orj360/${id}.jpg`,
+    large: { url: `https://wx1.sinaimg.cn/large/${id}.jpg`, geo: { width: 2048, height: 1024 } },
+  });
+  const status = {
+    mid: "5363614907110043",
+    created_at: "Tue Nov 10 08:01:48 +0800 2026",
+    text:
+      "投机解码又有新活<span class='url-icon'><img alt='[doge]' src='https://face.t.sinajs.cn/d.png'></span><br />第二行 " +
+      "<a href='https://weibo.cn/sinaurl?u=https%3A%2F%2Fexample.com%2Fpaper'><span class='url-icon'><img src='https://h5.sinaimg.cn/upload/2015/09/25/3/timeline_card_small_web_default.png'></span><span class=\"surl-text\">网页链接</span></a>",
+    user: { screen_name: "karminski-牙医" },
+    pics: ["a1", "a2", "a3"].map(pic),
+    page_info: {
+      type: "webpage",
+      page_url: "https://weibo.cn/sinaurl?u=https%3A%2F%2Fexample.com%2Fpaper",
+      content1: "论文标题",
+      page_pic: { url: "https://img.t.sinajs.cn/t6/style/images/face/face_card_longwb.png" },
+    },
+    retweeted_status: {
+      text: "被转发的微博",
+      user: { screen_name: "原作者" },
+      pics: [pic("b1")],
+    },
+  };
+
+  test("finds the post in status URLs only", async () => {
+    const id = (u: string) => weiboPostId(new URL(u));
+    expect(id("https://weibo.com/1727858283/QlZC28yte")).toBe("QlZC28yte");
+    expect(id("https://weibo.com/1788911247/5157064956185380?wm=3333_2001")).toBe(
+      "5157064956185380",
+    );
+    expect(id("https://m.weibo.cn/status/5112891411534437?jumpfrom=weibocom")).toBe(
+      "5112891411534437",
+    );
+    expect(id("https://m.weibo.cn/detail/5363614907110043")).toBe("5363614907110043");
+    expect(id("https://weibo.com/u/1727858283")).toBeNull();
+    expect(id("https://weibo.cn/sinaurl?u=https%3A%2F%2Fexample.com")).toBeNull();
+    expect(siteFor("https://mapp.api.weibo.cn/fx/e8.html")?.name).toBe("weibo");
+  });
+
+  /** A fetcher answering share-link hops and the statuses API from canned responses. */
+  function stub(api: object | string) {
+    const calls: string[] = [];
+    const fetcher = {
+      fetchText: async (url: string): Promise<TextResponse> => {
+        calls.push(url);
+        const share = url.includes("/fx/");
+        return {
+          status: 200,
+          text: share
+            ? "<html>Sina Visitor System</html>"
+            : typeof api === "string"
+              ? api
+              : JSON.stringify(api),
+          contentType: share ? "text/html" : "application/json",
+          finalUrl: share
+            ? `https://visitor.passport.weibo.cn/visitor/visitor?entry=sinawap&url=${encodeURIComponent("https://m.weibo.cn/status/5363614907110043")}`
+            : url,
+          headers: new Headers(),
+        };
+      },
+    } as unknown as Fetcher;
+    return { calls, ctx: { fetcher, githubToken: null } };
+  }
+
+  test("fetches a share link's post from the API", async () => {
+    const { calls, ctx } = stub({ ok: 1, data: status });
+    const r = await weibo.fetch!(new URL("https://mapp.api.weibo.cn/fx/e8.html"), ctx);
+    expect(calls[1]).toBe("https://m.weibo.cn/statuses/show?id=5363614907110043");
+    expect(r?.kind === "html" && r.finalUrl).toBe("https://m.weibo.cn/detail/5363614907110043");
+  });
+
+  test("a hidden post fails with Weibo's reason; a login redirect falls back", async () => {
+    const url = new URL("https://weibo.com/1/5075630316325401");
+    await expect(
+      weibo.fetch!(url, stub({ ok: 0, msg: "由于博主设置，目前内容暂不可见。" }).ctx),
+    ).rejects.toThrow("Weibo: 由于博主设置");
+    expect(await weibo.fetch!(url, stub("<html>login</html>").ctx)).toBeNull();
+  });
+
+  test("a rendered page keeps every full-size picture, the retweet and the link", async () => {
+    // What the headless browser returns: the post as $render_data, and the
+    // pictures in an image-only list Defuddle would drop.
+    const b = await saveRendered(
+      "https://m.weibo.cn/status/5363614907110043",
+      `<html><head><title>微博</title></head><body><article class="weibo-main">
+<div class="weibo-text">投机解码又有新活</div>
+<ul class="m-auto-list">${["a1", "a2", "a3"].map((p) => `<li><img src="https://wx1.sinaimg.cn/orj360/${p}.jpg"></li>`).join("")}</ul>
+</article><script>var $render_data = [${JSON.stringify({ status })}][0] || {};</script></body></html>`,
+    );
+    expect([b.contentStatus, b.extractor, b.title, b.author]).toEqual([
+      "ok",
+      "weibo",
+      "投机解码又有新活[doge]",
+      "karminski-牙医",
+    ]);
+    expect(b.publishedAt).toStartWith("2026-11-10T00:01:48");
+    for (const p of ["a1", "a2", "a3", "b1"]) {
+      expect(b.content).toContain(`https://wx1.sinaimg.cn/mw2000/${p}.jpg`);
+    }
+    expect(b.coverUrl).toBe("https://wx1.sinaimg.cn/mw2000/a1.jpg");
+    expect(b.content).toContain("被转发的微博");
+    expect(b.content).toContain("@原作者");
+    expect(b.content).toContain("[论文标题](https://example.com/paper)");
+    expect(b.content).toContain("[网页链接](https://example.com/paper)");
+    expect(b.content).not.toContain("sinajs.cn");
+    expect(b.content).not.toContain("timeline_card");
+  });
+});
+
+describe("weibo short posts", () => {
+  test("a one-line caption over pictures is the whole post, not an empty page", async () => {
+    const status = {
+      text: "叶思福走进了大家的视野。",
+      user: { screen_name: "峰哥" },
+      pics: [{ large: { url: "https://wx1.sinaimg.cn/large/c1.jpg" } }],
+    };
+    const b = await saveRendered(
+      "https://m.weibo.cn/status/5210175868244096",
+      `<html><body><script>var $render_data = [${JSON.stringify({ status })}][0] || {};</script></body></html>`,
+    );
+    expect([b.contentStatus, b.extractor]).toEqual(["ok", "weibo"]);
+    expect(b.content).toContain("https://wx1.sinaimg.cn/mw2000/c1.jpg");
   });
 });
 

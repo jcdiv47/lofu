@@ -73,6 +73,22 @@ describe("bookmarks", () => {
     expect(b.data.title).toBe("My title");
   });
 
+  test("a refetch takes the title, excerpt and cover from the page again", async () => {
+    const r = await api("POST", "/v1/bookmarks", {
+      url: `${base}/article-refetch`,
+      title: "微博",
+      html: "<html><head><meta name='description' content='随时随地发现新鲜事'></head><body><p>微博</p></body></html>",
+    });
+    await sys.runner.idle();
+    await api("PATCH", `/v1/bookmarks/${r.data.id}`, { coverUrl: "https://example.com/old.png" });
+    await api("POST", `/v1/bookmarks/${r.data.id}/refetch`);
+    await sys.runner.idle();
+    const b = (await api("GET", `/v1/bookmarks/${r.data.id}`)).data;
+    expect([b.contentStatus, b.title]).toEqual(["ok", "Sourdough Science"]);
+    expect(b.coverUrl).not.toBe("https://example.com/old.png");
+    expect(b.excerpt).not.toContain("随时随地");
+  });
+
   test("decodes legacy charsets", async () => {
     const r = await api("POST", "/v1/bookmarks", { url: `${base}/gbk` });
     await sys.runner.idle();

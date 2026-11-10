@@ -557,11 +557,18 @@ export class BookmarkStore {
   }
 
   /** Re-runs extraction (e.g. after a failure or a site redesign). */
+  /**
+   * Reads the page again. Its title, excerpt and cover are taken from the
+   * page this time, even ones the user or the saving client set: a client's
+   * title is often the interstitial it saw ("Sina Visitor System"). A title
+   * the page doesn't provide stays as it was.
+   */
   refetch(id: string): Bookmark {
     this.db.transaction(() => {
       const changes = this.db
         .query(
-          `UPDATE bookmarks SET content_status = 'pending', content_error = NULL, updated_at = ?, seq = ?
+          `UPDATE bookmarks SET content_status = 'pending', content_error = NULL, title_locked = 0,
+             excerpt = NULL, cover_url = NULL, updated_at = ?, seq = ?
            WHERE id = ? AND deleted_at IS NULL`,
         )
         .run(Date.now(), this.db.nextSeq(), id).changes;

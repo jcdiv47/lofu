@@ -27,6 +27,8 @@ export interface ExtractOutput {
   ogType: string | null;
   /** Length of the extracted plain text; ~0 means a JavaScript-only page. */
   textLength: number;
+  /** A site adapter built the whole post: short text is all there is, not a JavaScript shell. */
+  complete: boolean;
   /** Set when the page is a captcha/challenge interstitial (see blocked.ts). */
   blocked: string | null;
   parseMs: number;

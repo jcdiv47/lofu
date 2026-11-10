@@ -2,6 +2,7 @@ import { github } from "./github.ts";
 import type { SiteAdapter } from "./types.ts";
 import { v2ex } from "./v2ex.ts";
 import { wechat } from "./wechat.ts";
+import { weibo } from "./weibo.ts";
 import { xiaohongshu } from "./xiaohongshu.ts";
 import { zhihu } from "./zhihu.ts";
 
@@ -14,7 +15,7 @@ export type {
   SiteTransform,
 } from "./types.ts";
 
-export const SITES: readonly SiteAdapter[] = [github, wechat, xiaohongshu, zhihu, v2ex];
+export const SITES: readonly SiteAdapter[] = [github, wechat, weibo, xiaohongshu, zhihu, v2ex];
 
 const byHost = new Map(SITES.flatMap((s) => s.hosts.map((h) => [h, s] as const)));
 

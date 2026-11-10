@@ -69,6 +69,7 @@ self.onmessage = async (ev: MessageEvent<ExtractRequest>) => {
       extractor: fix ? site!.name : (r.extractorType ?? null),
       ogType,
       textLength: text.length,
+      complete: fix?.complete ?? false,
       blocked: fix?.blocked ?? detectBlockPage(nonEmpty(r.title), text),
       parseMs: performance.now() - t0,
     };

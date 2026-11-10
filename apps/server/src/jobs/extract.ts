@@ -172,7 +172,8 @@ export function extractHandler(deps: {
     if (!page.ready) return "no readable content, even in a browser";
     const out = await pool.run(page.html, page.finalUrl);
     if (out.blocked) return `still blocked in a browser (${out.blocked})`;
-    if (out.textLength < MIN_TEXT_CHARS) return "no readable content, even in a browser";
+    if (out.textLength < MIN_TEXT_CHARS && !out.complete)
+      return "no readable content, even in a browser";
     save(row, out, Buffer.byteLength(page.html), { status: "ok" }, "browser");
     return null;
   }
@@ -197,7 +198,7 @@ export function extractHandler(deps: {
       if (failure) throw new PermanentError(`blocked by site: ${out.blocked}; ${failure}`);
       return;
     }
-    if (out.textLength < MIN_TEXT_CHARS) {
+    if (out.textLength < MIN_TEXT_CHARS && !out.complete) {
       // Probably a client-rendered app: try a real browser before giving up.
       const failure = allowBrowser && browser ? await viaBrowser(row) : EMPTY_PAGE_ERROR;
       // Keep the metadata (title, image) even when the body is empty.
