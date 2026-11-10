@@ -30,9 +30,20 @@ mod mac {
 
     use objc2::rc::Retained;
     use objc2::runtime::AnyObject;
-    use objc2::{MainThreadOnly, class, define_class, msg_send};
+    use objc2::{Encoding, MainThreadOnly, RefEncode, class, define_class, msg_send};
     use objc2_app_kit::NSView;
     use objc2_foundation::{NSPoint, NSRect};
+
+    /// Core Graphics' color, only ever passed by pointer (`CGColorRef`).
+    #[repr(C)]
+    struct CGColor {
+        _private: [u8; 0],
+    }
+
+    // SAFETY: `CGColorRef` is a pointer to the opaque struct `CGColor`.
+    unsafe impl RefEncode for CGColor {
+        const ENCODING_REF: Encoding = Encoding::Pointer(&Encoding::Struct("CGColor", &[]));
+    }
 
     /// The host view, the split view controller and its sidebar item, while shown.
     struct Shown {
@@ -106,7 +117,9 @@ mod mac {
             let Some(layer): Option<Retained<AnyObject>> = msg_send![&*content, layer] else {
                 return;
             };
-            let none: *const AnyObject = std::ptr::null();
+            // A CGColorRef, not an object: debug builds check the argument's
+            // encoding and panic on `@`.
+            let none: *const CGColor = std::ptr::null();
             let _: () = msg_send![class!(CATransaction), begin];
             let _: () = msg_send![class!(CATransaction), setDisableActions: true];
             let _: () = msg_send![&*layer, setBackgroundColor: none];

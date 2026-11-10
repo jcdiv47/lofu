@@ -326,7 +326,11 @@ export function Reader(props: {
    * transparent header (the editor doesn't inset itself under it). */
   const topPad = () =>
     props.wide ? TOOLBAR + 36 : platform.os === "ios" ? safeArea().top + 54 + 20 : 24;
-  const sidePad = () => Math.max(props.wide ? 40 : 20, Math.round((width() - MEASURE) / 2));
+  /** The least room beside the text. */
+  const minPad = props.wide ? 40 : 20;
+  /** The room left of the text, from the view's edge (the content box is
+   * centred by its margins, `classes.content`). */
+  const sidePad = () => Math.max(minPad, Math.round((width() - MEASURE) / 2));
   /** The text's width (before the first layout, the widest it gets). */
   const textWidth = () => (width() > 0 ? Math.min(MEASURE, width() - 2 * sidePad()) : MEASURE);
 
@@ -704,7 +708,8 @@ export function Reader(props: {
       // the last line at the view's bottom (not the padding under it).
       const bottom = last ? last.y + last.height : Number.POSITIVE_INFINITY;
       const target = Math.max(0, Math.min(place.y - chromeTop() - 8, bottom - height));
-      const pos = ed.posAtCoords({ x: sidePad() + 4, y: target + height - 1 });
+      // In the content box's points: the text starts `minPad` inside it.
+      const pos = ed.posAtCoords({ x: minPad + 4, y: target + height - 1 });
       if (target > 0 && pos != null) ed.run(chain([setTextSelection(pos), scrollIntoView()]));
       afterFrames(2, reveal);
     };
@@ -978,7 +983,10 @@ export function Reader(props: {
             }}
             bubbleMenu={bubble()}
             classes={{
-              content: `px-[${sidePad()}px] pt-[${topPad()}px] pb-32`,
+              // Centred by its margins, not by padding worked out from the
+              // width: every block and run of text reads these classes, so a
+              // change restyled the whole article on every frame of a resize.
+              content: `mx-auto w-full max-w-[${MEASURE + 2 * minPad}px] px-[${minPad}px] pt-[${topPad()}px] pb-32`,
               nodes: {
                 paragraph: "text-[18px] leading-[30px] mb-5",
                 heading: "font-semibold mt-8 mb-3",

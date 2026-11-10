@@ -1,6 +1,7 @@
 import { Sidebar } from "lofu/native";
 import {
   cleanup,
+  computed,
   effect,
   keyboardFrame,
   lifecycle,
@@ -92,8 +93,13 @@ const nativeSidebar = hasGlass && platform.os === "macos" && Sidebar.available()
 
 if (isAvailable) Window.setTitleBar({ style: "hidden", height: TOOLBAR });
 
-/** Sidebar beside the content: desktops and tablets with room for it. */
-const wide = () => platform.idiom !== "phone" && windowSize().width >= 640;
+/**
+ * Sidebar beside the content: desktops and tablets with room for it. A
+ * computed, so it changes only when it crosses 640: the root mounts Desktop or
+ * Phone on it, and read straight from `windowSize` every frame of a live
+ * resize mounted the whole app again (a stalled drag, and the place lost).
+ */
+const wide = computed(() => platform.idiom !== "phone" && windowSize().width >= 640);
 
 /** Pages slide in on phones and tablets, where the stack follows the swipe back. */
 const pageAnimation = platform.os === "ios" || platform.os === "android" ? "default" : "none";

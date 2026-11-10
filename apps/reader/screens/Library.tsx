@@ -1,5 +1,6 @@
 import {
   cleanup,
+  computed,
   effect,
   keyboardFrame,
   List,
@@ -313,10 +314,16 @@ export function Library(props: {
   };
   const showCollection = props.source.kind !== "collection";
 
-  // Columns follow the width the grid gets.
+  // Columns follow the width the grid gets. The width changes on every frame
+  // of a live resize; the views read only what's computed from it (whether
+  // it's known, the column counts), so the grid is built again only when a
+  // column comes or goes, not on every frame.
   const width = signal(0);
+  const measured = computed(() => width() > 0);
   const columnsOf = (min: number) =>
     Math.max(1, Math.floor((width() - PAD * 2 + GAP) / (min + GAP)));
+  const cardColumns = computed(() => columnsOf(cardWidth(coverSize("cards"))));
+  const moodColumns = computed(() => columnsOf(cardWidth(coverSize("moodboard")) - 20));
   const view = () => viewFor(props.source);
   /** What the view shows of each bookmark (*Show in …*). */
   const show = (f: ShowField) => shows(view(), f);
@@ -519,7 +526,7 @@ export function Library(props: {
           onLayout={(e) => width.set(e.bounds.size.width)}
         >
           {() => {
-            if (!width()) return null;
+            if (!measured()) return null;
             const empty = <Empty searching={searching()} source={props.source} />;
             const top = TOOLBAR + 18;
             switch (view()) {
@@ -573,7 +580,7 @@ export function Library(props: {
                 // list of its own laid out in the one scroll view, so tiles
                 // keep their covers' shapes and only those near the
                 // viewport are made.
-                const n = columnsOf(cardWidth(coverSize("moodboard")) - 20);
+                const n = moodColumns();
                 const all = items();
                 if (!all.length)
                   return (
@@ -628,7 +635,7 @@ export function Library(props: {
                   <List
                     each={items()}
                     keyExtractor={(i) => i.b.id}
-                    numColumns={columnsOf(cardWidth(coverSize("cards")))}
+                    numColumns={cardColumns()}
                     estimatedItemSize={
                       (show("cover") ? cardCover(coverSize("cards")) : 0) + cardBody(show) + GAP
                     }

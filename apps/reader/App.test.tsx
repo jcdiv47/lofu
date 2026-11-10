@@ -158,6 +158,22 @@ test("desktop: the sidebar counts and filters", async () => {
   expect(app.shows("text:Article a")).toBe(true);
 });
 
+test("desktop: resizing the window keeps the place (the app isn't mounted again)", async () => {
+  const app = await open("./App.tsx", {
+    ...saved,
+    platform: "macos",
+    width: 1200,
+    height: 800,
+    network: { [`GET ${S}/v1/sync*`]: { body: library } },
+  });
+  await app.waitFor("text:Article a");
+  await app.press("label:Trash");
+  await app.waitFor("text:Article ccc");
+  for (const w of [1180, 1100, 900, 700, 1300]) await app.setViewport(w, 800);
+  expect(app.shows("text:Article ccc")).toBe(true);
+  expect(app.shows("text:Article a")).toBe(false);
+});
+
 test("desktop: sections fold away, and collections are put in order by dragging", async () => {
   const col = (id: string, name: string, sort: number) => ({
     id,
