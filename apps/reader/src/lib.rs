@@ -77,6 +77,13 @@ impl Sidebar {
     pub fn hide() {
         sidebar::hide()
     }
+
+    /// Keeps the window's content at least `width` × `height` points (macOS),
+    /// growing it there now if it's smaller: room for the sidebar beside the
+    /// library, as Finder's window keeps.
+    pub fn min_window_size(width: f64, height: f64) {
+        sidebar::set_min_size(width, height)
+    }
 }
 
 /// The window's toolbar on macOS (`src/toolbar.rs`): a real `NSToolbar`,
