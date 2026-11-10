@@ -46,6 +46,13 @@ export type ToolbarItem =
     }
   /** Leading room: the next item starts `x` points from the window's left edge. */
   | { kind: "space"; id: string; x: number }
+  /**
+   * An invisible point, in a slot of its own: `onPlace` hears where it is
+   * when that changes. `right`: where the items after it start, from the
+   * window's right edge (after a `flex`, the trailing items); `left`: where
+   * its slot starts, from the window's left edge (just after the item before).
+   */
+  | { kind: "mark"; id: string; onPlace: (right: number, left: number) => void }
   /** Pushes what follows to the trailing end. */
   | { kind: "flex" }
   /** Parts two capsules of glass. */
@@ -84,14 +91,21 @@ async function listen() {
       value?: string;
       key?: "up" | "down" | "enter" | "escape";
       search?: Frame | null;
+      right?: number;
+      left?: number;
     };
     try {
       e = JSON.parse(raw);
     } catch {
       continue;
     }
-    if (toolbarBlocked()) continue;
     const item = handlers.get(e.id);
+    // Where an item is, not a click: a dialog doesn't hold it back.
+    if (e.type === "mark") {
+      if (item?.kind === "mark" && e.right != null && e.left != null) item.onPlace(e.right, e.left);
+      continue;
+    }
+    if (toolbarBlocked()) continue;
     if (e.type === "press" && item?.kind === "button")
       item.onPress({ x: e.x ?? -1, y: e.y ?? -1 }, e.search ?? null);
     else if (item?.kind !== "search") continue;
@@ -114,6 +128,7 @@ function show(items: ToolbarItem[]) {
     delete rest.onFocus;
     delete rest.onBlur;
     delete rest.onKey;
+    delete rest.onPlace;
     return rest;
   });
   Toolbar.set(JSON.stringify(drawn));

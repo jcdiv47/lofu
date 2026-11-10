@@ -251,8 +251,13 @@ export function withNote(
 const MEASURE = 680;
 /** The desktop's toolbar, floating over the article. */
 const TOOLBAR = 52;
-/** The window toolbar's Back (macOS), before the page's meta. */
-const BACK_ROOM = 48;
+/**
+ * The room before the page's meta that the window toolbar's Back takes
+ * (macOS), from the content's left edge, until the toolbar says where Back
+ * ends (its `mark`): AppKit gives the space before it a slot of at least 36
+ * points, so Back sits further in than the space asks (measured on macOS 26).
+ */
+const BACK_ROOM = 74;
 /** The window toolbar's actions at the trailing end (macOS). */
 const ACTIONS_ROOM = 300;
 
@@ -326,7 +331,11 @@ export function Reader(props: {
    * transparent header (the editor doesn't inset itself under it). */
   const topPad = () =>
     props.wide ? TOOLBAR + 36 : platform.os === "ios" ? safeArea().top + 54 + 20 : 24;
-  const sidePad = () => Math.max(props.wide ? 40 : 20, Math.round((width() - MEASURE) / 2));
+  /** The least room beside the text. */
+  const minPad = props.wide ? 40 : 20;
+  /** The room left of the text, from the view's edge (the content box is
+   * centred by its margins, `classes.content`). */
+  const sidePad = () => Math.max(minPad, Math.round((width() - MEASURE) / 2));
   /** The text's width (before the first layout, the widest it gets). */
   const textWidth = () => (width() > 0 ? Math.min(MEASURE, width() - 2 * sidePad()) : MEASURE);
 
@@ -704,7 +713,8 @@ export function Reader(props: {
       // the last line at the view's bottom (not the padding under it).
       const bottom = last ? last.y + last.height : Number.POSITIVE_INFINITY;
       const target = Math.max(0, Math.min(place.y - chromeTop() - 8, bottom - height));
-      const pos = ed.posAtCoords({ x: sidePad() + 4, y: target + height - 1 });
+      // In the content box's points: the text starts `minPad` inside it.
+      const pos = ed.posAtCoords({ x: minPad + 4, y: target + height - 1 });
       if (target > 0 && pos != null) ed.run(chain([setTextSelection(pos), scrollIntoView()]));
       afterFrames(2, reveal);
     };
@@ -841,6 +851,13 @@ export function Reader(props: {
 
   /** The Mac's window toolbar has Back and the bookmark's actions (`lib/toolbar.ts`). */
   const native = props.wide && nativeToolbar;
+  /** Where the window toolbar's Back ends, from the window's left edge, once it says. */
+  const backEnd = signal<number | null>(null);
+  /** The page's meta starts after Back, from the content's left edge. */
+  const backRoom = () => {
+    const end = backEnd();
+    return end == null ? 16 + BACK_ROOM : Math.max(16, end - contentLeft() + 10);
+  };
   if (native) {
     useToolbar(() => {
       const bm = b();
@@ -854,6 +871,7 @@ export function Reader(props: {
           label: "Back to the library",
           onPress: () => props.onBack(),
         },
+        { kind: "mark", id: "back-end", onPlace: (_right, left) => backEnd.set(left) },
         { kind: "flex" },
         {
           kind: "button",
@@ -978,7 +996,10 @@ export function Reader(props: {
             }}
             bubbleMenu={bubble()}
             classes={{
-              content: `px-[${sidePad()}px] pt-[${topPad()}px] pb-32`,
+              // Centred by its margins, not by padding worked out from the
+              // width: every block and run of text reads these classes, so a
+              // change restyled the whole article on every frame of a resize.
+              content: `mx-auto w-full max-w-[${MEASURE + 2 * minPad}px] px-[${minPad}px] pt-[${topPad()}px] pb-32`,
               nodes: {
                 paragraph: "text-[18px] leading-[30px] mb-5",
                 heading: "font-semibold mt-8 mb-3",
@@ -1066,7 +1087,7 @@ export function Reader(props: {
             // of the items at the trailing end.
             height: native ? TOOLBAR : TOOLBAR + 8,
             paddingTop: native ? 0 : 8,
-            paddingLeft: (props.toolbarInset ?? 0) + 16 + (native ? BACK_ROOM : 0),
+            paddingLeft: (props.toolbarInset ?? 0) + (native ? backRoom() : 16),
             paddingRight: native ? ACTIONS_ROOM : 16,
           }}
         >

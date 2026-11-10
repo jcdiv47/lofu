@@ -1,6 +1,7 @@
 import { Sidebar } from "lofu/native";
 import {
   cleanup,
+  computed,
   effect,
   keyboardFrame,
   lifecycle,
@@ -92,8 +93,23 @@ const nativeSidebar = hasGlass && platform.os === "macos" && Sidebar.available()
 
 if (isAvailable) Window.setTitleBar({ style: "hidden", height: TOOLBAR });
 
-/** Sidebar beside the content: desktops and tablets with room for it. */
-const wide = () => platform.idiom !== "phone" && windowSize().width >= 640;
+/**
+ * The Mac's window keeps room for the sidebar, the library's title and the
+ * window toolbar's items beside it (`TITLE_ROOM` in `screens/Library.tsx`),
+ * as Finder's does: the phone's Library page isn't made for a window (its
+ * buttons lie under the traffic lights, its large title under the title bar).
+ */
+const macWindow = platform.os === "macos";
+if (macWindow) Sidebar.minWindowSize(800, 480);
+
+/**
+ * Sidebar beside the content: always on the Mac (its window keeps the room),
+ * and on tablets and browsers with room for it. A computed, so it changes only
+ * when it crosses 640: the root mounts Desktop or Phone on it, and read
+ * straight from `windowSize` every frame of a live resize mounted the whole
+ * app again (a stalled drag, and the place lost).
+ */
+const wide = computed(() => macWindow || (platform.idiom !== "phone" && windowSize().width >= 640));
 
 /** Pages slide in on phones and tablets, where the stack follows the swipe back. */
 const pageAnimation = platform.os === "ios" || platform.os === "android" ? "default" : "none";

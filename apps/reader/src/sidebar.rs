@@ -21,8 +21,11 @@ pub fn show(_width: f64) {}
 #[cfg(not(target_os = "macos"))]
 pub fn hide() {}
 
+#[cfg(not(target_os = "macos"))]
+pub fn set_min_size(_width: f64, _height: f64) {}
+
 #[cfg(target_os = "macos")]
-pub use mac::{hide, show};
+pub use mac::{hide, set_min_size, show};
 
 #[cfg(target_os = "macos")]
 mod mac {
@@ -30,9 +33,20 @@ mod mac {
 
     use objc2::rc::Retained;
     use objc2::runtime::AnyObject;
-    use objc2::{MainThreadOnly, class, define_class, msg_send};
+    use objc2::{Encoding, MainThreadOnly, RefEncode, class, define_class, msg_send};
     use objc2_app_kit::NSView;
-    use objc2_foundation::{NSPoint, NSRect};
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+    /// Core Graphics' color, only ever passed by pointer (`CGColorRef`).
+    #[repr(C)]
+    struct CGColor {
+        _private: [u8; 0],
+    }
+
+    // SAFETY: `CGColorRef` is a pointer to the opaque struct `CGColor`.
+    unsafe impl RefEncode for CGColor {
+        const ENCODING_REF: Encoding = Encoding::Pointer(&Encoding::Struct("CGColor", &[]));
+    }
 
     /// The host view, the split view controller and its sidebar item, while shown.
     struct Shown {
@@ -73,7 +87,7 @@ mod mac {
     );
 
     /// The app's window: the main one, else the key one, else the first.
-    unsafe fn window() -> Option<Retained<AnyObject>> {
+    pub(crate) unsafe fn window() -> Option<Retained<AnyObject>> {
         unsafe {
             let app: Retained<AnyObject> = msg_send![class!(NSApplication), sharedApplication];
             let main: Option<Retained<AnyObject>> = msg_send![&*app, mainWindow];
@@ -106,7 +120,9 @@ mod mac {
             let Some(layer): Option<Retained<AnyObject>> = msg_send![&*content, layer] else {
                 return;
             };
-            let none: *const AnyObject = std::ptr::null();
+            // A CGColorRef, not an object: debug builds check the argument's
+            // encoding and panic on `@`.
+            let none: *const CGColor = std::ptr::null();
             let _: () = msg_send![class!(CATransaction), begin];
             let _: () = msg_send![class!(CATransaction), setDisableActions: true];
             let _: () = msg_send![&*layer, setBackgroundColor: none];
@@ -192,6 +208,43 @@ mod mac {
                 let _: () = msg_send![&*shown.host, removeFromSuperview];
             }
         }
+    }
+
+    /// Keeps the window's content at least `width` × `height` points, and
+    /// grows it there now if it's smaller (a frame saved by an older build).
+    /// Before the window is up, tries again a little later.
+    pub fn set_min_size(width: f64, height: f64) {
+        fn attempt(width: f64, height: f64, tries: u32) {
+            // SAFETY: on the main thread (the queue's), with AppKit's own classes.
+            let done = unsafe {
+                match window() {
+                    Some(window) => {
+                        let min = NSSize::new(width, height);
+                        let _: () = msg_send![&*window, setContentMinSize: min];
+                        let content: Option<Retained<AnyObject>> = msg_send![&*window, contentView];
+                        if let Some(content) = content {
+                            let frame: NSRect = msg_send![&*content, frame];
+                            if frame.size.width < width || frame.size.height < height {
+                                let size = NSSize::new(
+                                    frame.size.width.max(width),
+                                    frame.size.height.max(height),
+                                );
+                                let _: () = msg_send![&*window, setContentSize: size];
+                            }
+                        }
+                        true
+                    }
+                    None => false,
+                }
+            };
+            if !done && tries > 0 {
+                let later = dispatch2::DispatchTime::try_from(std::time::Duration::from_millis(100))
+                    .unwrap_or(dispatch2::DispatchTime::NOW);
+                let _ = dispatch2::DispatchQueue::main()
+                    .after(later, move || attempt(width, height, tries - 1));
+            }
+        }
+        dispatch2::DispatchQueue::main().exec_async(move || attempt(width, height, 50));
     }
 
     /// Puts the system's sidebar, `width` points wide, under the window's content.

@@ -1,5 +1,6 @@
 import {
   cleanup,
+  computed,
   effect,
   keyboardFrame,
   List,
@@ -64,12 +65,32 @@ import {
   syncError,
   syncing,
 } from "../lib/store";
-import { type Frame, focusToolbarSearch, nativeToolbar, useToolbar } from "../lib/toolbar";
+import {
+  contentLeft,
+  type Frame,
+  focusToolbarSearch,
+  nativeToolbar,
+  useToolbar,
+} from "../lib/toolbar";
 
 const GAP = 18;
 const PAD = 24;
 /** The desktop's toolbar, floating over the grid. */
 const TOOLBAR = 52;
+/**
+ * The room the Mac's window toolbar takes at the title row's right end (sort,
+ * view, sync, +, filters and the search field, about 545 points on macOS 26)
+ * until the toolbar says where its items start (its `mark`): the title
+ * truncates before them instead of running under their glass.
+ */
+const TOOLBAR_ITEMS = 545;
+/**
+ * The room the title keeps beside the window toolbar's items: they start no
+ * nearer the sidebar than this (a `space`), so as the window narrows AppKit
+ * narrows the search field, then folds it into a button, instead of laying
+ * the items over the title.
+ */
+const TITLE_ROOM = 190;
 /** The phone's search capsule, floating over the list. */
 const SEARCH_H = 48;
 
@@ -166,11 +187,15 @@ export function Library(props: {
     origin: { x: f.x, y: f.y },
     size: { width: f.width, height: f.height },
   });
+  /** How far the toolbar's items reach in from the window's right edge. */
+  const toolbarItems = signal(TOOLBAR_ITEMS);
   if (native) {
     focusField = focusToolbarSearch;
     setSearchFocus(focusToolbarSearch);
     useToolbar(() => [
+      { kind: "space", id: "title", x: contentLeft() + PAD + TITLE_ROOM },
       { kind: "flex" },
+      { kind: "mark", id: "items", onPlace: (right) => toolbarItems.set(right) },
       // Sort and view, as Finder's: a symbol whose menu opens under it. A
       // search keeps the server's order, *By relevance*, as Raindrop shows it;
       // the item stays (greyed out), since a toolbar whose items change is
@@ -313,10 +338,16 @@ export function Library(props: {
   };
   const showCollection = props.source.kind !== "collection";
 
-  // Columns follow the width the grid gets.
+  // Columns follow the width the grid gets. The width changes on every frame
+  // of a live resize; the views read only what's computed from it (whether
+  // it's known, the column counts), so the grid is built again only when a
+  // column comes or goes, not on every frame.
   const width = signal(0);
+  const measured = computed(() => width() > 0);
   const columnsOf = (min: number) =>
     Math.max(1, Math.floor((width() - PAD * 2 + GAP) / (min + GAP)));
+  const cardColumns = computed(() => columnsOf(cardWidth(coverSize("cards"))));
+  const moodColumns = computed(() => columnsOf(cardWidth(coverSize("moodboard")) - 20));
   const view = () => viewFor(props.source);
   /** What the view shows of each bookmark (*Show in …*). */
   const show = (f: ShowField) => shows(view(), f);
@@ -346,6 +377,8 @@ export function Library(props: {
           height: native ? TOOLBAR : TOOLBAR + 8,
           paddingTop: native ? 0 : 8,
           paddingLeft: (props.toolbarInset ?? 0) + PAD,
+          // The window toolbar's items lie over the row's right end.
+          ...(native ? { paddingRight: toolbarItems() + 12 } : {}),
         }}
       >
         <View class="min-w-0 flex-1 flex-row items-baseline gap-2">
@@ -362,7 +395,13 @@ export function Library(props: {
           </Text>
           <Text
             class="truncate"
-            style={{ color: look().inkFaint, fontSize: 13, fontVariant: ["tabular-nums"] }}
+            // Gives way first, then the title: the row ends before the toolbar.
+            style={{
+              color: look().inkFaint,
+              fontSize: 13,
+              fontVariant: ["tabular-nums"],
+              flexShrink: 100,
+            }}
           >
             {searching()
               ? props.source.kind === "all"
@@ -519,7 +558,7 @@ export function Library(props: {
           onLayout={(e) => width.set(e.bounds.size.width)}
         >
           {() => {
-            if (!width()) return null;
+            if (!measured()) return null;
             const empty = <Empty searching={searching()} source={props.source} />;
             const top = TOOLBAR + 18;
             switch (view()) {
@@ -573,7 +612,7 @@ export function Library(props: {
                 // list of its own laid out in the one scroll view, so tiles
                 // keep their covers' shapes and only those near the
                 // viewport are made.
-                const n = columnsOf(cardWidth(coverSize("moodboard")) - 20);
+                const n = moodColumns();
                 const all = items();
                 if (!all.length)
                   return (
@@ -628,7 +667,7 @@ export function Library(props: {
                   <List
                     each={items()}
                     keyExtractor={(i) => i.b.id}
-                    numColumns={columnsOf(cardWidth(coverSize("cards")))}
+                    numColumns={cardColumns()}
                     estimatedItemSize={
                       (show("cover") ? cardCover(coverSize("cards")) : 0) + cardBody(show) + GAP
                     }

@@ -49,7 +49,11 @@ pub fn suggesting(on: bool) {
 /// `{ type: "searchFocus", id, x, y, width, height }` (the field took the
 /// keyboard; its frame, from the window's top left), `{ type: "searchBlur",
 /// id }`, or `{ type: "searchKey", id, key }` (`up`, `down`, `enter`,
-/// `escape`; the arrows and Escape only while `suggesting`);
+/// `escape`; the arrows and Escape only while `suggesting`), or
+/// `{ type: "mark", id, right, left }` (where the items after a `mark` start,
+/// `right` points from the window's right edge, and where its slot starts,
+/// `left` points from the window's left edge: just after the item before it;
+/// when either moved);
 /// "" after a second without one. The app asks again at once; the timeout
 /// lets a JS context that's gone (a hot reload) stop waiting, instead of
 /// holding the queue and taking the next event from the one that's live.
@@ -102,7 +106,8 @@ mod mac {
     #[derive(Clone, PartialEq)]
     struct Item {
         id: String,
-        /// `button`, `search`, `space` (leading room, up to `x`), `flex`, `gap`.
+        /// `button`, `search`, `space` (leading room, up to `x`), `flex`, `gap`,
+        /// `mark` (an invisible point whose place is reported, `report_marks`).
         kind: String,
         symbol: Option<String>,
         label: String,
@@ -155,6 +160,8 @@ mod mac {
             const { RefCell::new(None) };
         /// Each `space` item's width constraint.
         static SPACES: RefCell<HashMap<String, Retained<AnyObject>>> = RefCell::new(HashMap::new());
+        /// Where each `mark` was last reported (`right`, `left`).
+        static MARKS: RefCell<HashMap<String, (f64, f64)>> = RefCell::new(HashMap::new());
     }
 
     define_class!(
@@ -230,6 +237,23 @@ mod mac {
                     "id": id.unwrap_or_default(),
                     "value": value.to_string(),
                 }));
+            }
+
+            /// The window changed size: the items at the trailing end moved
+            /// (and the search field may have narrowed), once AppKit has laid
+            /// the toolbar out again.
+            #[unsafe(method(windowDidResize:))]
+            fn window_did_resize(&self, _notification: &AnyObject) {
+                // SAFETY: report_marks runs on the main thread.
+                dispatch2::DispatchQueue::main().exec_async(|| unsafe { report_marks() });
+            }
+
+            /// The search field opened out, folded into a button or narrowed:
+            /// it pushes the items before it into the overflow and back.
+            #[unsafe(method(searchFieldMoved:))]
+            fn search_field_moved(&self, _notification: &AnyObject) {
+                // SAFETY: report_marks runs on the main thread.
+                dispatch2::DispatchQueue::main().exec_async(|| unsafe { report_marks() });
             }
 
             /// The search field's editing ended: it lost the keyboard.
@@ -385,6 +409,27 @@ mod mac {
         }
     );
 
+    define_class!(
+        /// A `mark` item's view: reports its place once AppKit has put it in
+        /// the window.
+        #[unsafe(super(NSView, NSResponder, NSObject))]
+        #[thread_kind = MainThreadOnly]
+        #[name = "LofuToolbarMark"]
+        struct MarkView;
+
+        impl MarkView {
+            #[unsafe(method(viewDidMoveToWindow))]
+            fn did_move_to_window(&self) {
+                // SAFETY: NSView's own method, on the main thread.
+                unsafe {
+                    let _: () = msg_send![super(self), viewDidMoveToWindow];
+                }
+                // SAFETY: report_marks runs on the main thread.
+                dispatch2::DispatchQueue::main().exec_async(|| unsafe { report_marks() });
+            }
+        }
+    );
+
     /// The app's id in an item's identifier (`lofu.button.star` → `star`).
     fn id_of(identifier: &str) -> String {
         identifier
@@ -459,7 +504,32 @@ mod mac {
                     // Each edit is sent (the app waits a moment before searching).
                     let _: () = msg_send![&*field, setSendsSearchStringImmediately: true];
                     let _: () = msg_send![&*made, setResignsFirstResponderWithCancel: true];
+                    let _: () = msg_send![&*field, setPostsFrameChangedNotifications: true];
+                    let center: Retained<AnyObject> =
+                        msg_send![class!(NSNotificationCenter), defaultCenter];
+                    let _: () = msg_send![
+                        &*center,
+                        addObserver: target,
+                        selector: sel!(searchFieldMoved:),
+                        name: &*NSString::from_str("NSViewFrameDidChangeNotification"),
+                        object: &*field
+                    ];
                     update(&made, item);
+                    made
+                }
+                "mark" => {
+                    let made: Allocated<AnyObject> = msg_send![class!(NSToolbarItem), alloc];
+                    let made: Retained<AnyObject> =
+                        msg_send![made, initWithItemIdentifier: &*identifier];
+                    let view: Retained<AnyObject> = msg_send![MarkView::class(), new];
+                    for anchor in [sel!(widthAnchor), sel!(heightAnchor)] {
+                        let anchor: Retained<AnyObject> = msg_send![&*view, performSelector: anchor];
+                        let size: Retained<AnyObject> =
+                            msg_send![&*anchor, constraintEqualToConstant: 1.0f64];
+                        let _: () = msg_send![&*size, setActive: true];
+                    }
+                    let _: () = msg_send![&*made, setView: &*view];
+                    let _: () = msg_send![&*made, setBordered: false];
                     made
                 }
                 "space" => {
@@ -606,6 +676,73 @@ mod mac {
         }
     }
 
+    /// Tells each `mark` where it is, when that moved by a point or more:
+    /// `right`, where the items after it start, from the window's right edge
+    /// (the left edge of the first one shown: on macOS 26 its glass capsule,
+    /// a sibling of the mark's 36-point slot, or the overflow chevron when
+    /// the search field has pushed items into it; else the slot's right
+    /// edge), and `left`, where its slot starts, from the window's left edge
+    /// (just after the item before it). The trailing items keep their
+    /// distance from the window's right edge as it resizes, so this rarely
+    /// changes during a live resize (only as the search field narrows).
+    unsafe fn report_marks() {
+        unsafe {
+            let marks: Vec<(String, Retained<AnyObject>)> = ITEMS.with(|items| {
+                items
+                    .borrow()
+                    .iter()
+                    .filter(|i| i.kind == "mark")
+                    .filter_map(|i| {
+                        let made = MADE.with(|m| m.borrow().get(&i.identifier()).cloned())?;
+                        Some((i.id.clone(), made))
+                    })
+                    .collect()
+            });
+            for (id, made) in marks {
+                let view: Option<Retained<AnyObject>> = msg_send![&*made, view];
+                let Some(view) = view else { continue };
+                let window: Option<Retained<AnyObject>> = msg_send![&*view, window];
+                let Some(window) = window else { continue };
+                let frame: NSRect = msg_send![&*window, frame];
+                let slot: Option<Retained<AnyObject>> = msg_send![&*view, superview];
+                let Some(slot) = slot else { continue };
+                let (slot_x, _, slot_w, _) = frame_in_window(&slot);
+                // From the slot's left edge: AppKit's overflow chevron, when
+                // the search field has opened out over the items, overlaps it.
+                let after = slot_x - 1.0;
+                let mut x = slot_x + slot_w;
+                let container: Option<Retained<AnyObject>> = msg_send![&*slot, superview];
+                if let Some(container) = container {
+                    let shown: Retained<NSArray<AnyObject>> = msg_send![&*container, subviews];
+                    for other in shown.iter() {
+                        let hidden: bool = msg_send![&*other, isHiddenOrHasHiddenAncestor];
+                        let alpha: f64 = msg_send![&*other, alphaValue];
+                        let (ox, _, ow, _) = frame_in_window(&other);
+                        if !hidden && alpha > 0.0 && ow > 0.0 && ox >= after {
+                            x = x.min(ox);
+                        }
+                    }
+                }
+                let right = (frame.size.width - x).round();
+                // The slot follows the item before it (its glass, on macOS 26).
+                let left = slot_x.round();
+                let moved = MARKS.with(|m| {
+                    let mut m = m.borrow_mut();
+                    let moved = m.get(&id).is_none_or(|(r, l)| {
+                        (r - right).abs() >= 1.0 || (l - left).abs() >= 1.0
+                    });
+                    if moved {
+                        m.insert(id.clone(), (right, left));
+                    }
+                    moved
+                });
+                if moved {
+                    emit(serde_json::json!({ "type": "mark", "id": id, "right": right, "left": left }));
+                }
+            }
+        }
+    }
+
     /// Shows `items` (JSON, see `Item`) in the window's toolbar.
     pub fn set(items: String) {
         let Ok(Value::Array(items)) = serde_json::from_str::<Value>(&items) else {
@@ -679,6 +816,16 @@ mod mac {
                 let _: () = msg_send![&*window, setToolbar: &*toolbar];
                 // NSWindowToolbarStyleUnified: the height nsh's title bar asked for.
                 let _: () = msg_send![&*window, setToolbarStyle: 3isize];
+                // Where the `mark` items are, as the window resizes.
+                let center: Retained<AnyObject> =
+                    msg_send![class!(NSNotificationCenter), defaultCenter];
+                let _: () = msg_send![
+                    &*center,
+                    addObserver: &*delegate,
+                    selector: sel!(windowDidResize:),
+                    name: &*NSString::from_str("NSWindowDidResizeNotification"),
+                    object: &*window
+                ];
                 TOOLBAR.with(|t| *t.borrow_mut() = Some((toolbar, delegate)));
             } else if before != after {
                 let toolbar = installed.expect("ours");
@@ -706,9 +853,16 @@ mod mac {
                     }
                 }
             }
+            // Told again: a page that just asked for these items (another
+            // library over the same ids) hasn't heard where they are.
+            MARKS.with(|m| m.borrow_mut().clear());
             fit_spaces();
+            report_marks();
             // The toolbar lays out the items it just took a moment later.
-            dispatch2::DispatchQueue::main().exec_async(|| fit_spaces());
+            dispatch2::DispatchQueue::main().exec_async(|| {
+                fit_spaces();
+                report_marks();
+            });
         }
     }
 }
