@@ -18,6 +18,8 @@
           The address you reach lofu at: your Tailscale name (e.g.
           <code>https://homebox.tail1234.ts.net</code>) or a LAN address. Create a token on the server with
           <code>bun run stack:token create browser</code>.
+          The toolbar shows a blue ✓ for saved pages. To check this, the extension reads page URLs
+          and looks them up on this server; these checks never send page contents.
         </p>
         <form id="server-form" class="form" autocomplete="off">
           <label class="label" for="server-url">Server address</label>
@@ -36,8 +38,8 @@
         <p class="lede">
           Some sites refuse servers: logins (Zhihu), bot checks (Medium, V2EX). With auto-repair on, when you
           visit a page you've already saved that the server couldn't read, the extension sends the page
-          as your browser shows it. Only those pages, nothing else. The list is checked locally, so your browsing
-          isn't reported to the server. Turning this on asks for access to all sites.
+          as your browser shows it. Only those pages, nothing else. The repair list is checked locally;
+          no extra URL lookups are needed for repair. Turning this on asks for access to all sites.
         </p>
         <label class="switch">
           <input id="auto-repair" type="checkbox" />

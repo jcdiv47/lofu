@@ -72,10 +72,11 @@ bun run ext:build      # → apps/extension/.output/chrome-mv3 and firefox-mv3
 
 Chrome/Edge/Brave: open `chrome://extensions`, turn on developer mode, and use *Load unpacked* on `apps/extension/.output/chrome-mv3`. Firefox: `about:debugging` → *Load Temporary Add-on* (or `bun run --cwd apps/extension zip` to produce a zip you can sign). Then enter the server address and a token in the options page.
 
+- **Saved-page indicator:** a persistent blue ✓ on the toolbar icon marks pages already in your library (not in Trash). Status is checked on navigation/tab activation and after extension edits; changes from other clients appear on the next activation or periodic refresh. URLs are looked up on your configured server; page contents are not sent for these checks.
 - **Saving:** the toolbar button or <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> saves the page the moment the popup opens. Tags, collection, note and favorite autosave. Right-click menus save a page or a link.
 - **Pages are sent as your browser rendered them**, so pages behind your logins and bot checks (Zhihu, Medium, V2EX) save in full. Bodies over 32 KB are gzipped.
-- **Auto-repair (opt-in):** when you revisit a saved page the server couldn't read, the extension sends it. It checks against a local list of those URLs, so your browsing isn't sent anywhere. The options page lists the pages that need a visit.
-- **Permissions:** saving uses `activeTab`, the access a browser grants when you click the button, use the shortcut or right-click. All-sites access is requested only when you turn on auto-repair. The server allows extension origins through CORS, and every request still needs your token.
+- **Auto-repair (opt-in):** when you revisit a saved page the server couldn't read, the extension sends it. Repair checks use a local list of those URLs, with no extra URL lookups beyond the saved-page indicator. The options page lists the pages that need a visit.
+- **Permissions:** `tabs` reads page URLs for the saved-page indicator. Saving uses `activeTab`, the access a browser grants when you click the button, use the shortcut or right-click. All-sites access is requested only when you turn on auto-repair. The server allows extension origins through CORS, and every request still needs your token.
 
 `bun run ext:e2e` builds the extension and drives it in Chrome for Testing against a real server: popup save of a 403 bot wall, autosave, the "on shelf" state, auto-repair. Screenshots go to `apps/extension/e2e/screens/`.
 

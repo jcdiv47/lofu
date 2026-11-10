@@ -5,6 +5,7 @@ import { defineBackground } from "wxt/utils/define-background";
 import { ApiError, api } from "../lib/api.ts";
 import { captureHtml, isSavableUrl } from "../lib/capture.ts";
 import type { Ack, Message, SaveResult } from "../lib/messages.ts";
+import { forgetSavedBadge, refreshSavedBadge, refreshSavedBadges } from "../lib/saved-badge.ts";
 import { getSettings, isConfigured } from "../lib/settings.ts";
 
 /** Statuses where the server already has good content: don't re-send the page. */
@@ -20,7 +21,7 @@ async function flash(tabId: number | undefined, text: string, color: string) {
   try {
     await browser.action.setBadgeBackgroundColor({ tabId, color });
     await browser.action.setBadgeText({ tabId, text });
-    setTimeout(() => void browser.action.setBadgeText({ tabId, text: "" }).catch(() => {}), 4_000);
+    setTimeout(() => void refreshSavedBadge(tabId), 4_000);
   } catch {
     // Tab closed meanwhile.
   }
@@ -47,6 +48,7 @@ async function saveTab(tabId: number): Promise<SaveResult> {
   try {
     const existing = await api.lookup(tab.url);
     if (existing && HAS_CONTENT.has(existing.contentStatus)) {
+      void refreshSavedBadges();
       return { ok: true, bookmark: existing, created: false, captured: false };
     }
     const html = await captureHtml(tabId);
@@ -55,7 +57,7 @@ async function saveTab(tabId: number): Promise<SaveResult> {
       ...(html ? { html } : {}),
     });
     await dropFromRepairQueue(bookmark.url);
-    void flash(tabId, "✓", "#2f6b3a");
+    void refreshSavedBadges();
     return { ok: true, bookmark, created, captured: html !== null };
   } catch (e) {
     void flash(tabId, "!", "#c2412d");
@@ -81,7 +83,9 @@ function queuePatch(id: string, patch: UpdateBookmark): Promise<Ack> {
     const timer = setTimeout(async () => {
       pending.delete(id);
       try {
-        resolve({ ok: true, bookmark: await api.update(id, merged) });
+        const bookmark = await api.update(id, merged);
+        void refreshSavedBadges();
+        resolve({ ok: true, bookmark });
       } catch (e) {
         resolve({ ok: false, error: errorText(e) });
       }
@@ -159,6 +163,10 @@ async function maybeRepair(tabId: number, url: string) {
 }
 
 export default defineBackground(() => {
+  void refreshSavedBadges();
+  browser.runtime.onStartup.addListener(() => void refreshSavedBadges());
+  browser.tabs.onActivated.addListener(({ tabId }) => void refreshSavedBadge(tabId));
+  browser.tabs.onRemoved.addListener(forgetSavedBadge);
   browser.runtime.onInstalled.addListener(async ({ reason }) => {
     await browser.contextMenus.removeAll();
     browser.contextMenus.create({
@@ -183,7 +191,7 @@ export default defineBackground(() => {
     } else if (info.menuItemId === "save-link" && isSavableUrl(info.linkUrl)) {
       try {
         await api.save({ url: info.linkUrl });
-        void flash(tab?.id, "✓", "#2f6b3a");
+        void refreshSavedBadges();
       } catch {
         void flash(tab?.id, "!", "#c2412d");
       }
@@ -191,7 +199,10 @@ export default defineBackground(() => {
   });
 
   browser.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === "refresh-repair") void refreshRepairQueue().catch(() => {});
+    if (alarm.name === "refresh-repair") {
+      void refreshRepairQueue().catch(() => {});
+      void refreshSavedBadges();
+    }
   });
 
   browser.storage.onChanged.addListener((changes, area) => {
@@ -200,10 +211,12 @@ export default defineBackground(() => {
       ("autoRepair" in changes || "serverUrl" in changes || "token" in changes)
     ) {
       void refreshRepairQueue().catch(() => {});
+      void refreshSavedBadges();
     }
   });
 
   browser.tabs.onUpdated.addListener((tabId, change, tab) => {
+    if (change.url || change.status === "loading") void refreshSavedBadge(tabId);
     if (change.status === "complete" && isSavableUrl(tab.url)) void maybeRepair(tabId, tab.url);
   });
 
@@ -223,7 +236,10 @@ export default defineBackground(() => {
       case "remove":
         return reply(
           api.remove(msg.id).then(
-            (): Ack => ({ ok: true }),
+            (): Ack => {
+              void refreshSavedBadges();
+              return { ok: true };
+            },
             (e): Ack => ({ ok: false, error: errorText(e) }),
           ),
         );
@@ -238,10 +254,15 @@ export default defineBackground(() => {
               ...(b.note ? { note: b.note } : {}),
             })
             .then(
-              async ({ bookmark }): Promise<Ack> => ({
-                ok: true,
-                bookmark: b.favorite ? await api.update(bookmark.id, { favorite: true }) : bookmark,
-              }),
+              async ({ bookmark }): Promise<Ack> => {
+                void refreshSavedBadges();
+                return {
+                  ok: true,
+                  bookmark: b.favorite
+                    ? await api.update(bookmark.id, { favorite: true })
+                    : bookmark,
+                };
+              },
               (e): Ack => ({ ok: false, error: errorText(e) }),
             ),
         );

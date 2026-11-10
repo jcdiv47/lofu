@@ -199,6 +199,15 @@ try {
       options.sessionId,
       `chrome.tabs.query({}).then(ts => ts.find(t => t.url === ${JSON.stringify(url)})?.id ?? null)`,
     );
+  const badgeIs = async (tabId: number, text: string) =>
+    Boolean(
+      await until(() =>
+        evaluate(
+          options.sessionId,
+          `chrome.action.getBadgeText({ tabId: ${tabId} }).then(t => t === ${JSON.stringify(text)})`,
+        ),
+      ),
+    );
   const cardState = (sessionId: string) =>
     evaluate(sessionId, "document.getElementById('card').dataset.state");
 
@@ -207,8 +216,12 @@ try {
   check("fixture: the server alone gets 403", (await fetch(wallUrl)).status === 403);
   await open(wallUrl);
   const tabId = await until(() => tabIdOf(wallUrl));
+  check("unsaved page has no badge", await badgeIs(tabId, ""));
   const popup = await open(`${base}/popup.html?tab=${tabId}`);
   check("popup saves the page", Boolean(await until(async () => bookmarkFor(wallUrl))));
+  check("saved page has a check badge", await badgeIs(tabId, "✓"));
+  await sleep(4_500);
+  check("saved badge persists beyond the old flash timeout", await badgeIs(tabId, "✓"));
   await sys.runner.idle();
   const after = bookmarkFor(wallUrl);
   check(
@@ -279,6 +292,7 @@ try {
     "Move to Trash sets archived",
     Boolean(await until(async () => bookmarkFor(wallUrl)?.archived === true)),
   );
+  check("Trash clears the saved badge", await badgeIs(tabId, ""));
   check("the button then says In Trash", (await trashButton()) === "In Trash|true");
   await evaluate(again.sessionId, "document.activeElement?.blur(), true");
   console.log(`  screenshot: ${await screenshot(again.sessionId, "popup-in-trash", 360, false)}`);
@@ -287,6 +301,44 @@ try {
     "pressing it again restores it",
     Boolean(await until(async () => bookmarkFor(wallUrl)?.archived === false)),
   );
+
+  check("restoring from Trash restores the badge", await badgeIs(tabId, "✓"));
+
+  // A new tab recognizes an existing bookmark without opening the popup.
+  const variantUrl = `${wallUrl}#already-saved`;
+  const visited = await open(variantUrl);
+  const visitedId = await until(() => tabIdOf(variantUrl));
+  check("visiting a saved URL variant sets the badge", await badgeIs(visitedId, "✓"));
+  await cdp("Page.navigate", { url: `${fixture}/article?unsaved=1` }, visited.sessionId);
+  check("navigation to an unsaved page clears the badge", await badgeIs(visitedId, ""));
+  await cdp("Page.navigate", { url: wallUrl }, visited.sessionId);
+  check("navigation back restores the badge", await badgeIs(visitedId, "✓"));
+  await evaluate(
+    options.sessionId,
+    `chrome.runtime.sendMessage({ type: 'remove', id: ${JSON.stringify(after?.id)} })`,
+  );
+  check(
+    "removing a bookmark clears badges in every tab",
+    (await badgeIs(tabId, "")) && (await badgeIs(visitedId, "")),
+  );
+  await evaluate(
+    options.sessionId,
+    `chrome.runtime.sendMessage({ type: 'restore', bookmark: ${JSON.stringify(edited)} })`,
+  );
+  check(
+    "undoing removal restores badges in every tab",
+    (await badgeIs(tabId, "✓")) && (await badgeIs(visitedId, "✓")),
+  );
+
+  await evaluate(options.sessionId, "chrome.storage.local.set({ token: '' }).then(() => true)");
+  check("disconnecting clears saved badges", await badgeIs(tabId, ""));
+  await evaluate(
+    options.sessionId,
+    `chrome.storage.local.set({ token: ${JSON.stringify(token)} }).then(() => true)`,
+  );
+  check("reconnecting restores saved badges", await badgeIs(tabId, "✓"));
+  await cdp("Page.navigate", { url: "about:blank" }, visited.sessionId);
+  check("non-web pages have no saved badge", await badgeIs(visitedId, ""));
 
   // 3. Auto-repair: a bookmark the server couldn't read gets fixed on visit.
   const repairUrl = `${fixture}/bot-wall?article=2`;

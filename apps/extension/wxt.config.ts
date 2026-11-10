@@ -5,8 +5,9 @@ export default defineConfig({
   manifest: ({ browser }) => ({
     name: "lofu",
     description: "Save pages, exactly as you see them, to your own lofu server.",
-    permissions: ["activeTab", "scripting", "storage", "contextMenus", "alarms"],
-    // Least privilege: saving uses activeTab (granted by the click/shortcut/
+    permissions: ["activeTab", "tabs", "scripting", "storage", "contextMenus", "alarms"],
+    // tabs reads URLs for the saved-page badge, not page contents.
+    // Saving uses activeTab (granted by the click/shortcut/
     // menu); the server allows extension origins via CORS; all-sites access
     // is requested only if the user turns on auto-repair. E2E builds get it
     // up front because automation can't click permission prompts.
