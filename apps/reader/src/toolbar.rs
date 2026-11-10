@@ -50,8 +50,10 @@ pub fn suggesting(on: bool) {
 /// keyboard; its frame, from the window's top left), `{ type: "searchBlur",
 /// id }`, or `{ type: "searchKey", id, key }` (`up`, `down`, `enter`,
 /// `escape`; the arrows and Escape only while `suggesting`), or
-/// `{ type: "mark", id, right }` (a `mark` item is `right` points from the
-/// window's right edge: where the items after it start, when it moved);
+/// `{ type: "mark", id, right, left }` (where the items after a `mark` start,
+/// `right` points from the window's right edge, and where its slot starts,
+/// `left` points from the window's left edge: just after the item before it;
+/// when either moved);
 /// "" after a second without one. The app asks again at once; the timeout
 /// lets a JS context that's gone (a hot reload) stop waiting, instead of
 /// holding the queue and taking the next event from the one that's live.
@@ -158,8 +160,8 @@ mod mac {
             const { RefCell::new(None) };
         /// Each `space` item's width constraint.
         static SPACES: RefCell<HashMap<String, Retained<AnyObject>>> = RefCell::new(HashMap::new());
-        /// Where each `mark` was last reported, from the window's right edge.
-        static MARKS: RefCell<HashMap<String, f64>> = RefCell::new(HashMap::new());
+        /// Where each `mark` was last reported (`right`, `left`).
+        static MARKS: RefCell<HashMap<String, (f64, f64)>> = RefCell::new(HashMap::new());
     }
 
     define_class!(
@@ -674,14 +676,15 @@ mod mac {
         }
     }
 
-    /// Tells the app where the items after each `mark` start, from the
-    /// window's right edge, when that moved by a point or more: the left edge
-    /// of the first one shown (on macOS 26 its glass capsule, a sibling of the
-    /// mark's 36-point slot; or the overflow chevron, when the search field
-    /// has pushed items into it), else the mark's slot's right edge. The trailing
-    /// items keep their distance from the window's right edge as it resizes,
-    /// so this rarely changes during a live resize (only as the search field
-    /// narrows).
+    /// Tells each `mark` where it is, when that moved by a point or more:
+    /// `right`, where the items after it start, from the window's right edge
+    /// (the left edge of the first one shown: on macOS 26 its glass capsule,
+    /// a sibling of the mark's 36-point slot, or the overflow chevron when
+    /// the search field has pushed items into it; else the slot's right
+    /// edge), and `left`, where its slot starts, from the window's left edge
+    /// (just after the item before it). The trailing items keep their
+    /// distance from the window's right edge as it resizes, so this rarely
+    /// changes during a live resize (only as the search field narrows).
     unsafe fn report_marks() {
         unsafe {
             let marks: Vec<(String, Retained<AnyObject>)> = ITEMS.with(|items| {
@@ -721,16 +724,20 @@ mod mac {
                     }
                 }
                 let right = (frame.size.width - x).round();
+                // The slot follows the item before it (its glass, on macOS 26).
+                let left = slot_x.round();
                 let moved = MARKS.with(|m| {
                     let mut m = m.borrow_mut();
-                    let moved = m.get(&id).is_none_or(|last| (last - right).abs() >= 1.0);
+                    let moved = m.get(&id).is_none_or(|(r, l)| {
+                        (r - right).abs() >= 1.0 || (l - left).abs() >= 1.0
+                    });
                     if moved {
-                        m.insert(id.clone(), right);
+                        m.insert(id.clone(), (right, left));
                     }
                     moved
                 });
                 if moved {
-                    emit(serde_json::json!({ "type": "mark", "id": id, "right": right }));
+                    emit(serde_json::json!({ "type": "mark", "id": id, "right": right, "left": left }));
                 }
             }
         }

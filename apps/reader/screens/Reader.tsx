@@ -251,8 +251,13 @@ export function withNote(
 const MEASURE = 680;
 /** The desktop's toolbar, floating over the article. */
 const TOOLBAR = 52;
-/** The window toolbar's Back (macOS), before the page's meta. */
-const BACK_ROOM = 48;
+/**
+ * The room before the page's meta that the window toolbar's Back takes
+ * (macOS), from the content's left edge, until the toolbar says where Back
+ * ends (its `mark`): AppKit gives the space before it a slot of at least 36
+ * points, so Back sits further in than the space asks (measured on macOS 26).
+ */
+const BACK_ROOM = 74;
 /** The window toolbar's actions at the trailing end (macOS). */
 const ACTIONS_ROOM = 300;
 
@@ -846,6 +851,13 @@ export function Reader(props: {
 
   /** The Mac's window toolbar has Back and the bookmark's actions (`lib/toolbar.ts`). */
   const native = props.wide && nativeToolbar;
+  /** Where the window toolbar's Back ends, from the window's left edge, once it says. */
+  const backEnd = signal<number | null>(null);
+  /** The page's meta starts after Back, from the content's left edge. */
+  const backRoom = () => {
+    const end = backEnd();
+    return end == null ? 16 + BACK_ROOM : Math.max(16, end - contentLeft() + 10);
+  };
   if (native) {
     useToolbar(() => {
       const bm = b();
@@ -859,6 +871,7 @@ export function Reader(props: {
           label: "Back to the library",
           onPress: () => props.onBack(),
         },
+        { kind: "mark", id: "back-end", onPlace: (_right, left) => backEnd.set(left) },
         { kind: "flex" },
         {
           kind: "button",
@@ -1074,7 +1087,7 @@ export function Reader(props: {
             // of the items at the trailing end.
             height: native ? TOOLBAR : TOOLBAR + 8,
             paddingTop: native ? 0 : 8,
-            paddingLeft: (props.toolbarInset ?? 0) + 16 + (native ? BACK_ROOM : 0),
+            paddingLeft: (props.toolbarInset ?? 0) + (native ? backRoom() : 16),
             paddingRight: native ? ACTIONS_ROOM : 16,
           }}
         >

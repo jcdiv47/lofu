@@ -10,8 +10,13 @@ import { openInBrowser } from "../lib/actions";
 import { glass, look } from "../lib/look";
 import { contentLeft, nativeToolbar, useToolbar } from "../lib/toolbar";
 
-/** The window toolbar's Close and its back, forward and reload (macOS), before the page's title. */
-const NAV_ROOM = 160;
+/**
+ * The room before the page's title that the window toolbar's Close and its
+ * back, forward and reload take (macOS), from the content's left edge, until
+ * the toolbar says where they end (its `mark`; measured on macOS 26, where
+ * AppKit gives the space before them a slot of at least 36 points).
+ */
+const NAV_ROOM = 214;
 
 /**
  * Silences the page: its videos and sounds, and those of the frames it can
@@ -131,6 +136,13 @@ export function Browser(props: {
 
   /** The Mac's window toolbar has the page's controls (`lib/toolbar.ts`). */
   const native = props.wide && nativeToolbar;
+  /** Where the window toolbar's reload ends, from the window's left edge, once it says. */
+  const navEnd = signal<number | null>(null);
+  /** The page's title starts after the controls, from the content's left edge. */
+  const navRoom = () => {
+    const end = navEnd();
+    return end == null ? 16 + NAV_ROOM : Math.max(16, end - contentLeft() + 10);
+  };
   if (native) {
     useToolbar(() => [
       { kind: "space", id: "lead", x: contentLeft() + 16 },
@@ -171,6 +183,7 @@ export function Browser(props: {
           }
         },
       },
+      { kind: "mark", id: "nav-end", onPlace: (_right, left) => navEnd.set(left) },
       { kind: "flex" },
       {
         kind: "button",
@@ -193,7 +206,7 @@ export function Browser(props: {
             // keeps the page's title, between them.
             height: native ? 52 : 60,
             paddingTop: native ? 0 : 8,
-            paddingLeft: (props.toolbarInset ?? 0) + 16 + (native ? NAV_ROOM : 0),
+            paddingLeft: (props.toolbarInset ?? 0) + (native ? navRoom() : 16),
             paddingRight: native ? 64 : 16,
           }}
         >

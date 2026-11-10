@@ -47,10 +47,12 @@ export type ToolbarItem =
   /** Leading room: the next item starts `x` points from the window's left edge. */
   | { kind: "space"; id: string; x: number }
   /**
-   * An invisible point: `onPlace` hears how far it is from the window's right
-   * edge when that changes (after a `flex`, where the trailing items start).
+   * An invisible point, in a slot of its own: `onPlace` hears where it is
+   * when that changes. `right`: where the items after it start, from the
+   * window's right edge (after a `flex`, the trailing items); `left`: where
+   * its slot starts, from the window's left edge (just after the item before).
    */
-  | { kind: "mark"; id: string; onPlace: (right: number) => void }
+  | { kind: "mark"; id: string; onPlace: (right: number, left: number) => void }
   /** Pushes what follows to the trailing end. */
   | { kind: "flex" }
   /** Parts two capsules of glass. */
@@ -90,6 +92,7 @@ async function listen() {
       key?: "up" | "down" | "enter" | "escape";
       search?: Frame | null;
       right?: number;
+      left?: number;
     };
     try {
       e = JSON.parse(raw);
@@ -99,7 +102,7 @@ async function listen() {
     const item = handlers.get(e.id);
     // Where an item is, not a click: a dialog doesn't hold it back.
     if (e.type === "mark") {
-      if (item?.kind === "mark" && e.right != null) item.onPlace(e.right);
+      if (item?.kind === "mark" && e.right != null && e.left != null) item.onPlace(e.right, e.left);
       continue;
     }
     if (toolbarBlocked()) continue;
