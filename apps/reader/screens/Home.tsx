@@ -14,7 +14,7 @@ import {
 import { Input } from "nsh/base";
 import type { JSX } from "nsh/jsx-runtime";
 import { nativeScrollEdges, ScrollEdge } from "../components/native";
-import { promptText, systemPrompt } from "../components/Prompt";
+import { systemPrompt } from "../components/Prompt";
 import { SearchField } from "../components/SearchField";
 import {
   BottomEdge,
@@ -25,7 +25,13 @@ import {
   RoundGlassButton,
   TopEdge,
 } from "../components/ui";
-import { type MenuEntry, showSourceMenu, systemMenu, systemMenus } from "../lib/actions";
+import {
+  type MenuEntry,
+  newCollectionPrompt,
+  showSourceMenu,
+  systemMenu,
+  systemMenus,
+} from "../lib/actions";
 import { glass, look } from "../lib/look";
 import {
   type CollectionSort,
@@ -75,16 +81,7 @@ export function Home(props: {
   const naming = signal(false);
   /** Names a new collection: the system's alert on iOS, else the card below. */
   const newCollection = () => {
-    if (systemPrompt)
-      void promptText({
-        title: "New collection",
-        value: "",
-        placeholder: "Name",
-        confirm: "Create",
-        run: async (name) => {
-          await createCollection(name);
-        },
-      });
+    if (systemPrompt) void newCollectionPrompt();
     else naming.set(true);
   };
   // iOS: the system's menu (Liquid Glass) from the bar's •••, instead of the

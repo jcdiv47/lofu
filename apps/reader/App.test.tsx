@@ -859,6 +859,33 @@ test("desktop: tags are renamed and collections deleted from their menus", async
   await app.waitFor("text:Article a");
 });
 
+test("desktop: the sidebar's + makes a collection and opens it", async () => {
+  let now = library;
+  const posts: string[] = [];
+  const app = await open("./App.tsx", {
+    ...desktop,
+    network: {
+      [`GET ${S}/v1/sync*`]: () => ({ body: now }),
+      [`POST ${S}/v1/collections`]: (r) => {
+        posts.push(r.body ?? "");
+        const c = { ...now.collections[0], id: "c9", name: "Reading list", seq: 99 };
+        now = { ...now, collections: [...now.collections, c] };
+        return { status: 201, body: c };
+      },
+    },
+  });
+  await app.waitFor("id:new-collection");
+  await app.press("id:new-collection");
+  await app.waitFor("id:prompt-text");
+  await app.type("id:prompt-text", "Reading list");
+  await app.press("id:prompt-confirm");
+  await app.waitUntil(() => posts.length > 0);
+  expect(JSON.parse(posts[0])).toEqual({ name: "Reading list" });
+  await app.waitFor("id:collection-c9");
+  // It's selected: the library shows it, empty.
+  await app.waitUntil(() => app.texts().includes("Reading list"));
+});
+
 /** The titles the library shows, in order (one column: a grid's row says its cards in no set order). */
 const order = (texts: string[], titles: string[]) =>
   titles.map((t) => texts.indexOf(t)).every((k, i, a) => k >= 0 && (i === 0 || a[i - 1] < k));
