@@ -882,8 +882,8 @@ test("desktop: the sidebar's + makes a collection and opens it", async () => {
   await app.waitUntil(() => posts.length > 0);
   expect(JSON.parse(posts[0])).toEqual({ name: "Reading list" });
   await app.waitFor("id:collection-c9");
-  // It's selected: the library shows it, empty.
-  await app.waitUntil(() => app.texts().includes("Reading list"));
+  // It's opened: the library shows it, empty (All bookmarks isn't).
+  await app.waitFor("text:Nothing here yet");
 });
 
 /** The titles the library shows, in order (one column: a grid's row says its cards in no set order). */
