@@ -1019,7 +1019,7 @@ export function Reader(props: {
                 "paragraph[textAlign=justify]": `text-[15px] leading-[23px] mb-2 text-[${look().inkSoft}]`,
               },
               marks: {
-                code: `font-mono text-[15px] rounded-sm bg-[${look().paperDeep}]`,
+                code: `font-mono text-[15px] rounded-sm bg-[${look().selected}]`,
                 bold: "font-bold",
                 link: `text-[${look().stamp}] underline`,
                 // Footnote numbers: the editor can't raise text, so small and in the accent.
