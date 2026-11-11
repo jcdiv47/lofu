@@ -739,6 +739,87 @@ test("desktop: a bookmark's title, tags and note are edited, and the note shows 
   await app.waitFor("text:Some text to read here.");
 });
 
+test("desktop: tags are chips, suggested from the tags in use as they're typed", async () => {
+  const log = { patches: [] as [string, unknown][], deletes: [] as string[] };
+  const app = await open("./App.tsx", {
+    ...desktop,
+    network: {
+      ...editable(log),
+      ...readable,
+      [`PATCH ${S}/v1/bookmarks/a`]: (r) => {
+        const patch = JSON.parse(r.body ?? "{}");
+        log.patches.push(["a", patch]);
+        return { body: { ...library.bookmarks[0], ...patch } };
+      },
+    },
+  });
+  await app.waitFor("text:Article a");
+  await app.rightClick("id:card-a");
+  await app.chooseMenuItem("Edit Title, Tags and Note…");
+  await app.waitFor("id:tag-chip-rust");
+  // Backspace in the empty input takes the last chip off.
+  await app.press("id:edit-tags");
+  await app.keyboard.press("backspace");
+  await app.waitUntil(() => !app.shows("id:tag-chip-rust"));
+  // Typing suggests the tag in use, and Return takes it.
+  await app.type("id:edit-tags", "ru");
+  await app.waitFor("id:tag-suggest-rust");
+  await app.submit("id:edit-tags");
+  await app.waitFor("id:tag-chip-rust");
+  expect(app.value("id:edit-tags")).toBe("");
+  // A tag nobody uses yet is offered to be created; a comma adds it too.
+  await app.type("id:edit-tags", "Deep Dives");
+  await app.waitFor("id:tag-suggest-+new");
+  await app.submit("id:edit-tags");
+  await app.waitFor("id:tag-chip-deep dives");
+  await app.type("id:edit-tags", "later, ");
+  await app.waitFor("id:tag-chip-later");
+  await app.press("label:Remove tag rust");
+  await app.waitUntil(() => !app.shows("id:tag-chip-rust"));
+  await app.press("id:edit-save");
+  await app.waitUntil(() => log.patches.length > 0);
+  expect(log.patches[0]).toEqual(["a", { tags: ["deep dives", "later"] }]);
+});
+
+test('desktop: a long list of tags folds behind "+N more" and narrows as it\'s typed', async () => {
+  const many = Array.from({ length: 30 }, (_, i) => `topic ${String(i + 1).padStart(2, "0")}`);
+  const long = "an extremely long tag name that would never fit on one line of the dialog";
+  const lib = {
+    ...library,
+    bookmarks: library.bookmarks.map((b) => (b.id === "bb" ? { ...b, tags: [...many, long] } : b)),
+  };
+  const log = { patches: [] as [string, unknown][], deletes: [] as string[] };
+  const app = await open("./App.tsx", {
+    ...desktop,
+    network: { ...editable(log), ...readable, [`GET ${S}/v1/sync*`]: { body: lib } },
+  });
+  await app.waitFor("text:Article a");
+  await app.rightClick("id:card-a");
+  await app.chooseMenuItem("Edit Title, Tags and Note…");
+  await app.waitFor("id:tag-suggest-more");
+  expect(app.count("id:tag-suggest-topic 01")).toBe(1);
+  expect(app.shows("id:tag-suggest-topic 30")).toBe(false);
+  expect(app.texts()).toContain("+19 more");
+  await app.press("id:tag-suggest-more");
+  await app.waitFor("id:tag-suggest-topic 30");
+  expect(app.texts()).toContain("Show fewer");
+  // Typing narrows them; the fold has nothing to hide then.
+  await app.type("id:edit-tags", "topic 2");
+  await app.waitUntil(() => !app.shows("id:tag-suggest-topic 01"));
+  expect(app.shows("id:tag-suggest-topic 29")).toBe(true);
+  await app.press("id:tag-suggest-topic 25");
+  await app.waitFor("id:tag-chip-topic 25");
+  expect(app.value("id:edit-tags")).toBe("");
+  // The pills lay out again for the cleared input before the next press.
+  await app.waitFor(`id:tag-suggest-${long}`);
+  await app.wait(100);
+  await app.press(`id:tag-suggest-${long}`);
+  await app.waitFor(`id:tag-chip-${long}`);
+  await app.press("id:edit-save");
+  await app.waitUntil(() => log.patches.length > 0);
+  expect(log.patches[0]).toEqual(["a", { tags: ["rust", "topic 25", long] }]);
+});
+
 test("offline: a change waits on the device and is sent once the server is back", async () => {
   let online = false;
   const patches: unknown[] = [];

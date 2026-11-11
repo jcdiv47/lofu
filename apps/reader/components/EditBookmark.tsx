@@ -2,17 +2,8 @@ import { signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
 import type { Bookmark } from "../lib/api";
 import { look } from "../lib/look";
-import { tags as allTags, bookmark as current, updateBookmark } from "../lib/store";
-
-/** Tags as typed: separated by commas (a tag may have spaces), lowercased, once each. */
-export const parseTags = (text: string) => [
-  ...new Set(
-    text
-      .split(/[,，]/)
-      .map((t) => t.trim().toLowerCase())
-      .filter(Boolean),
-  ),
-];
+import { bookmark as current, updateBookmark } from "../lib/store";
+import { normalizeTag, TagField } from "./TagField";
 
 /**
  * A bookmark's title, tags and note. A dialog on desktops, a page on phones.
@@ -21,32 +12,20 @@ export const parseTags = (text: string) => [
 export function EditBookmark(props: { b: Bookmark; onDone: () => void; onCancel?: () => void }) {
   const b = () => current(props.b.id) ?? props.b;
   const title = signal(b().title);
-  const tags = signal(b().tags.join(", "));
+  const tags = signal([...b().tags]);
+  /** A tag typed but not yet added: saving adds it. */
+  const tagQuery = signal("");
   const note = signal(b().note ?? "");
   const error = signal("");
   const busy = signal(false);
-
-  /** Tags in use that start like the one being typed. */
-  const suggestions = () => {
-    const typed = tags().split(/[,，]/).pop()?.trim().toLowerCase() ?? "";
-    const have = new Set(parseTags(tags()));
-    if (!typed) return [];
-    return allTags()
-      .filter((t) => t.name.startsWith(typed) && t.name !== typed && !have.has(t.name))
-      .slice(0, 6);
-  };
-  const complete = (name: string) => {
-    const parts = tags().split(/[,，]/);
-    parts[parts.length - 1] = ` ${name}`;
-    tags.set(`${parts.join(",").trim()}, `);
-  };
 
   const save = async () => {
     if (busy()) return;
     const patch: Parameters<typeof updateBookmark>[1] = {};
     const t = title().trim();
     if (t && t !== b().title) patch.title = t;
-    const tg = parseTags(tags());
+    const typed = normalizeTag(tagQuery());
+    const tg = typed && !tags().includes(typed) ? [...tags(), typed] : tags();
     if (tg.join("\n") !== b().tags.join("\n")) patch.tags = tg;
     const n = note().trim();
     if (n !== (b().note ?? "").trim()) patch.note = n || null;
@@ -95,33 +74,7 @@ export function EditBookmark(props: { b: Bookmark; onDone: () => void; onCancel?
       </View>
       <View class="gap-1.5">
         {label("Tags")}
-        <Input
-          testID="edit-tags"
-          value={tags()}
-          placeholder="reading, rust, essays"
-          autoCapitalize="none"
-          autoCorrect={false}
-          onChange={({ value }) => tags.set(value)}
-          onSubmit={() => void save()}
-          class="rounded-xl px-3.5"
-          style={fieldStyle(40)}
-        />
-        <If when={suggestions().length}>
-          <View class="flex-row flex-wrap gap-1.5">
-            <Each of={suggestions()}>
-              {(t) => (
-                <View
-                  role="button"
-                  onPress={() => complete(t().name)}
-                  class="rounded-full px-2.5 py-1 active:opacity-60"
-                  style={{ backgroundColor: look().field }}
-                >
-                  <Text style={{ color: look().inkSoft, fontSize: 12.5 }}>#{t().name}</Text>
-                </View>
-              )}
-            </Each>
-          </View>
-        </If>
+        <TagField testID="edit-tags" value={tags} query={tagQuery} onSubmit={() => void save()} />
       </View>
       <View class="gap-1.5">
         {label("Note")}
