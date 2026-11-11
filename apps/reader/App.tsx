@@ -17,7 +17,7 @@ import {
   windowSize,
 } from "nsh";
 import { createNavStack, Dialog, NavPage, NavStack } from "nsh/base";
-import { isAvailable, Menu, titleBar, Window } from "nsh/desktop";
+import { isAvailable, Menu, titleBar } from "nsh/desktop";
 import { AddBookmark } from "./components/AddBookmark";
 import { EditBookmark } from "./components/EditBookmark";
 import { PromptHost, prompting } from "./components/Prompt";
@@ -80,6 +80,7 @@ const SYNC_EVERY = 5 * 60_000;
 const SIDEBAR = 240;
 /** The sidebar floats inset from the window's edges, as on macOS 26. */
 const INSET = 8;
+/** The hidden title bar's height: `nsh.json`'s `window.titleBar` says the same. */
 const TOOLBAR = 52;
 
 /**
@@ -95,16 +96,15 @@ const dialogMaxHeight = () => windowSize().height - 2 * (TOOLBAR + 12);
  */
 const nativeSidebar = hasGlass && platform.os === "macos" && Sidebar.available();
 
-if (isAvailable) Window.setTitleBar({ style: "hidden", height: TOOLBAR });
-
 /**
  * The Mac's window keeps room for the sidebar, the library's title and the
  * window toolbar's items beside it (`TITLE_ROOM` in `screens/Library.tsx`),
  * as Finder's does: the phone's Library page isn't made for a window (its
  * buttons lie under the traffic lights, its large title under the title bar).
+ * The room is `nsh.json`'s `window.minSize`, which the window has from its
+ * first frame, along with its hidden title bar.
  */
 const macWindow = platform.os === "macos";
-if (macWindow) Sidebar.minWindowSize(800, 480);
 
 /**
  * Sidebar beside the content: always on the Mac (its window keeps the room),
@@ -129,18 +129,13 @@ function App() {
     } else ready.set("settings");
   });
 
-  // Catch up whenever the app comes back to the front. nsh 0.4.0's web
-  // runtime doesn't have `lifecycle` (it's typed and documented), so the web
-  // build only syncs on start and on request.
-  const active = () => typeof lifecycle !== "function" || lifecycle() === "active";
-  if (typeof lifecycle === "function") {
-    effect(() => {
-      if (lifecycle() === "active" && ready() === "app") void sync();
-    });
-  }
-  // A window left open (the Mac's, a browser tab) stays current too.
+  // Catch up whenever the app comes back to the front (a browser tab too).
+  effect(() => {
+    if (lifecycle() === "active" && ready() === "app") void sync();
+  });
+  // A window left open in front (the Mac's, a browser tab) stays current too.
   const timer = setInterval(() => {
-    if (ready() === "app" && active()) void sync();
+    if (ready() === "app" && lifecycle() === "active") void sync();
   }, SYNC_EVERY);
   cleanup(() => clearInterval(timer));
 

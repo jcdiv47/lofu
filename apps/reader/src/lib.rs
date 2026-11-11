@@ -44,7 +44,6 @@ fn native(registry: &mut Registry) {
     registry.module::<Controls>();
     registry.module::<TextPrompt>();
     registry.module::<Keyboard>();
-    registry.module::<PullRefresh>();
     registry.module::<ShareExtension>();
     registry.module::<files::Files>();
     registry.module::<files::Secrets>();
@@ -76,13 +75,6 @@ impl Sidebar {
     /// Takes the system's sidebar away.
     pub fn hide() {
         sidebar::hide()
-    }
-
-    /// Keeps the window's content at least `width` × `height` points (macOS),
-    /// growing it there now if it's smaller: room for the sidebar beside the
-    /// library, as Finder's window keeps.
-    pub fn min_window_size(width: f64, height: f64) {
-        sidebar::set_min_size(width, height)
     }
 }
 
@@ -941,60 +933,6 @@ mod window {
                     None => return Some(top),
                 }
             }
-        }
-    }
-}
-
-/// Pull-to-refresh that nsh 0.4.0 misses on iOS 26 (`components/PullRefresh.tsx`).
-/// UIKit puts a scroll view's `UIRefreshControl` in a container of its own
-/// above a large title, and nsh sends the control's refresh to the node
-/// tagged on its superview: the container's tag, 0, so the app never hears
-/// of it and the spinner never stops.
-#[module]
-pub struct PullRefresh;
-
-#[module]
-impl PullRefresh {
-    /// Whether a refresh control in the key window is spinning.
-    pub async fn spinning() -> bool {
-        #[cfg(target_os = "ios")]
-        return pull_refresh::spinning().await;
-        #[cfg(not(target_os = "ios"))]
-        false
-    }
-}
-
-#[cfg(target_os = "ios")]
-mod pull_refresh {
-    use objc2::rc::Retained;
-    use objc2::runtime::AnyObject;
-    use objc2::{class, msg_send};
-    use objc2_foundation::NSArray;
-
-    pub async fn spinning() -> bool {
-        let (tx, rx) = std::sync::mpsc::channel::<bool>();
-        dispatch2::DispatchQueue::main().exec_async(move || {
-            // SAFETY: on the main thread, with UIKit's own classes.
-            let on = unsafe { super::window::key().is_some_and(|w| walk(&w)) };
-            let _ = tx.send(on);
-        });
-        nsh_core::prelude::blocking(move || rx.recv().unwrap_or(false))
-            .await
-            .unwrap_or(false)
-    }
-
-    unsafe fn walk(view: &AnyObject) -> bool {
-        unsafe {
-            if msg_send![view, isKindOfClass: class!(UIScrollView)] {
-                let control: Option<Retained<AnyObject>> = msg_send![view, refreshControl];
-                if let Some(control) = control
-                    && msg_send![&*control, isRefreshing]
-                {
-                    return true;
-                }
-            }
-            let subviews: Retained<NSArray<AnyObject>> = msg_send![view, subviews];
-            subviews.iter().any(|v| walk(&v))
         }
     }
 }

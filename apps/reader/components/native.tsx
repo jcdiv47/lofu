@@ -14,14 +14,14 @@ import { hasGlass } from "../lib/look";
 export const nativeControls = hasGlass && Controls.available();
 
 /**
- * The system's search field: iOS only. On macOS, nsh 0.4 never hands a
+ * The system's search field: iOS only. On macOS, nsh 0.4 and 0.5 never hand a
  * click to a component's own view, so `NSSearchField` couldn't be clicked
  * into; the app's field stands in there.
  */
 export const nativeSearchField = nativeControls && platform.os === "ios";
 
 /**
- * nsh 0.4's macOS backend loses a click on a native component's own view:
+ * nsh's macOS backend (0.4 and 0.5) loses a click on a native component's own view:
  * its picking finds the hosted view, but the root's `hitTest:` doesn't hand
  * it the event, and the root then drops it as the hosted view's. Clicks on
  * the app's own views are delivered, so buttons there take them through a

@@ -13,7 +13,7 @@ const bookmark = (id: string, over: Record<string, unknown> = {}) => ({
   faviconUrl: "/favicon.ico",
   domain: "example.com",
   type: "article",
-  tags: [],
+  tags: [] as string[],
   collectionId: null,
   favorite: false,
   archived: false,
@@ -32,7 +32,15 @@ const library = {
   cursor: 9,
   hasMore: false,
   collections: [
-    { id: "c1", name: "Homelab", parentId: null, sort: 1, color: null, deletedAt: null, seq: 1 },
+    {
+      id: "c1",
+      name: "Homelab",
+      parentId: null,
+      sort: 1,
+      color: null,
+      deletedAt: null as string | null,
+      seq: 1,
+    },
   ],
   bookmarks: [
     bookmark("a", { collectionId: "c1", tags: ["rust"], createdAt: "2026-11-04T10:00:00.000Z" }),

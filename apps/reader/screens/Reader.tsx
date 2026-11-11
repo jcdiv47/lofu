@@ -117,9 +117,11 @@ const withTitle = (markdown: string, title: string) => {
 
 /**
  * Gives each image its size and the server's proxy as its source. The editor
- * lays an image out only at an explicit width and height (a Markdown image,
- * which has neither, is drawn at 0×0), and doesn't keep it within the text,
- * so images get their measured size, scaled down to `textWidth`. Hotlink
+ * lays an image out at its explicit width and height; a Markdown image has
+ * neither, so it is 0 high until it loads, then at its own pixel size, not
+ * kept within the text (nsh 0.4 left it at 0×0). So images get their
+ * measured size, scaled down to `textWidth`, and the text doesn't move as
+ * they load. Hotlink
  * protection (WeChat, CSDN) refuses the original URL from another site's
  * page, hence the proxy. Images are matched by URL, or by position when the
  * parser changed a URL and the counts agree. Returns a new document.

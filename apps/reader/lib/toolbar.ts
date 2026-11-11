@@ -7,7 +7,7 @@ import { nativeControls } from "../components/native";
  * whose items AppKit draws in Liquid Glass on macOS 26 and groups into
  * capsules itself, with the system's search field. Its items get clicks as
  * any AppKit control does: they sit in the title bar, outside the root view
- * where nsh 0.4 loses clicks on native views (`components/native.tsx`).
+ * where nsh 0.4 and 0.5 lose clicks on native views (`components/native.tsx`).
  * Elsewhere, and on older systems, pages draw their own bars.
  */
 export const nativeToolbar = nativeControls && platform.os === "macos" && Toolbar.available();

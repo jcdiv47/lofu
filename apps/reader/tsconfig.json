@@ -1,5 +1,5 @@
 {
   "extends": "./.nsh/tsconfig.json",
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["e2e"]
+  "exclude": ["e2e", "share"]
 }

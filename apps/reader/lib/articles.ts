@@ -175,15 +175,6 @@ const hash = (s: string) => {
 };
 /** The file a picture of the article `id` is kept in. */
 export const pictureFile = (id: string, url: string) => `${PICTURE}${id}-${hash(url)}`;
-/**
- * What a picture's download is read for. (With Bun's types installed, the
- * checker sees `fetch`'s `Response` and nsh's as two types: lib/api.ts.)
- */
-interface Fetched {
-  ok: boolean;
-  headers: { get(name: string): string | null };
-  bytes(): Promise<Uint8Array>;
-}
 /** Pictures of one article fetched at once. */
 const PICTURES_AT_ONCE = 3;
 
@@ -232,7 +223,7 @@ export async function keepPictures(
   await inTurn(todo, PICTURES_AT_ONCE, async (url) => {
     if (unreachable) return;
     try {
-      const res = (await fetch(url)) as unknown as Fetched;
+      const res = await fetch(url);
       const type = res.headers.get("content-type") ?? "";
       if (!res.ok || !type.startsWith("image/")) return; // Gone, or not a picture.
       await writeBytes(pictureFile(id, url), await res.bytes());

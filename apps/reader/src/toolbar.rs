@@ -6,7 +6,7 @@
 //! toolbar it didn't install alone.
 //!
 //! The items sit in the title bar, outside nsh's root view, so clicks reach
-//! them as they reach any AppKit control (inside the root, nsh 0.4 loses a
+//! them as they reach any AppKit control (inside the root, nsh 0.4 and 0.5 lose a
 //! click on a hosted view: see `components/native.tsx`).
 //!
 //! TSX describes the items as JSON (`set`); clicks and search edits come
