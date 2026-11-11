@@ -4,5 +4,15 @@
   "version": "1.0.0",
   "build": 1,
   "rust": ".",
-  "icon": "../../design/logo/logo.png"
+  "icon": "../../design/logo/logo.png",
+  "window": {
+    "titleBar": {
+      "style": "hidden",
+      "height": 52
+    },
+    "minSize": {
+      "width": 800,
+      "height": 480
+    }
+  }
 }

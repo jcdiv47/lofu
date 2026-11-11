@@ -143,24 +143,6 @@ export async function launch(opts: {
       }
       await page.mouse("mouseReleased", x2, y2);
     },
-    /** Click at the start, Shift+click at the end: the desktop way to extend a selection. */
-    async shiftSelect(x1: number, y1: number, x2: number, y2: number) {
-      const m = (type: string, x: number, y: number, modifiers = 0) =>
-        s("Input.dispatchMouseEvent", {
-          type,
-          x,
-          y,
-          button: "left",
-          buttons: type === "mouseReleased" ? 0 : 1,
-          clickCount: 1,
-          modifiers,
-        });
-      await m("mousePressed", x1, y1);
-      await m("mouseReleased", x1, y1);
-      await Bun.sleep(100);
-      await m("mousePressed", x2, y2, 8); // 8 = Shift
-      await m("mouseReleased", x2, y2, 8);
-    },
     async type(text: string) {
       for (const ch of text) await s("Input.dispatchKeyEvent", { type: "char", text: ch });
     },

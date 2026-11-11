@@ -517,7 +517,6 @@ export function Library(props: {
               class="flex-1"
               refreshing={pull.refreshing()}
               onRefresh={pull.onRefresh}
-              onScrollDragEnd={pull.onScrollDragEnd}
               keyboardDismissMode="on-drag"
               keyboardShouldPersistTaps="handled"
               contentStyle={{ paddingTop: 4, paddingBottom: SEARCH_H + 40 }}

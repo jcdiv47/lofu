@@ -8,8 +8,8 @@
 //!   `glassEffect` doesn't.
 //! - `lofu.searchField` (iOS): `UISearchTextField` on a capsule of
 //!   interactive glass, with the system's magnifier, clear button, caret
-//!   and keyboard handling. macOS keeps the app's own field: nsh 0.4 never
-//!   hands a click to a component's view there (see `native.tsx`).
+//!   and keyboard handling. macOS keeps the app's own field: nsh 0.4 and 0.5 never
+//!   hand a click to a component's view there (see `native.tsx`).
 //!
 //! Props arrive as JSON (`set_prop`), each when it changes and all of them
 //! right after the component is made; events go back with `cx.emit`. UIKit

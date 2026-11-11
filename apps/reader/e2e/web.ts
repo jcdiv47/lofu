@@ -28,13 +28,6 @@ function check(name: string, ok: boolean, detail = "") {
   console.log(`${ok ? "✓" : "✗"} ${name}${!ok && detail ? `\n    ${detail}` : ""}`);
   if (!ok) failures++;
 }
-/** A check that documents an upstream bug: reported, not counted as a failure. */
-function known(name: string, ok: boolean, issue: string) {
-  console.log(
-    `${ok ? "✓" : "!"} ${name}${ok ? " (fixed upstream? drop the workaround)" : `: known issue, ${issue}`}`,
-  );
-}
-
 type Highlight = { id: string; quote: string; prefix: string; suffix: string };
 async function api<T>(method: string, path: string): Promise<T> {
   const res = await fetch(`${SERVER}${path}`, {
@@ -67,7 +60,8 @@ const isDecorated = (quote: string) => `(() => {
   return false;
 })()`;
 
-const page = await launch({ profile: "/tmp/lofu-reader-e2e", width: 800, height: 1000 });
+// Wide enough for the library's title beside its controls, as the Mac's window keeps.
+const page = await launch({ profile: "/tmp/lofu-reader-e2e", width: 1100, height: 1000 });
 try {
   await page.goto(APP);
   await connect(page, SERVER, TOKEN);
@@ -88,21 +82,12 @@ try {
     await page.eval<boolean>(isDecorated("the shape of the intersection")),
   );
 
-  // A mouse drag should select; in nsh 0.4.0's web backend it doesn't.
+  // A mouse drag selects (nsh 0.5; in 0.4 it didn't: longbridge/nsh#1004).
   const target = "decide what to work on";
   const box = await page.waitForText(target);
   await page.drag(box.x + 1, box.y + box.h / 2, box.x + box.w - 1, box.y + box.h / 2);
-  known(
-    "a mouse drag selects text in the read-only RichEditor",
-    Boolean(await page.waitForText("=Highlight", 1500).catch(() => null)),
-    "nsh 0.4.0 web: RichEditor ignores drag-to-select, longbridge/nsh#1004 (Shift+click and Shift+arrows work)",
-  );
-  await page.click(box.x - 40, box.y - 30); // collapse whatever happened
-
-  // Select it with click + Shift+click instead.
-  await page.shiftSelect(box.x + 1, box.y + box.h / 2, box.x + box.w - 1, box.y + box.h / 2);
   const bubble = await page.waitForText("=Highlight", 3000).catch(() => null);
-  check("selecting text shows the Highlight bubble", Boolean(bubble));
+  check("a mouse drag selects text and shows the Highlight bubble", Boolean(bubble));
   console.log(`  screenshot: ${await page.screenshot(SHOTS, "web-selection")}`);
   if (bubble) await page.clickText("=Highlight");
   await page.waitForText("2 highlights", 5000).catch(() => null);
@@ -150,12 +135,7 @@ try {
   await openByTitle(page, "React Hooks 入门教程");
   const zhText = "组件尽量写成纯函数";
   const zhBox = await page.scrollTo(zhText);
-  await page.shiftSelect(
-    zhBox.x + 1,
-    zhBox.y + zhBox.h / 2,
-    zhBox.x + zhBox.w - 1,
-    zhBox.y + zhBox.h / 2,
-  );
+  await page.drag(zhBox.x + 1, zhBox.y + zhBox.h / 2, zhBox.x + zhBox.w - 1, zhBox.y + zhBox.h / 2);
   if (await page.waitForText("=Highlight", 3000).catch(() => null))
     await page.clickText("=Highlight");
   await page.waitForText("1 highlight", 5000).catch(() => null);
