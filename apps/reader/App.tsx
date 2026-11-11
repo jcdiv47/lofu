@@ -3,6 +3,7 @@ import {
   cleanup,
   computed,
   effect,
+  type JSX,
   keyboardFrame,
   lifecycle,
   mount,
@@ -10,7 +11,9 @@ import {
   Scroll,
   signal,
   Text,
+  untracked,
   View,
+  type ViewStyle,
   windowSize,
 } from "nsh";
 import { createNavStack, Dialog, NavPage, NavStack } from "nsh/base";
@@ -271,10 +274,9 @@ function Desktop(props: { onReconnect: () => void }) {
           }}
         </NavStack>
       </View>
-      <Dialog
+      <GlassDialog
         open={settingsOpen()}
-        animation="fade"
-        onOpenChange={(e) => settingsOpen.set(e.open)}
+        onClose={() => settingsOpen.set(false)}
         backdropClass="bg-black/40"
         class="m-auto w-[500px] overflow-hidden rounded-[26px]"
         // Taller than a short window: it scrolls inside it.
@@ -290,13 +292,10 @@ function Desktop(props: { onReconnect: () => void }) {
             }}
           />
         </Scroll>
-      </Dialog>
-      <Dialog
+      </GlassDialog>
+      <GlassDialog
         open={!!editing()}
-        animation="fade"
-        onOpenChange={(e) => {
-          if (!e.open) editing.set(null);
-        }}
+        onClose={() => editing.set(null)}
         backdropClass="bg-black/25"
         class="m-auto w-[480px] overflow-hidden rounded-[26px]"
         style={{ ...glass(), borderCurve: "continuous" }}
@@ -316,11 +315,10 @@ function Desktop(props: { onReconnect: () => void }) {
             </View>
           )}
         </If>
-      </Dialog>
-      <Dialog
+      </GlassDialog>
+      <GlassDialog
         open={adding()}
-        animation="fade"
-        onOpenChange={(e) => adding.set(e.open)}
+        onClose={() => adding.set(false)}
         backdropClass="bg-black/25"
         class="m-auto w-[440px] overflow-hidden rounded-[26px]"
         style={{ ...glass(), borderCurve: "continuous" }}
@@ -336,8 +334,61 @@ function Desktop(props: { onReconnect: () => void }) {
             />
           </View>
         </If>
-      </Dialog>
+      </GlassDialog>
     </View>
+  );
+}
+
+/**
+ * A dialog on glass that fades in and closes at once. nsh (0.4 and 0.5) fades
+ * a closing dialog out as a picture of it, which `renderInContext` takes
+ * without the Liquid Glass, the blur or the backdrop: a flat grey panel
+ * flashes over an undimmed page (longbridge/nsh#1719). So the fade is only
+ * the way in. `open` going false removes the dialog in the same update that
+ * would change its `animation`, so the change wouldn't reach it in time:
+ * `animation` turns to `"none"` first and the dialog closes a frame later.
+ * Escape and a press on the backdrop close it through `onClose` too, rather
+ * than natively with the fade.
+ */
+function GlassDialog(props: {
+  open: boolean;
+  onClose: () => void;
+  backdropClass: string;
+  class: string;
+  style: ViewStyle;
+  children: JSX.Element;
+}) {
+  const shown = signal(false);
+  const fade = signal(true);
+  effect(() => {
+    if (props.open) {
+      fade.set(true);
+      shown.set(true);
+      return;
+    }
+    if (!untracked(shown)) return;
+    fade.set(false);
+    // A frame later: a timer would run in this turn, and its close would
+    // reach the platform in the same batch as the new `animation`.
+    const frame = requestAnimationFrame(() => shown.set(false));
+    cleanup(() => cancelAnimationFrame(frame));
+  });
+  return (
+    <Dialog
+      open={shown()}
+      animation={fade() ? "fade" : "none"}
+      closeOnEscape={false}
+      closeOnBackdropPress={false}
+      onCancel={() => props.onClose()}
+      onOpenChange={(e) => {
+        if (!e.open) props.onClose();
+      }}
+      backdropClass={props.backdropClass}
+      class={props.class}
+      style={props.style}
+    >
+      {props.children}
+    </Dialog>
   );
 }
 
