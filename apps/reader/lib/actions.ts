@@ -9,6 +9,7 @@ import {
   collectionName,
   collections,
   countFor,
+  createCollection,
   deleteCollection,
   deleteForever,
   deleteTag,
@@ -566,6 +567,19 @@ export async function showSourceMenu(s: Source, at?: At, onGone?: () => void) {
     : await actionSheet(title, actions);
   actions.find((a) => a.id === chosen)?.run();
 }
+
+/** Asks for a new collection's name and makes it; `onCreated` gets it once the server has. */
+export const newCollectionPrompt = (onCreated?: (id: string) => void) =>
+  promptText({
+    title: "New collection",
+    value: "",
+    placeholder: "Name",
+    confirm: "Create",
+    run: async (name) => {
+      const c = await createCollection(name);
+      onCreated?.(c.id);
+    },
+  });
 
 const renameCollectionPrompt = (id: string) =>
   promptText({

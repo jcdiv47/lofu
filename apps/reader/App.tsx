@@ -23,6 +23,7 @@ import {
   deleteBookmark,
   editBookmark,
   focusSearch,
+  newCollectionPrompt,
   openBookmark,
   openInBrowser,
   openOriginal,
@@ -197,6 +198,7 @@ function Desktop(props: { onReconnect: () => void }) {
     select,
     reading,
     add: () => adding.set(true),
+    newCollection: () => void newCollectionPrompt((id) => select({ kind: "collection", id })),
     settings: () => settingsOpen.set(true),
     back: () => {
       if (nav.routes().length > 1) nav.pop();
@@ -348,6 +350,7 @@ function useMenuBar(app: {
   select: (s: Source) => void;
   reading: () => Bookmark | null;
   add: () => void;
+  newCollection: () => void;
   settings: () => void;
   back: () => void;
 }) {
@@ -378,6 +381,7 @@ function useMenuBar(app: {
         label: "File",
         submenu: [
           { label: "New Bookmark…", shortcut: "mod+n", onSelect: app.add },
+          { label: "New Collection…", shortcut: "mod+shift+n", onSelect: app.newCollection },
           { type: "separator" },
           { role: "close" },
         ],

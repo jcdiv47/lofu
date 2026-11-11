@@ -1,7 +1,7 @@
 import type { TouchProps, ViewStyle } from "nsh";
 import { PanResponder, Scroll, signal, Text, View } from "nsh";
 import { Icon, type IconName } from "../components/ui";
-import { showSourceMenu } from "../lib/actions";
+import { newCollectionPrompt, showSourceMenu } from "../lib/actions";
 import { fonts, look } from "../lib/look";
 import {
   isCollapsed,
@@ -140,24 +140,46 @@ export function Sources(props: {
     );
   };
 
-  /** Clicking a section's name folds it away, as Raindrop's sidebar does. */
-  const heading = (section: Section, label: string) => (
-    <View
-      role="button"
-      accessibilityLabel={isCollapsed(section) ? `Show ${label}` : `Hide ${label}`}
-      accessibilityState={{ expanded: !isCollapsed(section) }}
-      testID={`section-${section}`}
-      onPress={() => toggleSection(section)}
-      class="mx-2 mt-4 mb-0.5 flex-row items-center rounded-lg px-2.5 py-1"
-      hoverStyle={{ backgroundColor: hoverBg() }}
-      activeStyle={{ backgroundColor: selectedBg() }}
-    >
-      <Text
-        class="flex-1"
-        style={{ color: look().inkFaint, fontSize: 11, fontWeight: "600", letterSpacing: 0.6 }}
+  /**
+   * Clicking a section's name folds it away, as Raindrop's sidebar does. A
+   * section that things can be added to has a + at the end of its heading.
+   */
+  const heading = (
+    section: Section,
+    label: string,
+    add?: { label: string; testID: string; run: () => void },
+  ) => (
+    <View class="mx-2 mt-4 mb-0.5 flex-row items-center gap-1">
+      <View
+        role="button"
+        accessibilityLabel={isCollapsed(section) ? `Show ${label}` : `Hide ${label}`}
+        accessibilityState={{ expanded: !isCollapsed(section) }}
+        testID={`section-${section}`}
+        onPress={() => toggleSection(section)}
+        class="flex-1 flex-row items-center rounded-lg px-2.5 py-1"
+        hoverStyle={{ backgroundColor: hoverBg() }}
+        activeStyle={{ backgroundColor: selectedBg() }}
       >
-        {label.toUpperCase()}
-      </Text>
+        <Text
+          class="flex-1"
+          style={{ color: look().inkFaint, fontSize: 11, fontWeight: "600", letterSpacing: 0.6 }}
+        >
+          {label.toUpperCase()}
+        </Text>
+      </View>
+      {add ? (
+        <View
+          role="button"
+          accessibilityLabel={add.label}
+          testID={add.testID}
+          onPress={add.run}
+          class="h-6 w-6 items-center justify-center rounded-lg"
+          hoverStyle={{ backgroundColor: hoverBg() }}
+          activeStyle={{ backgroundColor: selectedBg() }}
+        >
+          <Icon name="plus" size={13} color={look().inkFaint} />
+        </View>
+      ) : null}
     </View>
   );
 
@@ -211,38 +233,40 @@ export function Sources(props: {
           {row({ kind: "unsorted" }, "inbox", "Unsorted", "source-unsorted")}
           {row({ kind: "trash" }, "trash", "Trash", "source-trash")}
         </View>
-        <If when={sortedCollections().length}>
-          {heading("collections", "Collections")}
-          <If when={!isCollapsed("collections")}>
-            <View class="gap-px px-2" testID="collections">
-              <Each of={sortedCollections()} key={(c) => c.id}>
-                {(c, i) =>
-                  row(
-                    { kind: "collection", id: c().id },
-                    "folder",
-                    c().name,
-                    `collection-${c().id}`,
-                    undefined,
-                    draggable(c().id, i),
-                  )
-                }
-              </Each>
-              <If when={slot() >= 0}>
-                <View
-                  testID="drop-line"
-                  class="absolute right-2 left-2"
-                  style={{
-                    pointerEvents: "none",
-                    zIndex: 1,
-                    top: slot() * ROW - 1.5,
-                    height: 2,
-                    borderRadius: 1,
-                    backgroundColor: look().stamp,
-                  }}
-                />
-              </If>
-            </View>
-          </If>
+        {heading("collections", "Collections", {
+          label: "New collection",
+          testID: "new-collection",
+          run: () => void newCollectionPrompt((id) => props.onSelect({ kind: "collection", id })),
+        })}
+        <If when={!isCollapsed("collections")}>
+          <View class="gap-px px-2" testID="collections">
+            <Each of={sortedCollections()} key={(c) => c.id}>
+              {(c, i) =>
+                row(
+                  { kind: "collection", id: c().id },
+                  "folder",
+                  c().name,
+                  `collection-${c().id}`,
+                  undefined,
+                  draggable(c().id, i),
+                )
+              }
+            </Each>
+            <If when={slot() >= 0}>
+              <View
+                testID="drop-line"
+                class="absolute right-2 left-2"
+                style={{
+                  pointerEvents: "none",
+                  zIndex: 1,
+                  top: slot() * ROW - 1.5,
+                  height: 2,
+                  borderRadius: 1,
+                  backgroundColor: look().stamp,
+                }}
+              />
+            </If>
+          </View>
         </If>
         {heading("filters", "Filters")}
         <If when={!isCollapsed("filters")}>
