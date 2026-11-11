@@ -1007,7 +1007,8 @@ export function Reader(props: {
                 "heading[level=2]": "text-[24px] leading-[31px]",
                 "heading[level=3]": "text-[20px] leading-[27px]",
                 blockquote: `pl-4 border-l-2 border-[${look().rule}]`,
-                codeBlock: "rounded-md p-3 font-mono text-[13px] leading-[20px]",
+                // A panel of its own, as code is set apart on the page it came from.
+                codeBlock: `mt-1 mb-6 rounded-lg px-4 py-3 font-mono text-[13px] leading-[20px] bg-[${look().paperDeep}] border border-[${look().rule}]`,
                 table: "my-6",
                 tableCell: `px-3 py-2 border-b border-[${look().rule}]`,
                 tableHeader: `px-3 py-2 border-b-2 border-[${look().rule}] font-semibold`,
@@ -1018,7 +1019,7 @@ export function Reader(props: {
                 "paragraph[textAlign=justify]": `text-[15px] leading-[23px] mb-2 text-[${look().inkSoft}]`,
               },
               marks: {
-                code: "font-mono text-[15px]",
+                code: `font-mono text-[15px] rounded-sm bg-[${look().paperDeep}]`,
                 bold: "font-bold",
                 link: `text-[${look().stamp}] underline`,
                 // Footnote numbers: the editor can't raise text, so small and in the accent.
