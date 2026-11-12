@@ -6,6 +6,7 @@ import { Fetcher } from "./extract/fetch.ts";
 import { ImageCache } from "./extract/imageCache.ts";
 import { ImageProxy } from "./extract/images.ts";
 import { MARKDOWN_VERSION, PLAIN_EXTRACTORS } from "./extract/markdown.ts";
+import { allowPrivateNetworks } from "./extract/netguard.ts";
 import { PdfExtractor } from "./extract/pdf.ts";
 import { ExtractPool } from "./extract/pool.ts";
 import { extractHandler } from "./jobs/extract.ts";
@@ -24,6 +25,7 @@ import { TokenStore } from "./store/tokens.ts";
 
 /** Builds every long-lived component. Shared by main.ts and the tests. */
 export function wire(config: Config) {
+  allowPrivateNetworks(config.fetchPrivate);
   const db = openDb(config.dbPath);
 
   // Late-bound so stores can be built before the runner/indexer exist.

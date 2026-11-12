@@ -60,6 +60,13 @@ describe("bookmarks", () => {
     expect(plain.data).toContain("zymurgy");
   });
 
+  test("a page's HTML can't run as a document on the API's origin", async () => {
+    const { res } = await api("GET", `/v1/bookmarks/${id}/content?format=html`);
+    expect(res.headers.get("content-type")).toStartWith("text/html");
+    expect(res.headers.get("content-security-policy")).toContain("sandbox");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
   test("user-set title survives extraction; html payload skips fetching", async () => {
     const r = await api("POST", "/v1/bookmarks", {
       url: "https://unreachable.invalid/private-page",

@@ -48,6 +48,12 @@ export const config = {
   browserIdleMs: int("LOFU_BROWSER_IDLE_MS", 5 * 60_000),
   /** GitHub API token for README fetches; raises the limit from 60 to 5,000 an hour. */
   githubToken: process.env.LOFU_GITHUB_TOKEN || null,
+  /**
+   * Let fetches reach private and loopback addresses (netguard.ts). Off, a
+   * saved page can't make the server request anything on its own network.
+   * Turn on to bookmark pages on your LAN.
+   */
+  fetchPrivate: process.env.LOFU_FETCH_PRIVATE === "1",
   meiliUrl: process.env.MEILI_URL ?? "",
   meiliKey: process.env.MEILI_MASTER_KEY ?? "",
   meiliIndex: process.env.MEILI_INDEX ?? "bookmarks",
@@ -61,7 +67,7 @@ export const config = {
     .split(",")
     .map((s) => s.trim().replace(/\/$/, ""))
     .filter(Boolean),
-  /** Disable auth entirely. Only for tests and local experiments. */
+  /** Disable auth entirely. Only for tests and local experiments; refused unless bound to loopback. */
   authDisabled: process.env.LOFU_AUTH_DISABLED === "1",
 };
 

@@ -112,6 +112,10 @@ export function bookmarkRoutes(app: OpenAPIHono, ctx: AppContext) {
       "content-type": `${type}; charset=utf-8`,
       vary: "accept-encoding",
       "cache-control": "private, no-cache",
+      // The page's own HTML, served from the API's origin: opened as a
+      // document it must not run scripts or load anything there.
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+      "x-content-type-options": "nosniff",
     };
     if (/\bzstd\b/.test(c.req.header("accept-encoding") ?? "")) {
       headers["content-encoding"] = "zstd";

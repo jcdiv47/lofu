@@ -1,7 +1,12 @@
 import { isRedirectLink, unwrapUrl } from "@lofu/shared";
 import { HONEST_USER_AGENT } from "./fetch.ts";
+import { assertPublicUrl, type FetchFn } from "./netguard.ts";
 
-type FetchFn = (url: string, init: RequestInit) => Promise<Response>;
+/** One hop, off private networks. */
+const publicHop: FetchFn = async (url, init) => {
+  await assertPublicUrl(url);
+  return fetch(url, init);
+};
 
 const MAX_HOPS = 6;
 /** Interstitial pages are small; a shortener answering with a whole page is done. */
@@ -45,7 +50,7 @@ export async function resolveLink(
   url: string,
   opts: { fetch?: FetchFn; timeoutMs?: number } = {},
 ): Promise<string> {
-  const fetchFn = opts.fetch ?? fetch;
+  const fetchFn = opts.fetch ?? publicHop;
   const deadline = AbortSignal.timeout(opts.timeoutMs ?? 6000);
   let current = unwrapUrl(url);
   try {

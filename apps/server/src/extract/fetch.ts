@@ -1,5 +1,6 @@
 import type { BookmarkType } from "@lofu/shared";
 import { Semaphore } from "../util/semaphore.ts";
+import { BlockedAddressError, publicFetch } from "./netguard.ts";
 
 export type FetchResult =
   | { kind: "html"; html: string; finalUrl: string; bytes: number }
@@ -162,11 +163,11 @@ export class Fetcher {
    * HTTPS requests try HTTP/2 first, like a browser. Some servers reject
    * HTTP/1.1 clients outright (e.g. paulgraham.com answers 500), while others
    * don't speak h2 at all; those fail fast and are retried over HTTP/1.1.
-   * Uses Bun's experimental `protocol` fetch option.
+   * Uses Bun's experimental `protocol` fetch option. Redirects are followed
+   * by `publicFetch`, which keeps every hop off private networks.
    */
-  private async request(url: string, req: RequestOptions = {}): Promise<Response> {
+  private request(url: string, req: RequestOptions = {}): Promise<Response> {
     const init: RequestInit = {
-      redirect: "follow",
       signal: AbortSignal.timeout(this.opts.timeoutMs),
       headers: {
         "user-agent": req.userAgent ?? USER_AGENT,
@@ -175,6 +176,10 @@ export class Fetcher {
         ...req.headers,
       },
     };
+    return publicFetch(url, init, (hopUrl, hopInit) => this.requestOnce(hopUrl, hopInit));
+  }
+
+  private async requestOnce(url: string, init: RequestInit): Promise<Response> {
     const host = new URL(url).host;
     if (this.opts.http2 && url.startsWith("https:") && !this.h1Only.has(host)) {
       try {
@@ -194,6 +199,7 @@ export class Fetcher {
     try {
       res = await this.request(url, req);
     } catch (e) {
+      if (e instanceof BlockedAddressError) throw new FetchError(e.message, true);
       throw new FetchError(`fetch failed: ${(e as Error).message}`, false);
     }
     const finalUrl = res.url || url;
