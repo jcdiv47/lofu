@@ -33,31 +33,71 @@ describe.if(Boolean(chromium))("browser fallback (real Chromium)", () => {
 });
 
 describe.if(Boolean(chromium))("browser requests to private networks (real Chromium)", () => {
-  test("a page's own requests can't reach the LAN", async () => {
-    let hits = 0;
-    const lan = Bun.serve({
+  // Chromium goes through a local proxy, so pages can sit at public addresses
+  // (which the guard lets through) and their requests to private ones arrive
+  // here when nothing stops them (Chromium's own local-network checks see
+  // only the proxy's address).
+  async function lanHits(guarded: boolean): Promise<string[]> {
+    const hits: string[] = [];
+    const lan = "http://10.0.0.1";
+    const html = (body: string) =>
+      new Response(`<!doctype html><title>t</title>${body}`, {
+        headers: { "content-type": "text/html" },
+      });
+    const proxy = Bun.serve({
       port: 0,
-      fetch: () => {
-        hits++;
-        return new Response("secret");
+      fetch: (req) => {
+        const u = new URL(req.url);
+        if (u.hostname === "8.8.8.8") {
+          // An article whose scripts, worker and cross-site frame aim at the LAN.
+          return html(`<iframe src="http://1.1.1.1/frame"></iframe><script>
+            fetch("${lan}/hit-fetch").catch(() => {});
+            const s = document.createElement("script"); s.src = "${lan}/hit-script"; document.head.append(s);
+            new Worker(URL.createObjectURL(new Blob(['fetch("${lan}/hit-worker")'], { type: "text/javascript" })));
+            setTimeout(() => { location.href = "${lan}/hit-nav"; }, 1500);
+          </script>`);
+        }
+        if (u.hostname === "1.1.1.1") {
+          return html(`<script>fetch("${lan}/hit-frame").catch(() => {});</script>`);
+        }
+        if (u.pathname.startsWith("/hit-")) hits.push(u.pathname);
+        return new Response("secret", { headers: { "access-control-allow-origin": "*" } });
       },
     });
     const browser = new Browser(
-      { kind: "launch", executable: chromium!, args: [] },
-      { concurrency: 1, timeoutMs: 6_000, idleMs: 60_000 },
+      {
+        kind: "launch",
+        executable: chromium!,
+        args: [
+          `--proxy-server=http://127.0.0.1:${proxy.port}`,
+          "--proxy-bypass-list=<-loopback>",
+          "--disable-features=HttpsUpgrades,HttpsFirstBalancedModeAutoEnable",
+        ],
+      },
+      { concurrency: 1, timeoutMs: 5_000, idleMs: 60_000 },
     );
-    allowPrivateNetworks(false);
+    allowPrivateNetworks(!guarded);
     try {
-      const target = `http://127.0.0.1:${lan.port}/hit`;
-      const page = `<title>t</title><script>fetch(${JSON.stringify(target)}).catch(()=>{});
-        const s=document.createElement("script");s.src=${JSON.stringify(`${target}.js`)};document.head.append(s);
-        setTimeout(()=>{location.href=${JSON.stringify(`${target}-nav`)}},500);</script>`;
-      await browser.render(`data:text/html,${encodeURIComponent(page)}`).catch(() => null);
-      expect(hits).toBe(0);
+      await browser.render("http://8.8.8.8/article").catch(() => null);
+      return hits.sort();
     } finally {
       allowPrivateNetworks(true);
       browser.shutdown();
-      lan.stop(true);
+      proxy.stop(true);
     }
+  }
+
+  test("without the guard, the page's requests reach the LAN (the test sees them)", async () => {
+    expect(await lanHits(false)).toEqual([
+      "/hit-fetch",
+      "/hit-frame",
+      "/hit-nav",
+      "/hit-script",
+      "/hit-worker",
+    ]);
+  }, 30_000);
+
+  test("with it, none of them do: page, worker, cross-site frame", async () => {
+    expect(await lanHits(true)).toEqual([]);
   }, 30_000);
 });

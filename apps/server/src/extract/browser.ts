@@ -303,20 +303,46 @@ export class Browser {
       const mainFrame = targetId;
       let status: number | null = null;
       let idleAt = 0;
+      // The page and what it starts in processes of its own (cross-site
+      // frames, workers): each is attached paused, and resumed only once its
+      // requests are intercepted too.
+      const sessions = new Set([sessionId]);
+      const intercept = (id: string) =>
+        Promise.all([
+          conn.send("Fetch.enable", { patterns: [{ urlPattern: "*" }] }, id),
+          conn.send(
+            "Target.setAutoAttach",
+            { autoAttach: true, waitForDebuggerOnStart: true, flatten: true },
+            id,
+          ),
+        ]);
       unlisten = conn.on((m) => {
-        if (m.sessionId !== sessionId || !m.method) return;
+        if (!m.sessionId || !sessions.has(m.sessionId) || !m.method) return;
         const p = m.params ?? {};
         if (m.method === "Fetch.requestPaused") {
+          const from = m.sessionId;
           void screen(p)
             .then((ok) =>
               ok
-                ? s("Fetch.continueRequest", { requestId: p.requestId })
-                : s("Fetch.failRequest", {
-                    requestId: p.requestId,
-                    errorReason: "BlockedByClient",
-                  }),
+                ? conn.send("Fetch.continueRequest", { requestId: p.requestId }, from)
+                : conn.send(
+                    "Fetch.failRequest",
+                    { requestId: p.requestId, errorReason: "BlockedByClient" },
+                    from,
+                  ),
             )
             .catch(() => {});
+        } else if (m.method === "Target.attachedToTarget") {
+          const child = p.sessionId as string;
+          sessions.add(child);
+          // A target that can't be intercepted stays paused: it never runs.
+          void intercept(child)
+            .then(() => conn.send("Runtime.runIfWaitingForDebugger", {}, child))
+            .catch(() => {});
+        } else if (m.method === "Target.detachedFromTarget") {
+          sessions.delete(p.sessionId as string);
+        } else if (m.sessionId !== sessionId) {
+          return;
         } else if (m.method === "Network.responseReceived") {
           // Last main-document response wins (challenge 403 → redirect → 200).
           if (p.type === "Document" && p.frameId === mainFrame) {
@@ -338,7 +364,7 @@ export class Browser {
         // Every request pauses here: images, media and fonts are dropped, and
         // the rest must stay off private networks (netguard.ts), redirects
         // included (each hop pauses again).
-        s("Fetch.enable", { patterns: [{ urlPattern: "*" }] }),
+        intercept(sessionId),
         s("Page.enable"),
         s("Page.setLifecycleEventsEnabled", { enabled: true }),
       ]);
