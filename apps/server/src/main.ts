@@ -2,6 +2,15 @@ import { createApp, VERSION } from "./app.ts";
 import { config } from "./config.ts";
 import { wire } from "./wire.ts";
 
+const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost"]);
+if (config.authDisabled && !LOOPBACK.has(config.host)) {
+  console.error(
+    `LOFU_AUTH_DISABLED=1 leaves the API open to anyone who can reach it; ` +
+      `refusing to listen on ${config.host}. Bind to 127.0.0.1 or turn auth back on.`,
+  );
+  process.exit(1);
+}
+
 const sys = wire(config);
 const app = createApp(sys.ctx);
 

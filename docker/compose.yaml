@@ -14,15 +14,19 @@ services:
       LOFU_HOST: 0.0.0.0
       LOFU_PORT: 8787
       LOFU_DATA_DIR: /data
+      LOFU_BROWSER: http://browser:9222
       MEILI_URL: http://meilisearch:7700
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY in docker/.env}
     # Runs as uid 1000 (the image's `bun` user). Create the host dirs first
     # (`bun run stack:up` does) or Docker creates them root-owned.
     volumes:
       - ${LOFU_DATA:-../data}/server:/data
+    networks: [default, browser]
     depends_on:
       meilisearch:
         condition: service_healthy
+      browser:
+        condition: service_started
 
   meilisearch:
     image: getmeili/meilisearch:v1.56
@@ -40,3 +44,31 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+
+  # Headless Chromium for JavaScript-only pages and bot walls. It runs the
+  # scripts of pages you save, so it gets its own container: no data, no
+  # secrets, no published port, and a network shared with the server alone
+  # (it can't reach Meilisearch). Chromium's own sandbox needs privileges a
+  # container lacks; this container is the boundary instead. The server
+  # refuses its requests to private addresses (netguard.ts).
+  browser:
+    # A browser running untrusted pages wants updates more than pinning:
+    # `docker compose pull browser && bun run stack:up` now and then.
+    image: chromedp/headless-shell:stable
+    restart: unless-stopped
+    user: "65534:65534"
+    environment:
+      HOME: /tmp
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m
+    shm_size: 256m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1g
+    pids_limit: 512
+    networks: [browser]
+
+networks:
+  default:
+  browser:

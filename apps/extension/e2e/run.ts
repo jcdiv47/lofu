@@ -51,6 +51,7 @@ const sys = wire({
   browser: "off",
   meiliUrl: "",
   fetchHostIntervalMs: 0,
+  fetchPrivate: true, // the fixture site is on localhost
   authDisabled: false,
 });
 const app = createApp(sys.ctx);

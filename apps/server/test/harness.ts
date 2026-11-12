@@ -24,6 +24,7 @@ export function setupServer(overrides: Partial<Config> = {}) {
     extractWorkers: 2,
     fetchHostIntervalMs: 0, // every fixture URL is on one host
     browser: "off",
+    fetchPrivate: true, // the fixture site is on localhost
     meiliUrl: withSearch ? (process.env.MEILI_URL as string) : "",
     meiliIndex: `test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     ...overrides,

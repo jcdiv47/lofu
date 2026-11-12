@@ -10,15 +10,11 @@ RUN bun install --frozen-lockfile --production
 
 FROM oven/bun:1.4-slim
 # poppler-utils: pdftotext/pdfinfo for PDF full text.
-# chromium: headless fallback for JavaScript-only pages; launched on demand and
-# stopped when idle (no fonts needed: it only reads the DOM, never paints).
-# Set LOFU_BROWSER=off to skip it, and drop it from here to save ~0.5 GB.
+# No Chromium here: the browser fallback runs in its own container
+# (`browser` in compose.yaml), away from the database and the keys.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends poppler-utils chromium \
+  && apt-get install -y --no-install-recommends poppler-utils \
   && rm -rf /var/lib/apt/lists/*
-# Chromium's sandbox needs privileges containers don't have by default; the
-# container itself is the isolation boundary.
-ENV LOFU_CHROME_ARGS="--no-sandbox"
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=deps /app ./

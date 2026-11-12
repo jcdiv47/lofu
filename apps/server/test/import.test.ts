@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { openDb } from "../src/db/index.ts";
 import { Fetcher } from "../src/extract/fetch.ts";
+import { allowPrivateNetworks } from "../src/extract/netguard.ts";
 import { parseCsv } from "../src/importers/csv.ts";
 import { parseRaindropHighlights } from "../src/importers/raindrop.ts";
 import { noopHooks } from "../src/store/hooks.ts";
@@ -132,6 +133,7 @@ test("interactive jobs are claimed before bulk ones", () => {
 });
 
 test("fetcher paces requests to the same host", async () => {
+  allowPrivateNetworks(true); // the fixture site is on localhost
   const site = startFixtureServer();
   const f = new Fetcher({
     concurrency: 8,

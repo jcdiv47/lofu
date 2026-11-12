@@ -4,6 +4,7 @@ import { Semaphore } from "../util/semaphore.ts";
 import { BROWSER_USER_AGENT } from "./browser.ts";
 import { ImageCache } from "./imageCache.ts";
 import { type ImageSize, imageSize } from "./imageSize.ts";
+import { publicFetch } from "./netguard.ts";
 
 /**
  * Images in saved articles stay at their original URLs. Two things are kept
@@ -85,9 +86,8 @@ export async function measureImage(url: string): Promise<ImageSize | null> {
   if (!/^https?:\/\//i.test(url)) return null;
   const release = await probes.acquire();
   try {
-    const res = await fetch(url, {
+    const res = await publicFetch(url, {
       headers: { ...imageHeaders(url), range: `bytes=0-${PROBE_MAX_BYTES - 1}` },
-      redirect: "follow",
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
     if (!res.ok || !res.body || !isImageType(res.headers.get("content-type"))) {
@@ -297,9 +297,8 @@ export class ImageProxy {
     try {
       let res: Response;
       try {
-        res = await fetch(url, {
+        res = await publicFetch(url, {
           headers: imageHeaders(url),
-          redirect: "follow",
           signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
         });
       } catch (e) {

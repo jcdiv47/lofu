@@ -1,8 +1,11 @@
+import { lookup } from "node:dns/promises";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { isIP } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Semaphore } from "../util/semaphore.ts";
 import { detectBlockPage } from "./blocked.ts";
+import { assertPublicUrl } from "./netguard.ts";
 
 /**
  * Headless-Chromium fallback for pages a plain fetch can't get: JavaScript
@@ -14,7 +17,8 @@ import { detectBlockPage } from "./blocked.ts";
  * - Launched on first use and shut down after `idleMs`, so it costs no memory
  *   while nothing needs rendering. Or point it at an external CDP endpoint.
  * - Each render gets a fresh browser context (no cookies shared across sites).
- * - Images, media and fonts are blocked at the network layer.
+ * - Images, media and fonts are blocked at the network layer, and no request
+ *   reaches a private network (netguard.ts).
  * - Instead of a fixed delay, it polls until the page no longer looks like
  *   a challenge/interstitial, then waits briefly for the network to settle.
  *
@@ -228,13 +232,22 @@ export class Browser {
       if (this.source.kind === "launch") {
         wsUrl = await this.launch();
       } else {
-        const res = await fetch(`${this.source.endpoint}/json/version`, {
+        // Chromium answers DevTools requests only for an IP or `localhost` in
+        // the Host header (DNS rebinding protection), so a name such as a
+        // compose service (`http://browser:9222`) is resolved here first.
+        const endpoint = new URL(this.source.endpoint);
+        const name = endpoint.hostname.replace(/^\[|\]$/g, "");
+        if (!isIP(name) && name !== "localhost") {
+          const { address, family } = await lookup(name);
+          endpoint.hostname = family === 6 ? `[${address}]` : address;
+        }
+        const res = await fetch(new URL("/json/version", endpoint), {
           signal: AbortSignal.timeout(5000),
         });
         const { webSocketDebuggerUrl } = (await res.json()) as { webSocketDebuggerUrl: string };
         // Containers report their internal address; keep the host we were given.
         const ws = new URL(webSocketDebuggerUrl);
-        ws.host = new URL(this.source.endpoint).host;
+        ws.host = endpoint.host;
         wsUrl = ws.toString();
       }
       return CdpConnection.connect(wsUrl);
@@ -261,6 +274,15 @@ export class Browser {
   }
 
   private async renderOnce(url: string): Promise<RenderResult> {
+    const screen = async (p: Record<string, unknown>): Promise<boolean> => {
+      if ((BLOCKED_RESOURCES as readonly unknown[]).includes(p.resourceType)) return false;
+      const reqUrl = (p.request as { url: string }).url;
+      if (!/^https?:/i.test(reqUrl)) return true; // data:, blob: never touch the network
+      return assertPublicUrl(reqUrl).then(
+        () => true,
+        () => false,
+      );
+    };
     const conn = await this.connection();
     const { browserContextId } = await conn.send("Target.createBrowserContext", {
       disposeOnDetach: true,
@@ -285,10 +307,16 @@ export class Browser {
         if (m.sessionId !== sessionId || !m.method) return;
         const p = m.params ?? {};
         if (m.method === "Fetch.requestPaused") {
-          void s("Fetch.failRequest", {
-            requestId: p.requestId,
-            errorReason: "BlockedByClient",
-          }).catch(() => {});
+          void screen(p)
+            .then((ok) =>
+              ok
+                ? s("Fetch.continueRequest", { requestId: p.requestId })
+                : s("Fetch.failRequest", {
+                    requestId: p.requestId,
+                    errorReason: "BlockedByClient",
+                  }),
+            )
+            .catch(() => {});
         } else if (m.method === "Network.responseReceived") {
           // Last main-document response wins (challenge 403 → redirect → 200).
           if (p.type === "Document" && p.frameId === mainFrame) {
@@ -307,9 +335,10 @@ export class Browser {
           acceptLanguage: "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
           platform: "MacIntel",
         }),
-        s("Fetch.enable", {
-          patterns: BLOCKED_RESOURCES.map((resourceType) => ({ resourceType })),
-        }),
+        // Every request pauses here: images, media and fonts are dropped, and
+        // the rest must stay off private networks (netguard.ts), redirects
+        // included (each hop pauses again).
+        s("Fetch.enable", { patterns: [{ urlPattern: "*" }] }),
         s("Page.enable"),
         s("Page.setLifecycleEventsEnabled", { enabled: true }),
       ]);

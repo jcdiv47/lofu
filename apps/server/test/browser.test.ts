@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { findChromium } from "../src/extract/browser.ts";
+import { Browser, findChromium } from "../src/extract/browser.ts";
+import { allowPrivateNetworks } from "../src/extract/netguard.ts";
 import { setupServer } from "./harness.ts";
 
 const chromium = findChromium(process.env.LOFU_CHROME_PATH || undefined);
@@ -28,5 +29,35 @@ describe.if(Boolean(chromium))("browser fallback (real Chromium)", () => {
     const b = (await api("GET", `/v1/bookmarks/${r.data.id}`)).data;
     expect(b.contentStatus).toBe("failed");
     expect(b.contentError).toStartWith("blocked by site (HTTP 403); ");
+  }, 30_000);
+});
+
+describe.if(Boolean(chromium))("browser requests to private networks (real Chromium)", () => {
+  test("a page's own requests can't reach the LAN", async () => {
+    let hits = 0;
+    const lan = Bun.serve({
+      port: 0,
+      fetch: () => {
+        hits++;
+        return new Response("secret");
+      },
+    });
+    const browser = new Browser(
+      { kind: "launch", executable: chromium!, args: [] },
+      { concurrency: 1, timeoutMs: 6_000, idleMs: 60_000 },
+    );
+    allowPrivateNetworks(false);
+    try {
+      const target = `http://127.0.0.1:${lan.port}/hit`;
+      const page = `<title>t</title><script>fetch(${JSON.stringify(target)}).catch(()=>{});
+        const s=document.createElement("script");s.src=${JSON.stringify(`${target}.js`)};document.head.append(s);
+        setTimeout(()=>{location.href=${JSON.stringify(`${target}-nav`)}},500);</script>`;
+      await browser.render(`data:text/html,${encodeURIComponent(page)}`).catch(() => null);
+      expect(hits).toBe(0);
+    } finally {
+      allowPrivateNetworks(true);
+      browser.shutdown();
+      lan.stop(true);
+    }
   }, 30_000);
 });
