@@ -1,8 +1,18 @@
-import type { ExtractOutput, ExtractRequest, ExtractResponse, MarkdownOutput } from "./protocol.ts";
+import type {
+  ExtractOutput,
+  ExtractRequest,
+  ExtractResponse,
+  MarkdownOutput,
+  MathOutput,
+} from "./protocol.ts";
+
+type Output = ExtractOutput | MarkdownOutput | MathOutput;
+/** A request before the pool numbers it. */
+type Unnumbered<R = ExtractRequest> = R extends unknown ? Omit<R, "id"> : never;
 
 interface Task {
   req: ExtractRequest;
-  resolve: (o: ExtractOutput | MarkdownOutput) => void;
+  resolve: (o: Output) => void;
   reject: (e: Error) => void;
 }
 
@@ -31,18 +41,24 @@ export class ExtractPool {
   }
 
   run(html: string, url: string): Promise<ExtractOutput> {
-    return this.submit("extract", html, url) as Promise<ExtractOutput>;
+    return this.submit({ kind: "extract", html, url }) as Promise<ExtractOutput>;
   }
 
   /** Converts an extracted article's HTML to Markdown again (see extract/markdown.ts). */
   markdown(html: string, url: string): Promise<MarkdownOutput> {
-    return this.submit("markdown", html, url) as Promise<MarkdownOutput>;
+    return this.submit({ kind: "markdown", html, url }) as Promise<MarkdownOutput>;
   }
 
-  private submit(kind: ExtractRequest["kind"], html: string, url: string) {
+  /** Draws a formula's TeX as SVG (see extract/mathSvg.ts). */
+  math(tex: string, display: boolean): Promise<MathOutput> {
+    return this.submit({ kind: "math", tex, display }) as Promise<MathOutput>;
+  }
+
+  private submit(req: Unnumbered) {
     if (this.closed) return Promise.reject(new Error("extract pool closed"));
-    return new Promise<ExtractOutput | MarkdownOutput>((resolve, reject) => {
-      this.queue.push({ req: { id: this.nextId++, kind, html, url }, resolve, reject });
+    return new Promise<Output>((resolve, reject) => {
+      const numbered = { ...req, id: this.nextId++ } as ExtractRequest;
+      this.queue.push({ req: numbered, resolve, reject });
       this.pump();
     });
   }

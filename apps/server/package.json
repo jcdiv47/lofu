@@ -9,11 +9,12 @@
     "token": "bun src/admin.ts token"
   },
   "dependencies": {
-    "@lofu/shared": "workspace:*",
     "@hono/zod-openapi": "^1.6.3",
+    "@lofu/shared": "workspace:*",
     "defuddle": "^0.19.6",
     "hono": "^4.13.16",
     "linkedom": "^0.18.15",
+    "mathjax-full": "3.2.2",
     "zod": "^4.6.7"
   }
 }

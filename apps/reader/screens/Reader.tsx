@@ -58,7 +58,14 @@ import {
   showBookmarkMenu,
   toolbarActions,
 } from "../lib/actions";
-import { type ArticleImage, api, type Bookmark, type Highlight, OfflineError } from "../lib/api";
+import {
+  type ArticleImage,
+  api,
+  type Bookmark,
+  formulaUrl,
+  type Highlight,
+  OfflineError,
+} from "../lib/api";
 import {
   fetchArticle,
   type Kept,
@@ -78,6 +85,15 @@ import {
 import { isFootnoteNumber, numberFootnotes, raiseFootnotes } from "../lib/footnotes";
 import { readingTime } from "../lib/format";
 import { fonts, glass, look } from "../lib/look";
+import {
+  depthTitle,
+  type FormulaPicture,
+  MAX_DEPTH,
+  mathMarks,
+  pictureKey,
+  protectMath,
+  typesetMath,
+} from "../lib/math";
 import {
   bookmark as current,
   removeHighlight as dropHighlight,
@@ -124,14 +140,17 @@ const withTitle = (markdown: string, title: string) => {
  * they load. Hotlink
  * protection (WeChat, CSDN) refuses the original URL from another site's
  * page, hence the proxy. Images are matched by URL, or by position when the
- * parser changed a URL and the counts agree. Returns a new document.
+ * parser changed a URL and the counts agree; `formulas` (pictures of
+ * formulas, typesetMath) by URL only. Returns a new document.
  */
 export function placeImages(
   doc: RichNodeJSON,
   images: ArticleImage[],
   textWidth: number,
+  formulas: ArticleImage[] = [],
 ): RichNodeJSON {
   const out = JSON.parse(JSON.stringify(doc)) as RichNodeJSON;
+  const formulaSrc = new Map(formulas.map((f) => [f.src, f]));
   const bySrc = new Map(images.map((i) => [i.src, i]));
   const nodes: RichNodeJSON[] = [];
   const walk = (n: RichNodeJSON) => {
@@ -139,9 +158,15 @@ export function placeImages(
     n.content?.forEach(walk);
   };
   walk(out);
-  nodes.forEach((n, k) => {
+  // Formula pictures (typesetMath) are matched by URL only: the article's images by position too.
+  const articleNodes = nodes.filter((n) => !formulaSrc.has(String(n.attrs?.src ?? "")));
+  nodes.forEach((n) => {
     const src = String(n.attrs?.src ?? "");
-    const img = bySrc.get(src) ?? (nodes.length === images.length ? images[k] : undefined);
+    const k = articleNodes.indexOf(n);
+    const img =
+      formulaSrc.get(src) ??
+      bySrc.get(src) ??
+      (articleNodes.length === images.length ? images[k] : undefined);
     if (!img) return;
     n.attrs = { ...n.attrs, src: img.proxy ?? src };
     if (img.width && img.height) {
@@ -152,6 +177,14 @@ export function placeImages(
   });
   return out;
 }
+
+/** Classes lowering formula pictures in text by their depth (lib/math.ts `depthTitle`). */
+const depthClasses = Object.fromEntries(
+  Array.from({ length: MAX_DEPTH + 1 }, (_, k) => [
+    `image[title=${depthTitle(k)}]`,
+    `translate-y-[${k}px]`,
+  ]),
+);
 
 /** A long document's first page, in nodes (each a native view): a few screens. */
 const FIRST_PAGE = 300;
@@ -328,7 +361,14 @@ export function Reader(props: {
   let index: DocIndex = { text: "", pos: [] };
   let hasFootnotes = false;
   /** The document as parsed and the text width its images are sized for. */
-  let sized: { doc: RichNodeJSON; images: ArticleImage[]; width: number } | null = null;
+  let sized: {
+    doc: RichNodeJSON;
+    images: ArticleImage[];
+    formulas: ArticleImage[];
+    width: number;
+  } | null = null;
+  /** The ink formula pictures were shown in (they're drawn again in another). */
+  let shownInk: string | null = null;
   /** Room above the article: the desktop's floating toolbar, or iOS's
    * transparent header (the editor doesn't inset itself under it). */
   const topPad = () =>
@@ -493,43 +533,70 @@ export function Reader(props: {
   let last: Kept | null = null;
   let shownNote: string | null = null;
 
-  /** Shows an article (laid out from its Markdown), its highlights placed. */
-  const show = (a: Kept) => {
+  /**
+   * Shows an article (laid out from its Markdown), its highlights placed.
+   * `inPlace`: in the editor already shown, at the place the reader is (the
+   * view takes its session once: a new one wouldn't be seen).
+   */
+  const show = (a: Kept, inPlace = false) => {
     const markdown = a.markdown ?? "";
-    const content = numberFootnotes(withTitle(readable(markdown), props.bookmark.title));
-    const ed = createRichEditor({
+    const math = protectMath(withTitle(readable(markdown), props.bookmark.title));
+    const content = numberFootnotes(math.markdown);
+    const parser = createRichEditor({
       content,
       format: "markdown",
       editable: false,
-      extensions: [StarterKit, TableKit.configure({ table: { resizable: false } })],
+      extensions: [StarterKit, TableKit.configure({ table: { resizable: false } }), ...mathMarks],
       // StarterKit's link is the mark alone: opening a pressed link (the
       // editor being read-only, any press) is this plugin's. It opens in
       // the system's browser.
       plugins: [plugin, link({ openOnClick: true, autolink: false, linkOnPaste: false })],
     });
+    const ed = (inPlace && untracked(editor)) || parser;
     hasFootnotes = content.includes("\uE000");
     last = a;
     shownNote = b().note;
-    const parsed = ed.getJSON();
+    const parsed = parser.getJSON();
     const noted = withNote(parsed, shownNote);
     let doc = parsed;
-    if (a.images.length > 0 || hasFootnotes || content.includes("|") || noted.note) {
-      doc = compactCells(raiseFootnotes(noted.doc));
-      if (a.images.length > 0) {
-        sized = { doc, images: a.images, width: textWidth() };
-        doc = placeImages(doc, a.images, sized.width);
+    // Formulas as the server drew them, in this appearance's ink.
+    shownInk = untracked(look).ink;
+    const pictures = new Map<string, FormulaPicture>();
+    const formulaImages: ArticleImage[] = [];
+    for (const f of a.formulas ?? []) {
+      const url = formulaUrl(f, shownInk);
+      // Servers that drew only formulas on lines of their own sent no `display`.
+      pictures.set(pictureKey(f.tex, f.display ?? true), {
+        src: url,
+        width: f.width,
+        height: f.height,
+        depth: f.depth,
+      });
+      formulaImages.push({
+        src: url,
+        width: f.width,
+        height: f.height,
+        proxy: f.kept?.[url] ?? url,
+      });
+    }
+    const formulas = math.formulas.length > 0;
+    if (a.images.length > 0 || hasFootnotes || formulas || content.includes("|") || noted.note) {
+      doc = compactCells(raiseFootnotes(typesetMath(noted.doc, math.formulas, pictures)));
+      if (a.images.length > 0 || formulaImages.length > 0) {
+        sized = { doc, images: a.images, formulas: formulaImages, width: textWidth() };
+        doc = placeImages(doc, a.images, sized.width, formulaImages);
       }
     }
     // The whole text, though a long article is shown a page at a time.
     index = indexDoc(doc, isFootnoteNumber);
     if (noted.note) index = withoutRange(index, noted.note.from, noted.note.to);
-    present(ed, doc, doc !== parsed);
+    present(ed, doc, doc !== parsed || ed !== parser, ed !== parser ? shownTo : 0);
     shown = markdown;
-    hideForRestore();
+    if (ed === parser) hideForRestore();
     editor.set(ed);
     status.set("");
     place(pendingHighlights(props.bookmark.id, a.highlights));
-    restoreProgress();
+    if (ed === parser) restoreProgress();
   };
 
   /** The device's copy at once, then the server's (offline, the copy stays). */
@@ -558,6 +625,13 @@ export function Reader(props: {
     }
   };
   void load();
+
+  // The appearance changed: formula pictures are drawn in the other ink.
+  effect(() => {
+    const ink = look().ink;
+    if (ink === shownInk || !last?.formulas?.length) return;
+    untracked(() => last && show({ ...last, highlights: all() }, true));
+  });
 
   // The note was edited: lay the article out again with it.
   effect(() => {
@@ -835,7 +909,7 @@ export function Reader(props: {
       if (!ed || !sized || sized.width === w) return;
       sized.width = w;
       // Pages still to come are added sized anew; what's shown stays shown.
-      present(ed, placeImages(sized.doc, sized.images, w), true, shownTo);
+      present(ed, placeImages(sized.doc, sized.images, w, sized.formulas), true, shownTo);
       decorate();
     }, 150);
     return () => clearTimeout(t);
@@ -1017,15 +1091,23 @@ export function Reader(props: {
                 horizontalRule: `my-8 border-t border-[${look().rule}]`,
                 // Paragraphs in cells (compactCells).
                 "paragraph[textAlign=left]": "text-[15px] leading-[22px] mb-0",
+                // A formula of its own (typesetMath).
+                "paragraph[textAlign=center]": "text-center text-[18px] leading-[30px] mb-5",
+                // Formulas in text lowered to the baseline (depthTitle).
+                ...depthClasses,
                 // The bookmark's note (withNote).
                 "paragraph[textAlign=justify]": `text-[15px] leading-[23px] mb-2 text-[${look().inkSoft}]`,
               },
               marks: {
                 code: `font-mono text-[15px] rounded-sm bg-[${look().selected}]`,
                 bold: "font-bold",
+                italic: "italic",
                 link: `text-[${look().stamp}] underline`,
                 // Footnote numbers: the editor can't raise text, so small and in the accent.
                 superscript: `text-[12px] font-semibold text-[${look().stamp}]`,
+                // Scripts of formulas Unicode has no raised or lowered letters for.
+                mathSub: "text-[13px]",
+                mathSup: "text-[13px]",
               },
             }}
             styles={{

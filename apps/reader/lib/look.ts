@@ -97,6 +97,9 @@ export const glass = (opts?: { shadow?: boolean; edge?: boolean }) => ({
   boxShadow: opts?.shadow === false ? undefined : look().glassShadow,
 });
 
+/** The ink of both appearances (formula pictures are kept in each). */
+export const inks = [light.ink, dark.ink];
+
 /** Reactive: read inside JSX or a computed so it follows the system appearance. */
 export const look = () => (colorScheme() === "dark" ? dark : light);
 

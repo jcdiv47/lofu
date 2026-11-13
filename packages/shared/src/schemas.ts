@@ -158,11 +158,37 @@ export const ContentImage = z
   })
   .meta({ id: "ContentImage" });
 
+export const ContentFormula = z
+  .object({
+    /** The formula's TeX, as it is between `$$` (or `$`) in the content. */
+    tex: z.string(),
+    /** On a line of its own (`$$`), or in text (`$`, drawn in the style of text). */
+    display: z.boolean(),
+    /** The picture's size in pixels, for text 18 pixels high. */
+    width: z.number().int(),
+    height: z.number().int(),
+    /** How far it reaches below the text's baseline, in pixels. */
+    depth: z.number().int(),
+    /**
+     * The formula drawn as SVG, relative to the server (signed, as the image
+     * proxy is). Add `&c=<rrggbb>` for its color (black without).
+     */
+    src: z.string(),
+  })
+  .meta({ id: "ContentFormula" });
+
 export const BookmarkWithContent = Bookmark.extend({
   content: z.string().nullable(),
   contentFormat: ContentFormat,
   /** The images of Markdown content, in order (null for other formats). */
   images: z.array(ContentImage).nullable(),
+  /**
+   * The Markdown's formulas drawn as pictures, each once, in order: those on
+   * lines of their own (`$$…$$`), and those in text with scripts, fractions
+   * or the like; those MathJax can't read are left out (null for other
+   * formats).
+   */
+  formulas: z.array(ContentFormula).nullable(),
 }).meta({ id: "BookmarkWithContent" });
 
 export const SearchQuery = z.object({

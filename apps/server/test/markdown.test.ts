@@ -33,6 +33,19 @@ describe("articleMarkdown: what Markdown can't express doesn't come out as raw H
     expect(md(`<p>式中， ${formula} 是最大值</p>`)).toBe("式中， xₘₐₓ = (a − b)/σy∗ 是最大值");
   });
 
+  test("KaTeX and MathML stay TeX; a caption taken for a formula becomes text", () => {
+    expect(md('<p>Input <math data-latex="x_t"><mi>x</mi></math> at each step.</p>')).toBe(
+      "Input $x_t$ at each step.",
+    );
+    const caption =
+      "A SumTree representing &quot;Hello World!\\nThis is&quot; with some fields left out";
+    expect(
+      md(`<p>Like this:</p><math data-latex="${caption}" display="block"><mi>A</mi></math>`),
+    ).toBe(
+      'Like this:\n\n*A SumTree representing "Hello World! This is" with some fields left out*',
+    );
+  });
+
   test("sup and sub become raised and lowered characters, else plain text", () => {
     expect(md("<p>E = mc<sup>2</sup>, H<sub>2</sub>O, the 1<sup>st</sup> one</p>")).toBe(
       "E = mc², H₂O, the 1st one",

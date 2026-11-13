@@ -6,6 +6,7 @@ import { Fetcher } from "./extract/fetch.ts";
 import { ImageCache } from "./extract/imageCache.ts";
 import { ImageProxy } from "./extract/images.ts";
 import { MARKDOWN_VERSION, PLAIN_EXTRACTORS } from "./extract/markdown.ts";
+import { MathPictures } from "./extract/mathPictures.ts";
 import { allowPrivateNetworks } from "./extract/netguard.ts";
 import { PdfExtractor } from "./extract/pdf.ts";
 import { ExtractPool } from "./extract/pool.ts";
@@ -111,6 +112,7 @@ export function wire(config: Config) {
     highlights,
     tokens,
     images,
+    math: new MathPictures(pool, (value) => images.sign(value)),
     searcher,
     meiliHealthy: () => meili?.health() ?? Promise.resolve(false),
   };
