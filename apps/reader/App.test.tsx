@@ -506,6 +506,60 @@ test("phone: a search result that is deleted leaves the results", async () => {
   expect(log.patches).toEqual([["bb", { archived: true }]]);
 });
 
+test("phone: the list's filter narrows it, the view changes, and a search keeps the filter", async () => {
+  const searches: string[] = [];
+  const app = await open("./App.tsx", {
+    ...saved,
+    network: {
+      [`GET ${S}/v1/sync*`]: { body: library },
+      [`GET ${S}/v1/search*`]: (r: { url: string }) => {
+        const q = new URL(r.url).searchParams.get("q") ?? "";
+        searches.push(q);
+        const hits = library.bookmarks
+          .filter((b) => !b.archived && (!q.includes("favorite:true") || b.favorite))
+          .map((bookmark) => ({ bookmark, snippet: null }));
+        return { body: { hits, estimatedTotal: hits.length } };
+      },
+    },
+  });
+  await app.waitFor("id:source-all");
+  await app.press("id:source-all");
+  await app.waitFor("text:Article a");
+
+  // Favorites only: a chip says so, with how many of the list are left.
+  await app.press("id:filter-button");
+  await app.press("id:filter-favorite");
+  await app.keyboard.press("escape");
+  await app.waitUntil(() => !app.shows("text:Article a"));
+  expect(app.shows("text:Article bb")).toBe(true);
+  expect(app.shows("id:filter-chip-favorite")).toBe(true);
+  expect(app.texts()).toContain("1 of 3");
+
+  // The view is the phone's own: cards, still filtered.
+  await app.press("id:view-button");
+  await app.press("id:view-cards");
+  await app.keyboard.press("escape");
+  await app.waitFor("id:card-bb");
+  expect(app.shows("id:card-a")).toBe(false);
+
+  // A search sends the filter's conditions to the server.
+  await app.back();
+  await app.waitFor("id:home-search");
+  await app.type("id:home-search", "article");
+  await app.press("id:search-bookmarks");
+  await app.waitFor("id:card-a");
+  await app.press("id:filter-button");
+  await app.press("id:filter-favorite");
+  await app.keyboard.press("escape");
+  await app.waitUntil(() => searches.includes("article favorite:true"));
+  await app.waitUntil(() => !app.shows("id:card-a"));
+  expect(app.shows("id:card-bb")).toBe(true);
+
+  // Its ✕ drops it.
+  await app.press("id:filter-chip-favorite");
+  await app.waitFor("id:card-a");
+});
+
 test("phone: swiping a row right moves it to a collection", async () => {
   const log = { patches: [] as [string, unknown][], deletes: [] as string[] };
   const app = await open("./App.tsx", { ...saved, network: editable(log) });

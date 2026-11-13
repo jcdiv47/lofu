@@ -88,7 +88,12 @@ export function Home(props: {
   // app's panel.
   effect(() => {
     if (!systemMenus || !menu()) return;
-    untracked(() => void openSystemMenu(newCollection).finally(() => menu.set(false)));
+    // Down at once, not when the menu's done (a second or two after it's
+    // gone), so that the next tap opens it again (`Library`'s menu too).
+    untracked(() => {
+      menu.set(false);
+      void openSystemMenu(newCollection);
+    });
   });
   const query = signal("");
   const top = () => safeArea().top;

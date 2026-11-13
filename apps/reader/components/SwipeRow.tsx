@@ -19,7 +19,7 @@ import {
 import type { Bookmark } from "../lib/api";
 import { look } from "../lib/look";
 import { inTrash, restoreBookmark } from "../lib/store";
-import { BookmarkRow } from "./BookmarkCard";
+import { BookmarkHeadline, BookmarkRow, type Shows } from "./BookmarkCard";
 import { Icon, type IconName } from "./ui";
 
 /*
@@ -91,6 +91,11 @@ export function SwipeRow(props: {
   onOpen: () => void;
   showCollection: boolean;
   snippet?: string | null;
+  /** What the row shows (*Show in …*). */
+  show?: Shows;
+  coverLeft?: boolean;
+  /** A headline (one line) rather than a row of the list. */
+  headline?: boolean;
 }) {
   const b = () => props.b;
   const trail = () => TRAIL_SLOTS(canShare ? 3 : 2);
@@ -238,13 +243,29 @@ export function SwipeRow(props: {
         }}
         style={{ backgroundColor: look().paper, transform: [{ translateX: offset }] }}
       >
-        <BookmarkRow
-          b={b()}
-          snippet={props.snippet}
-          showCollection={props.showCollection}
-          // An open row shuts on a tap instead of opening the bookmark.
-          onOpen={() => (open() ? close() : props.onOpen())}
-        />
+        <If
+          when={props.headline}
+          else={
+            <BookmarkRow
+              b={b()}
+              snippet={props.snippet}
+              show={props.show}
+              coverLeft={props.coverLeft}
+              showCollection={props.showCollection}
+              // An open row shuts on a tap instead of opening the bookmark.
+              onOpen={() => (open() ? close() : props.onOpen())}
+            />
+          }
+        >
+          <BookmarkHeadline
+            b={b()}
+            snippet={props.snippet}
+            show={props.show}
+            touch
+            showCollection={props.showCollection}
+            onOpen={() => (open() ? close() : props.onOpen())}
+          />
+        </If>
       </View>
     </View>
   );

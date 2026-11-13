@@ -117,6 +117,15 @@ export function Settings(props: { onDone: () => void; onCancel?: () => void; fir
     </View>
   );
 
+  // First launch on a small phone: iOS scrolls the field being typed in
+  // above the keyboard, and Connect under it stayed behind the keyboard.
+  // It's kept in view while the keyboard is up.
+  let connectButton: ViewRef | undefined;
+  effect(() => {
+    if (props.first && keyboardFrame().height > 0)
+      untracked(() => connectButton?.reveal({ vertical: "nearest" }));
+  });
+
   const form = (
     <View class="gap-5">
       {field(
@@ -149,6 +158,9 @@ export function Settings(props: { onDone: () => void; onCancel?: () => void; fir
         <View
           role="button"
           testID="connect"
+          ref={(r) => {
+            connectButton = r;
+          }}
           accessibilityState={{ disabled: busy() }}
           onPress={() => void connect()}
           class="rounded-full px-5 py-2.5 active:opacity-70"

@@ -1,6 +1,20 @@
 import { type JSX, Text, View, type ViewRef } from "nsh";
 import { Menu as DrawnMenu, MenuItem, MenuSeparator, Slider } from "nsh/base";
 import { isAvailable, Menu } from "nsh/desktop";
+import { type MenuEntry, systemMenu } from "../lib/actions";
+import type { Bookmark } from "../lib/api";
+import {
+  filterCounts,
+  filterParts,
+  isFiltered,
+  type ListFilter,
+  NO_FILTER,
+  offersType,
+  type Toggle,
+  toggled,
+  togglesFor,
+  typeChoices,
+} from "../lib/filters";
 import { look } from "../lib/look";
 import {
   applyViewToAll,
@@ -11,6 +25,7 @@ import {
   coverSize,
   hasManualOrder,
   prefs,
+  type ShowField,
   setCoverPosition,
   setCoverSize,
   setSortFor,
@@ -22,7 +37,7 @@ import {
   toggleShow,
   viewFor,
 } from "../lib/prefs";
-import type { Source } from "../lib/store";
+import { type BookmarkType, type Source, typeTitles } from "../lib/store";
 import { Icon, type IconName } from "./ui";
 
 /*
@@ -435,5 +450,226 @@ export function ViewButton(props: { source: Source }) {
         </>
       )}
     />
+  );
+}
+
+/*
+ * Phones: the bar's ••• opens one menu of the list's View, Sort by, Filter
+ * and Show in …, as Files' and Mail's do: the system's (iOS, `UIMenu`), the
+ * views inline at the top with the current one checked, the rest as
+ * submenus that name their current choice under them. Each pick closes it.
+ */
+
+/** How a filter reads under *Filter*: its parts, or *Off*. */
+const filterSummary = (f: ListFilter) => {
+  const parts = filterParts(f).map((p) => p.label);
+  return parts.length ? parts.join(", ") : "Off";
+};
+
+/** The phone list's menu (iOS): what's picked is applied here, the filter through `setFilter`. */
+export async function phoneListMenu(o: {
+  source: Source;
+  filter: ListFilter;
+  setFilter: (f: ListFilter) => void;
+  /** The bookmarks the filter's counts are of: the source's. */
+  list: Bookmark[];
+  /** A search keeps the server's order: no *Sort by*. */
+  searching: boolean;
+}) {
+  const s = o.source;
+  const view = currentView(s);
+  const f = o.filter;
+  const n = filterCounts(f, o.list);
+  const count = (k: number | undefined) => (k ? k.toLocaleString() : "None");
+  const sorted: MenuEntry[] = o.searching
+    ? []
+    : [
+        {
+          title: "Sort by",
+          subtitle: currentSort(s).label,
+          symbol: "arrow.up.arrow.down",
+          children: sortsFor(s).map((c) => ({
+            id: `sort:${c.value}`,
+            title: c.label,
+            symbol: c.symbol,
+            checked: c.value === currentSort(s).value,
+          })),
+        },
+      ];
+  const types = typeChoices.filter((t) => (n.types.get(t.value) ?? 0) > 0 || f.type === t.value);
+  const filterMenu: MenuEntry = {
+    title: "Filter",
+    subtitle: filterSummary(f),
+    symbol: isFiltered(f)
+      ? "line.3.horizontal.decrease.circle.fill"
+      : "line.3.horizontal.decrease.circle",
+    children: [
+      ...togglesFor(s).map((c) => ({
+        id: `filter:${c.value}`,
+        title: c.label,
+        subtitle: count(n.toggles.get(c.value)),
+        symbol: c.symbol,
+        checked: f.toggles.includes(c.value),
+      })),
+      ...(offersType(s) && types.length > 1
+        ? [
+            { separator: true as const },
+            {
+              title: "Type",
+              subtitle: f.type ? typeTitles[f.type] : "Any",
+              symbol: "square.stack",
+              children: [
+                { id: "type:", title: "Any type", checked: f.type === null },
+                { separator: true as const },
+                ...types.map((t) => ({
+                  id: `type:${t.value}`,
+                  title: typeTitles[t.value],
+                  subtitle: count(n.types.get(t.value)),
+                  symbol: t.symbol,
+                  checked: f.type === t.value,
+                })),
+              ],
+            },
+          ]
+        : []),
+      ...(isFiltered(f)
+        ? [
+            { separator: true as const },
+            { id: "clear", title: "Clear filter", symbol: "xmark.circle" },
+          ]
+        : []),
+    ],
+  };
+  const sizeMenu: MenuEntry[] = sizedViews.includes(view.value)
+    ? [
+        {
+          title: "Cover size",
+          subtitle: sizeNames[coverSize(view.value) - 1],
+          symbol: "photo",
+          children: sizeNames.map((name, k) => ({
+            id: `size:${k + 1}`,
+            title: name,
+            checked: coverSize(view.value) === k + 1,
+          })),
+        },
+      ]
+    : view.value === "list"
+      ? [
+          {
+            title: "Cover position",
+            subtitle: prefs().coverPosition === "left" ? "Left" : "Right",
+            symbol: "photo",
+            children: positions.map(([p, label]) => ({
+              id: `position:${p}`,
+              title: label,
+              checked: prefs().coverPosition === p,
+            })),
+          },
+        ]
+      : [];
+  const id = await systemMenu("", [
+    ...viewChoices.map((c) => ({
+      id: `view:${c.value}`,
+      title: c.label,
+      symbol: c.symbol,
+      checked: c.value === view.value,
+    })),
+    { separator: true },
+    ...sorted,
+    filterMenu,
+    {
+      title: `Show in ${view.label}`,
+      symbol: "eye",
+      children: showFields.map(([field, label]) => ({
+        id: `show:${field}`,
+        title: label,
+        checked: shows(view.value, field),
+      })),
+    },
+    ...sizeMenu,
+    { separator: true },
+    // Short, as a menu's titles must be on a small phone; the subtitle wraps.
+    {
+      id: "apply-all",
+      title: "Apply to All",
+      subtitle: `${view.label} in every list`,
+      symbol: "square.on.square",
+    },
+  ]);
+  if (!id) return;
+  const [kind, value = ""] = id.split(/:(.*)/s);
+  switch (kind) {
+    case "view":
+      return setViewFor(s, value as BookmarkView);
+    case "sort":
+      return setSortFor(s, value as BookmarkSort);
+    case "filter":
+      return o.setFilter(toggled(f, value as Toggle));
+    case "type":
+      return o.setFilter({ ...f, type: (value || null) as BookmarkType | null });
+    case "clear":
+      return o.setFilter(NO_FILTER);
+    case "show":
+      return toggleShow(view.value, value as ShowField);
+    case "size":
+      return setCoverSize(view.value, Number(value));
+    case "position":
+      return setCoverPosition(value as CoverPosition);
+    case "apply-all":
+      return applyViewToAll(view.value);
+  }
+}
+
+/** *Filter* as the app's own menu (phone-sized windows without the system's: the web, Android). */
+export function FilterButton(props: {
+  source: Source;
+  filter: ListFilter;
+  setFilter: (f: ListFilter) => void;
+  list: Bookmark[];
+}) {
+  const f = () => props.filter;
+  const n = () => filterCounts(f(), props.list);
+  const types = () =>
+    typeChoices.filter((t) => (n().types.get(t.value) ?? 0) > 0 || f().type === t.value);
+  const trigger = (
+    <Trigger
+      icon="filter"
+      label={isFiltered(f()) ? `Filter (${filterParts(f()).length})` : "Filter"}
+      accessibilityLabel={`Filter: ${filterSummary(f())}`}
+      testID="filter-button"
+    />
+  );
+  return (
+    <DrawnMenu trigger={trigger} {...popup()}>
+      <Heading text="Filter" />
+      {togglesFor(props.source).map((c) => (
+        <CheckItem
+          checked={f().toggles.includes(c.value)}
+          label={`${c.label}  ${n().toggles.get(c.value) ?? 0}`}
+          testID={`filter-${c.value}`}
+          onSelect={() => props.setFilter(toggled(f(), c.value))}
+        />
+      ))}
+      <If when={offersType(props.source) && types().length > 1}>
+        <MenuSeparator class="mx-2 my-1 h-px" style={{ backgroundColor: look().rule }} />
+        <Heading text="Type" />
+        <RadioItem
+          checked={f().type === null}
+          label="Any type"
+          testID="filter-type-any"
+          closeOnSelect={false}
+          onSelect={() => props.setFilter({ ...f(), type: null })}
+        />
+        {types().map((t) => (
+          <RadioItem
+            checked={f().type === t.value}
+            label={`${typeTitles[t.value]}  ${n().types.get(t.value) ?? 0}`}
+            testID={`filter-type-${t.value}`}
+            closeOnSelect={false}
+            onSelect={() => props.setFilter({ ...f(), type: t.value })}
+          />
+        ))}
+      </If>
+    </DrawnMenu>
   );
 }
