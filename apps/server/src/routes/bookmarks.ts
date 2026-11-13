@@ -75,14 +75,16 @@ export function bookmarkRoutes(app: OpenAPIHono, ctx: AppContext) {
       },
       responses: { 200: json(BookmarkWithContent, "The bookmark"), 404: notFound },
     }),
-    (c) => {
+    async (c) => {
       const { id } = c.req.valid("param");
       const { content: format } = c.req.valid("query");
       const b = bookmarks.get(id);
       const blob = format === "none" ? null : bookmarks.contentBlob(id, format);
       const content = blob ? dec.decode(Bun.zstdDecompressSync(blob)) : null;
       let images = null;
+      let formulas = null;
       if (content !== null && format === "markdown") {
+        formulas = await ctx.math.list(content);
         const sizes = bookmarks.imageSizes(id) ?? {};
         images = markdownImages(content).map((src) => ({
           src,
@@ -91,7 +93,7 @@ export function bookmarkRoutes(app: OpenAPIHono, ctx: AppContext) {
           proxy: ctx.images.path(src, ARTICLE_IMAGE_WIDTH),
         }));
       }
-      return c.json({ ...b, content, contentFormat: format, images }, 200);
+      return c.json({ ...b, content, contentFormat: format, images, formulas }, 200);
     },
   );
 

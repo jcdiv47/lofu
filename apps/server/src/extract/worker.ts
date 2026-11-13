@@ -10,6 +10,7 @@ import { parseHTML } from "linkedom";
 import { assetUrl } from "./assetUrl.ts";
 import { detectBlockPage } from "./blocked.ts";
 import { articleMarkdown } from "./markdown.ts";
+import { formulaSvg } from "./mathSvg.ts";
 import type { ExtractRequest, ExtractResponse, MarkdownOutput } from "./protocol.ts";
 import { type SiteDocument, type SiteTransform, siteFor } from "./sites/index.ts";
 import { markdownToText } from "./text.ts";
@@ -23,8 +24,14 @@ const zstd = (s: string) => Bun.zstdCompressSync(enc.encode(s), { level: ZSTD_LE
 const nonEmpty = (s: string | undefined | null) => s?.trim() || null;
 
 self.onmessage = async (ev: MessageEvent<ExtractRequest>) => {
-  const { id, html, url } = ev.data;
+  const { id } = ev.data;
   try {
+    if (ev.data.kind === "math") {
+      const msg: ExtractResponse = { id, ok: true, out: formulaSvg(ev.data.tex, ev.data.display) };
+      self.postMessage(msg);
+      return;
+    }
+    const { html, url } = ev.data;
     if (ev.data.kind === "markdown") {
       const markdown = articleMarkdown(html, url);
       const out: MarkdownOutput = {

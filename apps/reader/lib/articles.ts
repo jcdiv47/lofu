@@ -1,5 +1,13 @@
 import { computed, Storage, signal } from "nsh";
-import { type ArticleImage, api, type Bookmark, type Highlight, OfflineError } from "./api";
+import {
+  type ArticleFormula,
+  type ArticleImage,
+  api,
+  type Bookmark,
+  formulaUrl,
+  type Highlight,
+  OfflineError,
+} from "./api";
 import {
   filePath,
   listText,
@@ -10,6 +18,7 @@ import {
   writeBytes,
   writeText,
 } from "./files";
+import { inks } from "./look";
 
 /**
  * Articles kept on the device for reading offline (files: `lib/files.ts`).
@@ -24,6 +33,8 @@ import {
 export interface Kept {
   markdown: string | null;
   images: ArticleImage[];
+  /** Formula pictures (copies kept before there were any have none). */
+  formulas?: ArticleFormula[];
   highlights: Highlight[];
 }
 
@@ -152,18 +163,20 @@ export async function clearArticles() {
 
 /** The article and its highlights from the server, kept for next time. */
 export async function fetchArticle(id: string): Promise<Kept> {
-  const [{ markdown, images }, highlights] = await Promise.all([
+  const [{ markdown, images, formulas }, highlights] = await Promise.all([
     api.article(id),
     api.highlights(id),
   ]);
-  const a = { markdown, images, highlights };
+  const a = { markdown, images, formulas, highlights };
   if (markdown) await keepArticle(id, a);
   return a;
 }
 
 /** Where the article's pictures load from, as the reader loads them. */
-export function pictureUrls(a: Pick<Kept, "images">): string[] {
+export function pictureUrls(a: Pick<Kept, "images" | "formulas">): string[] {
   const urls = a.images.map((i) => i.proxy ?? i.src);
+  // A formula in the ink of each appearance: the system's may change offline.
+  for (const f of a.formulas ?? []) urls.push(...inks.map((ink) => formulaUrl(f, ink)));
   return [...new Set(urls.filter((u) => /^https?:\/\//i.test(u)))];
 }
 
@@ -183,15 +196,26 @@ const PICTURES_AT_ONCE = 3;
  * (the copy on the disk keeps the URLs it came with).
  */
 export async function withKeptPictures(id: string, a: Kept): Promise<Kept> {
-  if (!onDisk || !a.images.length) return a;
+  if (!onDisk || !(a.images.length || a.formulas?.length)) return a;
   const here = new Set(await listText(`${PICTURE}${id}-`));
   if (!here.size) return a;
+  const local = (url: string) => {
+    const name = pictureFile(id, url);
+    return here.has(name) ? filePath(name) : null;
+  };
   return {
     ...a,
     images: a.images.map((i) => {
-      const name = pictureFile(id, i.proxy ?? i.src);
-      const local = here.has(name) ? filePath(name) : null;
-      return local ? { ...i, proxy: local } : i;
+      const path = local(i.proxy ?? i.src);
+      return path ? { ...i, proxy: path } : i;
+    }),
+    formulas: a.formulas?.map((f) => {
+      const kept: Record<string, string> = {};
+      for (const url of inks.map((ink) => formulaUrl(f, ink))) {
+        const path = local(url);
+        if (path) kept[url] = path;
+      }
+      return { ...f, kept };
     }),
   };
 }
@@ -207,7 +231,7 @@ export async function withKeptPictures(id: string, a: Kept): Promise<Kept> {
 export async function keepPictures(
   id: string,
   a: Kept,
-  showing?: Pick<Kept, "images">,
+  showing?: Pick<Kept, "images" | "formulas">,
 ): Promise<boolean> {
   if (!onDisk) return false;
   const here = new Set(await listText(`${PICTURE}${id}-`));

@@ -2,7 +2,12 @@ export type ExtractRequest =
   /** Extract an article from a fetched page. */
   | { id: number; kind: "extract"; html: string; url: string }
   /** Convert an already extracted article's HTML to Markdown again (extract/markdown.ts). */
-  | { id: number; kind: "markdown"; html: string; url: string };
+  | { id: number; kind: "markdown"; html: string; url: string }
+  /** Draw a formula's TeX as SVG (extract/mathSvg.ts). */
+  | { id: number; kind: "math"; tex: string; display: boolean };
+
+/** A formula drawn (extract/mathSvg.ts), or null for TeX MathJax can't read. */
+export type MathOutput = { svg: string; width: number; height: number; depth: number } | null;
 
 export interface MarkdownOutput {
   /** zstd-compressed markdown / plain text. */
@@ -35,5 +40,5 @@ export interface ExtractOutput {
 }
 
 export type ExtractResponse =
-  | { id: number; ok: true; out: ExtractOutput | MarkdownOutput }
+  | { id: number; ok: true; out: ExtractOutput | MarkdownOutput | MathOutput }
   | { id: number; ok: false; error: string };

@@ -72,9 +72,29 @@ export interface ArticleImage {
   proxy: string | null;
 }
 
+/** A formula drawn by the server (`ContentFormula` in packages/shared/src/schemas.ts). */
+export interface ArticleFormula {
+  tex: string;
+  /** On a line of its own, or in text (older servers: always the first). */
+  display?: boolean;
+  /** How far it reaches below the text's baseline, in pixels. */
+  depth?: number;
+  /** The picture's size in pixels, for 18-pixel text. */
+  width: number;
+  height: number;
+  /** Absolute URL of the picture, without its color (`formulaUrl`). */
+  src: string;
+  /** Files the device keeps it in, by URL (`withKeptPictures`; not saved). */
+  kept?: Record<string, string>;
+}
+
+/** The URL of a formula's picture in an ink. */
+export const formulaUrl = (f: ArticleFormula, ink: string) => `${f.src}&c=${ink.replace("#", "")}`;
+
 export interface Article {
   markdown: string | null;
   images: ArticleImage[];
+  formulas: ArticleFormula[];
 }
 
 export interface SearchHit {
@@ -245,15 +265,18 @@ export const api = {
   refetch: (id: string) => request<Bookmark>("POST", `/v1/bookmarks/${id}/refetch`),
   /** The saved text as Markdown, and its images (sizes, and where to load them from). */
   article: async (id: string): Promise<Article> => {
-    const r = await request<{ content: string | null; images?: ArticleImage[] | null }>(
-      "GET",
-      `/v1/bookmarks/${id}?content=markdown`,
-    );
+    const r = await request<{
+      content: string | null;
+      images?: ArticleImage[] | null;
+      formulas?: ArticleFormula[] | null;
+    }>("GET", `/v1/bookmarks/${id}?content=markdown`);
     const server = normalizeServer((await loadSettings()).server);
     return {
       markdown: r.content,
       // Servers from before image sizes send none.
       images: (r.images ?? []).map((i) => ({ ...i, proxy: i.proxy && `${server}${i.proxy}` })),
+      // Servers from before formula pictures send none: formulas are then set as text.
+      formulas: (r.formulas ?? []).map((f) => ({ ...f, src: `${server}${f.src}` })),
     };
   },
   highlights: (id: string) => request<Highlight[]>("GET", `/v1/bookmarks/${id}/highlights`),

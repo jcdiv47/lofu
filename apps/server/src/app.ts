@@ -59,6 +59,11 @@ export function createApp(ctx: AppContext) {
     ctx.images.serve(c.req.param("sig"), c.req.query("u"), c.req.query("w")),
   );
 
+  // Formulas drawn as pictures, signed the same way (extract/mathPictures.ts).
+  app.get("/math/:sig", (c) =>
+    ctx.math.serve(c.req.param("sig"), c.req.query("t"), c.req.query("c"), c.req.query("i")),
+  );
+
   app.use("/v1/*", compress({ threshold: 2048 }));
   // Clients may gzip large uploads (the browser extension sends rendered
   // pages of several MB); decode before any validator reads the body.

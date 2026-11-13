@@ -53,12 +53,12 @@ interface Doc {
 }
 
 /** Bump when the output changes, so saved articles are converted again (jobs/markdown.ts). */
-export const MARKDOWN_VERSION = 1;
+export const MARKDOWN_VERSION = 2;
 
 /** Extractors whose Markdown is plain text rather than converted HTML (jobs/extract.ts). */
 export const PLAIN_EXTRACTORS = ["pdftotext", "text", "markdown"];
 
-const RAW = /<(svg|sup|sub|iframe|video|audio|td|th)\b/i;
+const RAW = /<(svg|sup|sub|iframe|video|audio|td|th|math)\b/i;
 
 export function articleMarkdown(html: string, url: string): string {
   if (!RAW.test(html)) return createMarkdownContent(html, url);
@@ -72,6 +72,7 @@ function tidy(doc: Doc, url: string) {
     [...doc.body.querySelectorAll(sel)].filter((e) => !e.parentElement?.closest(sel));
   const captions = new Set<El>();
   for (const svg of outermost("svg")) replaceSvg(doc, svg, captions);
+  for (const math of outermost("math")) replaceProseMath(doc, math);
   for (const el of [...doc.body.querySelectorAll("sup, sub")].reverse()) replaceScript(doc, el);
   for (const el of outermost("iframe, video, audio")) replaceEmbed(doc, el, url);
   // Innermost first: a nested table is laid out before the one around it.
@@ -178,6 +179,26 @@ const group = (s: string) => {
   const t = s.trim();
   return /^[\p{L}\p{N}.′]*$/u.test(t) || /^\(.*\)$/.test(t) ? t : `(${t})`;
 };
+
+/**
+ * A caption Defuddle took for a formula becomes its text in italics, as a
+ * diagram's name does. zed.dev's diagrams have one:
+ * `<math data-latex="A SumTree representing &quot;Hello World!\nThis is…">`.
+ * A formula has TeX commands or scripts in it; such a caption has words.
+ */
+function replaceProseMath(doc: Doc, math: El) {
+  const latex = math.getAttribute("data-latex") ?? math.getAttribute("alttext") ?? "";
+  const text = latex.replace(/\\n/g, " ").replace(/\s+/g, " ").trim();
+  if (/[\\^_{}]/.test(text) || (text.match(/\p{L}{2,}/gu) ?? []).length < 4) return;
+  const em = doc.createElement("em");
+  em.textContent = text;
+  let caption = em;
+  if (math.getAttribute("display") === "block") {
+    caption = doc.createElement("p");
+    caption.append(em);
+  }
+  math.replaceWith(caption);
+}
 
 // --- sup / sub ---------------------------------------------------------------
 

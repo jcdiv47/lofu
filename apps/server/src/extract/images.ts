@@ -220,7 +220,8 @@ export class ImageProxy {
     return new ImageProxy(key, cache);
   }
 
-  private sign(url: string): string {
+  /** A signature of `url` (or of anything else the server hands out signed: extract/mathPictures.ts). */
+  sign(url: string): string {
     const h = new Bun.CryptoHasher("sha256", this.key);
     h.update(url);
     return b64url(h.digest()).slice(0, 22); // 132 bits
