@@ -581,7 +581,9 @@ function Phone(props: { onReconnect: () => void }) {
                 />
               </NavPage>
             );
-          case "library":
+          case "library": {
+            /** The list's ••• menu: View, Sort by, Filter, Show in … (`components/ListControls.tsx`). */
+            const listMenu = signal(false);
             return (
               <NavPage
                 animation={pageAnimation}
@@ -590,17 +592,28 @@ function Phone(props: { onReconnect: () => void }) {
                 headerTransparent
                 headerClass={headerClass()}
                 style={{ backgroundColor: look().paper }}
+                ios={{ headerRightSymbol: "ellipsis" }}
+                headerRight={
+                  <View
+                    role="button"
+                    accessibilityLabel="View, sort and filter"
+                    testID="list-menu"
+                    onPress={() => listMenu.set(true)}
+                  />
+                }
               >
                 <WebBar title={sourceTitle(route.source)} onBack={() => nav.pop()} />
                 <Library
                   source={route.source}
                   wide={false}
                   initialQuery={route.query}
+                  menu={listMenu}
                   onOpen={(b) => openBookmark(b)}
                   onAdd={() => nav.push({ name: "add", source: route.source })}
                 />
               </NavPage>
             );
+          }
           case "reader": {
             const b = () => current(route.bookmark.id) ?? route.bookmark;
             /** Off the stack, once deleted; only if it's still on top (a menu can outlive it). */

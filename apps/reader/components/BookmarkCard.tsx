@@ -100,7 +100,12 @@ function Cover(props: { b: Bookmark; height: number; radius?: number }) {
 }
 
 /** Favorite, highlights and fetch status: small marks at the end of the meta line. */
-function Marks(props: { b: Bookmark; highlights?: boolean }) {
+function Marks(props: {
+  b: Bookmark;
+  highlights?: boolean;
+  /** At most this much of the system's text size (`maxFontSizeMultiplier`). */
+  maxScale?: number;
+}) {
   const hl = () => highlightCount(props.b.id);
   const status = () => props.b.contentStatus;
   // Offline, what can't be read without the server (the web keeps nothing, so says nothing).
@@ -112,6 +117,7 @@ function Marks(props: { b: Bookmark; highlights?: boolean }) {
         <Text
           testID={`online-only-${props.b.id}`}
           style={{ color: look().inkFaint, fontSize: 11.5 }}
+          maxFontSizeMultiplier={props.maxScale}
         >
           Online only
         </Text>
@@ -122,24 +128,40 @@ function Marks(props: { b: Bookmark; highlights?: boolean }) {
       <If when={props.highlights !== false && hl() > 0}>
         <View class="flex-row items-center gap-0.5">
           <Icon name="highlighter" size={12} color={look().inkFaint} />
-          <Text style={{ color: look().inkFaint, fontSize: 11.5 }}>{hl()}</Text>
+          <Text
+            maxFontSizeMultiplier={props.maxScale}
+            style={{ color: look().inkFaint, fontSize: 11.5 }}
+          >
+            {hl()}
+          </Text>
         </View>
       </If>
       <If when={props.b.readProgress >= 0.98}>
         <View class="flex-row items-center gap-0.5">
           <Icon name="check" size={12} color={look().inkFaint} />
-          <Text style={{ color: look().inkFaint, fontSize: 11.5 }}>Read</Text>
+          <Text
+            maxFontSizeMultiplier={props.maxScale}
+            style={{ color: look().inkFaint, fontSize: 11.5 }}
+          >
+            Read
+          </Text>
         </View>
       </If>
       <If when={props.b.readProgress > 0.02 && props.b.readProgress < 0.98}>
-        <Text style={{ color: look().inkFaint, fontSize: 11.5, fontVariant: ["tabular-nums"] }}>
+        <Text
+          maxFontSizeMultiplier={props.maxScale}
+          style={{ color: look().inkFaint, fontSize: 11.5, fontVariant: ["tabular-nums"] }}
+        >
           {`${Math.round(props.b.readProgress * 100)}%`}
         </Text>
       </If>
       <If when={status() === "failed" || status() === "pending"}>
         <View class="flex-row items-center gap-1">
           <Icon name={status() === "failed" ? "alert" : "clock"} size={12} color={look().stamp} />
-          <Text style={{ color: look().stamp, fontSize: 11.5 }}>
+          <Text
+            maxFontSizeMultiplier={props.maxScale}
+            style={{ color: look().stamp, fontSize: 11.5 }}
+          >
             {status() === "failed" ? "Unreadable" : "Fetching"}
           </Text>
         </View>
@@ -204,7 +226,16 @@ interface ItemProps {
   drag?: DragProps;
   /** What it shows; everything without it. */
   show?: Shows;
+  /** A phone's: a long press opens the bookmark's menu, as the rows' does. */
+  touch?: boolean;
 }
+
+/** The menu from a long press, on phones. */
+const longPress = (b: () => Bookmark, touch?: boolean) =>
+  touch && nativeMenus
+    ? (e: { pagePosition: { x: number; y: number } }) =>
+        void showBookmarkMenu(b(), { at: e.pagePosition })
+    : undefined;
 
 const tagLine = (b: Bookmark) => b.tags.map((t) => `#${t}`).join("  ");
 const excerptOf = (b: Bookmark) => b.excerpt?.replace(/\s+/g, " ").trim() ?? "";
@@ -301,10 +332,17 @@ export function cardBody(show: Shows) {
 }
 
 /** A card in the desktop grid: cover, title, and what *Show in Cards* asks for. */
-export function BookmarkCard(props: ItemProps & { coverHeight?: number }) {
+export function BookmarkCard(
+  props: ItemProps & {
+    coverHeight?: number;
+    /** The text's scale (phones: Dynamic Type), which the body's fixed height follows. */
+    bodyScale?: number;
+  },
+) {
   const b = () => props.b;
   const on = (f: ShowField) => !props.show || props.show(f);
-  const body = () => (props.show ? cardBody(props.show) : CARD_BODY);
+  const body = () =>
+    Math.round((props.show ? cardBody(props.show) : CARD_BODY) * (props.bodyScale ?? 1));
   const card = (
     <View
       role="button"
@@ -313,6 +351,7 @@ export function BookmarkCard(props: ItemProps & { coverHeight?: number }) {
       ref={props.drag?.ref}
       {...(props.drag?.handlers ?? {})}
       onPress={props.onOpen}
+      onLongPress={longPress(b, props.touch)}
       onContextMenu={
         nativeMenus ? (e) => void showBookmarkMenu(b(), { at: e.pagePosition }) : undefined
       }
@@ -361,7 +400,10 @@ export function BookmarkCard(props: ItemProps & { coverHeight?: number }) {
   return nativeMenus ? card : <BookmarkContextMenu b={b()} trigger={card} />;
 }
 
-/** A row in the phone list: title, excerpt and meta beside a thumbnail. */
+/**
+ * A row in the phone list: title, excerpt and meta beside a thumbnail, or
+ * what *Show in List* asks for, the thumbnail on the side *Cover position* says.
+ */
 export function BookmarkRow(props: {
   b: Bookmark;
   onOpen: () => void;
@@ -369,10 +411,32 @@ export function BookmarkRow(props: {
   snippet?: string | null;
   /** Draggable into place (manual order). */
   drag?: DragProps;
+  /** What it shows; the title, excerpt, meta and thumbnail without it. */
+  show?: Shows;
+  coverLeft?: boolean;
 }) {
   const b = () => props.b;
+  const on = (f: ShowField) =>
+    props.show ? props.show(f) : f !== "note" && f !== "tags" && f !== "highlights";
   const thumbFailed = signal<string | null>(null);
-  const excerpt = () => b().excerpt?.replace(/\s+/g, " ").trim() ?? "";
+  const excerpt = () => (on("description") ? excerptOf(b()) : "");
+  const thumb = () => (
+    <If when={on("cover") && b().coverUrl && thumbFailed() !== b().coverUrl}>
+      <Image
+        src={b().coverUrl ?? ""}
+        onError={() => thumbFailed.set(b().coverUrl)}
+        style={{
+          width: 76,
+          height: 76,
+          borderRadius: 12,
+          borderCurve: "continuous",
+          objectFit: "cover",
+          backgroundColor: look().paperDeep,
+          marginTop: 2,
+        }}
+      />
+    </If>
+  );
   const row = (
     <View
       role="button"
@@ -397,18 +461,21 @@ export function BookmarkRow(props: {
         class="absolute right-0 bottom-0 left-4"
         style={{ height: 1 / pixelRatio(), backgroundColor: look().rule }}
       />
+      <If when={props.coverLeft}>{thumb()}</If>
       <View class="min-w-0 flex-1 gap-1">
-        <Text
-          style={{
-            color: look().ink,
-            fontSize: 16,
-            lineHeight: 21,
-            fontWeight: "600",
-            numberOfLines: 2,
-          }}
-        >
-          {displayTitle(b())}
-        </Text>
+        <If when={on("title")}>
+          <Text
+            style={{
+              color: look().ink,
+              fontSize: 16,
+              lineHeight: 21,
+              fontWeight: "600",
+              numberOfLines: 2,
+            }}
+          >
+            {displayTitle(b())}
+          </Text>
+        </If>
         <If
           when={props.snippet}
           else={
@@ -423,28 +490,28 @@ export function BookmarkRow(props: {
         >
           <Snippet text={props.snippet ?? ""} lines={3} />
         </If>
-        <View class="mt-1 flex-row items-center gap-1.5">
-          <Favicon url={b().faviconUrl} domain={b().domain} size={13} />
-          <View class="min-w-0 flex-1">
-            <MetaLine b={b()} showCollection={props.showCollection} />
+        <If when={on("note") && b().note}>
+          <Note text={b().note ?? ""} lines={2} />
+        </If>
+        <If when={on("tags") && b().tags.length}>
+          <Text class="truncate" style={{ color: look().stamp, fontSize: 12.5, lineHeight: 17 }}>
+            {tagLine(b())}
+          </Text>
+        </If>
+        <If when={on("info")} else={<HighlightCount b={b()} on={on} />}>
+          <View class="mt-1 flex-row items-center gap-1.5">
+            <Favicon url={b().faviconUrl} domain={b().domain} size={13} />
+            <View class="min-w-0 flex-1">
+              <MetaLine
+                b={b()}
+                showCollection={props.showCollection}
+                highlights={props.show ? on("highlights") : undefined}
+              />
+            </View>
           </View>
-        </View>
+        </If>
       </View>
-      <If when={b().coverUrl && thumbFailed() !== b().coverUrl}>
-        <Image
-          src={b().coverUrl ?? ""}
-          onError={() => thumbFailed.set(b().coverUrl)}
-          style={{
-            width: 76,
-            height: 76,
-            borderRadius: 12,
-            borderCurve: "continuous",
-            objectFit: "cover",
-            backgroundColor: look().paperDeep,
-            marginTop: 2,
-          }}
-        />
-      </If>
+      <If when={!props.coverLeft}>{thumb()}</If>
     </View>
   );
   return nativeMenus ? row : <BookmarkContextMenu b={b()} trigger={row} />;
@@ -535,10 +602,13 @@ export function BookmarkHeadline(props: ItemProps) {
       ref={props.drag?.ref}
       {...(props.drag?.handlers ?? {})}
       onPress={props.onOpen}
+      onLongPress={longPress(b, props.touch)}
       onContextMenu={
         nativeMenus ? (e) => void showBookmarkMenu(b(), { at: e.pagePosition }) : undefined
       }
-      class="h-10 flex-row items-center gap-2.5 rounded-lg px-3"
+      // 48 points on phones: a finger's target is 44 at the least.
+      // grows with the text (Dynamic Type) rather than crowd it.
+      class={`${props.touch ? "min-h-12 py-2" : "h-10"} flex-row items-center gap-2.5 rounded-lg px-3`}
       style={props.drag?.style()}
       activeStyle={{ backgroundColor: look().selected }}
       hoverStyle={{ backgroundColor: look().cardHover }}
@@ -556,7 +626,14 @@ export function BookmarkHeadline(props: ItemProps) {
       <If when={on("title")}>
         <Text
           class="min-w-0 truncate"
-          style={{ color: look().ink, fontSize: 14, fontWeight: "500", flexShrink: 1 }}
+          style={{
+            color: look().ink,
+            fontSize: props.touch ? 15 : 14,
+            fontWeight: "500",
+            flexShrink: 1,
+            // Phones: the title takes the row, the date and marks what it leaves.
+            ...(props.touch ? { flexGrow: 1 } : {}),
+          }}
         >
           {displayTitle(b())}
         </Text>
@@ -586,11 +663,32 @@ export function BookmarkHeadline(props: ItemProps) {
           {tagLine(b())}
         </Text>
       </If>
-      <View class="min-w-[120px] flex-1">
-        <If when={on("info")} else={<HighlightCount b={b()} on={on} />}>
-          <MetaLine b={b()} showCollection={props.showCollection} highlights={on("highlights")} />
-        </If>
-      </View>
+      <If
+        when={props.touch}
+        else={
+          <View class="min-w-[120px] flex-1">
+            <If when={on("info")} else={<HighlightCount b={b()} on={on} />}>
+              <MetaLine
+                b={b()}
+                showCollection={props.showCollection}
+                highlights={on("highlights")}
+              />
+            </If>
+          </View>
+        }
+      >
+        {/* A phone's row is too narrow for the site (its icon is there) and
+            the collection: the date and the marks. */}
+        <View class="shrink-0 flex-row items-center gap-2">
+          <If when={on("info")} else={<HighlightCount b={b()} on={on} />}>
+            {/* Secondary: it grows less than the title, which keeps the row. */}
+            <Text maxFontSizeMultiplier={1.5} style={{ color: look().inkFaint, fontSize: 12 }}>
+              {shortDate(b().createdAt)}
+            </Text>
+            <Marks b={b()} highlights={on("highlights")} maxScale={1.5} />
+          </If>
+        </View>
+      </If>
     </View>
   );
   return nativeMenus ? row : <BookmarkContextMenu b={b()} trigger={row} />;
@@ -628,6 +726,7 @@ export function MoodboardTile(props: ItemProps) {
       ref={props.drag?.ref}
       {...(props.drag?.handlers ?? {})}
       onPress={props.onOpen}
+      onLongPress={longPress(b, props.touch)}
       onContextMenu={
         nativeMenus ? (e) => void showBookmarkMenu(b(), { at: e.pagePosition }) : undefined
       }

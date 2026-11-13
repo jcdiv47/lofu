@@ -30,7 +30,7 @@ use nsh_platform_ios::{ComponentContext, Components, NativeComponent};
 use objc2::rc::{Retained, Weak};
 use objc2::runtime::{AnyClass, AnyObject};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, class, define_class, msg_send};
-use objc2_foundation::NSRect;
+use objc2_foundation::{NSPoint, NSRect};
 use objc2_ui_kit::UIView;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -108,12 +108,13 @@ impl EdgeView {
         self.attach();
     }
 
-    /// Finds the page's scroll view and hands it to UIKit, once.
+    /// Finds the page's scroll view and hands it to UIKit: once, and again
+    /// when the page's scroll view is another (the library's layout changed).
     fn attach(&self) {
         let Some(edge) = self.ivars().borrow().edge else {
             return;
         };
-        if !Self::supported() || self.ivars().borrow().scroll.as_ref().is_some_and(|s| s.load().is_some()) {
+        if !Self::supported() {
             return;
         }
         // SAFETY: UIKit's own classes and methods, on the main thread.
@@ -132,9 +133,47 @@ impl EdgeView {
             let Some(scroll) = page_scroll_view(&root) else {
                 return;
             };
+            if edge == Edge::Top {
+                tallest_top(&controller, &root, &scroll);
+            }
+            let current = self.ivars().borrow().scroll.as_ref().and_then(|s| s.load());
+            if current.is_some_and(|c| Retained::as_ptr(&c) == Retained::as_ptr(&scroll)) {
+                return;
+            }
+            self.detach();
             let mut state = self.ivars().borrow_mut();
             match edge {
                 Edge::Top => {
+                    // A scroll view made after the page's first (the library's
+                    // layout changed) comes with no inset adjustment: nsh gives
+                    // UIKit's automatic one only to those the page mounts with,
+                    // and the bar's height to the content with it. It takes
+                    // what the one it replaces had.
+                    let previous: Option<Retained<AnyObject>> =
+                        msg_send![&*controller, contentScrollViewForEdge: 1usize];
+                    if let Some(previous) = previous
+                        && Retained::as_ptr(&previous) != Retained::as_ptr(&scroll)
+                    {
+                        let theirs: isize = msg_send![&*previous, contentInsetAdjustmentBehavior];
+                        let ours: isize = msg_send![&*scroll, contentInsetAdjustmentBehavior];
+                        if theirs != ours {
+                            let _: () = msg_send![&*scroll, setContentInsetAdjustmentBehavior: theirs];
+                            // Its content starts at the top of the inset it now
+                            // has (under the large title), not under the bar.
+                            // With the large title shown, as a page opens, even
+                            // if the list it replaces had been scrolled under the
+                            // bar: UIKit opens the title out as it follows.
+                            let offset: NSPoint = msg_send![&*scroll, contentOffset];
+                            if offset.y == 0.0 {
+                                let inset: Insets = msg_send![&*scroll, contentInset];
+                                let top = NSPoint {
+                                    x: offset.x,
+                                    y: -(tallest_top(&controller, &root, &scroll) + inset.top),
+                                };
+                                let _: () = msg_send![&*scroll, setContentOffset: top];
+                            }
+                        }
+                    }
                     // NSDirectionalRectEdgeTop
                     let _: () = msg_send![&*controller, setContentScrollView: &*scroll, forEdge: 1usize];
                     state.controller = Some(Weak::from_retained(&controller));
@@ -184,6 +223,56 @@ impl EdgeView {
             state.controller = None;
         }
     }
+}
+
+thread_local! {
+    /// The tallest top safe area each page's scroll view has had (its bar
+    /// with the large title open), by controller and by the width of its
+    /// view: turned on its side, a phone's bar has no large title.
+    static TALLEST: RefCell<Vec<(Weak<AnyObject>, u32, f64)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The top of `scroll`'s safe area with its page's large title open (at
+/// this width): the tallest it has been (it's shorter while the title is folded).
+unsafe fn tallest_top(controller: &Retained<AnyObject>, root: &AnyObject, scroll: &AnyObject) -> f64 {
+    let now: Insets = unsafe { msg_send![scroll, safeAreaInsets] };
+    let bounds: NSRect = unsafe { msg_send![root, bounds] };
+    let width = bounds.size.width.round() as u32;
+    TALLEST.with_borrow_mut(|seen| {
+        seen.retain(|(c, _, _)| c.load().is_some());
+        let at = seen.iter().position(|(c, w, _)| {
+            *w == width
+                && c.load().is_some_and(|c| Retained::as_ptr(&c) == Retained::as_ptr(controller))
+        });
+        match at {
+            Some(i) => {
+                seen[i].2 = seen[i].2.max(now.top);
+                seen[i].2
+            }
+            None => {
+                seen.push((Weak::from_retained(controller), width, now.top));
+                now.top
+            }
+        }
+    })
+}
+
+/// `UIEdgeInsets`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Insets {
+    top: f64,
+    left: f64,
+    bottom: f64,
+    right: f64,
+}
+
+// SAFETY: the layout of UIKit's `UIEdgeInsets` (four `CGFloat`s).
+unsafe impl objc2::Encode for Insets {
+    const ENCODING: objc2::Encoding = objc2::Encoding::Struct(
+        "UIEdgeInsets",
+        &[f64::ENCODING, f64::ENCODING, f64::ENCODING, f64::ENCODING],
+    );
 }
 
 /// An interaction marking its view as holding elements over `scroll`'s `edge` (a `UIRectEdge`).

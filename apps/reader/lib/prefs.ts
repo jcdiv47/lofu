@@ -1,4 +1,4 @@
-import { computed, Storage, signal } from "nsh";
+import { computed, platform, Storage, signal } from "nsh";
 import type { Bookmark } from "./api";
 import { collections, counts, type Source, tags } from "./store";
 
@@ -42,6 +42,8 @@ interface Prefs {
   views: Record<string, BookmarkView>;
   /** The view of sources without their own: what *Apply to all* sets. */
   view: BookmarkView;
+  /** `view` was chosen (*Apply to all*), not the default every field is saved with. */
+  viewChosen?: boolean;
   /** What each view shows (one left out shows its defaults, `SHOW_DEFAULTS`). */
   show: Partial<Record<BookmarkView, ShowField[]>>;
   /** The size of the covers of cards and the moodboard, 1–5 (`coverSize`). */
@@ -50,6 +52,8 @@ interface Prefs {
 }
 
 const KEY = "prefs.v1";
+/** Phones start in the list they always had; wide windows in cards. */
+const defaultView: BookmarkView = platform.idiom === "phone" ? "list" : "cards";
 export const prefs = signal<Prefs>({
   collectionSort: "manual",
   tagSort: "count",
@@ -57,7 +61,7 @@ export const prefs = signal<Prefs>({
   openIn: "reader",
   sorts: {},
   views: {},
-  view: "cards",
+  view: defaultView,
   show: {},
   coverSizes: {},
   coverPosition: "right",
@@ -65,7 +69,12 @@ export const prefs = signal<Prefs>({
 
 void Storage.getItem(KEY)
   .then((v) => {
-    if (v) prefs.set({ ...prefs(), ...(JSON.parse(v) as Partial<Prefs>) });
+    if (!v) return;
+    const saved = JSON.parse(v) as Partial<Prefs>;
+    // Phones had no way to pick a view before, so the one they saved is the
+    // wide windows' default, not a choice: they keep their list.
+    if (platform.idiom === "phone" && !saved.viewChosen) delete saved.view;
+    prefs.set({ ...prefs(), ...saved });
   })
   .catch(() => {});
 
@@ -128,7 +137,8 @@ export const setSortFor = (s: Source, sort: BookmarkSort) =>
 export const setViewFor = (s: Source, view: BookmarkView) =>
   setPrefs({ views: { ...prefs().views, [sourceKey(s)]: view } });
 /** *Apply to all*: this view everywhere, the sources' own ones forgotten. */
-export const applyViewToAll = (view: BookmarkView) => setPrefs({ views: {}, view });
+export const applyViewToAll = (view: BookmarkView) =>
+  setPrefs({ views: {}, view, viewChosen: true });
 
 /** A bookmark's name: its title, or its address without the scheme. */
 export const displayTitle = (b: Bookmark) => b.title || b.url.replace(/^https?:\/\/(www\.)?/, "");
@@ -204,7 +214,10 @@ const SHOW_DEFAULTS: Record<BookmarkView, ShowField[]> = {
   headlines: ["title", "highlights", "info"],
   moodboard: ["cover", "title", "info"],
 };
-export const shownIn = (v: BookmarkView) => prefs().show[v] ?? SHOW_DEFAULTS[v];
+/** The phone's list starts as its rows always were: the excerpt, no note or tags. */
+const PHONE_LIST: ShowField[] = ["cover", "title", "description", "highlights", "info"];
+export const shownIn = (v: BookmarkView) =>
+  prefs().show[v] ?? (v === "list" && platform.idiom === "phone" ? PHONE_LIST : SHOW_DEFAULTS[v]);
 export const shows = (v: BookmarkView, f: ShowField) => shownIn(v).includes(f);
 export const toggleShow = (v: BookmarkView, f: ShowField) =>
   setPrefs({

@@ -481,7 +481,21 @@ mod menu {
 
     /// Takes the button away and answers "" (a choice, if any, was sent first).
     fn close() {
-        if let Some(open) = OPEN.with(|o| o.borrow_mut().take()) {
+        close_if(|_| true);
+    }
+
+    /// `close`, if the menu on screen is the one from `button`: a menu ends
+    /// a moment after it's gone (its animation), when the next may be open.
+    fn close_from(button: usize) {
+        close_if(|open| Retained::as_ptr(&open.button) as usize == button);
+    }
+
+    fn close_if(this_one: impl Fn(&Open) -> bool) {
+        let taken = OPEN.with(|o| {
+            let mut o = o.borrow_mut();
+            if o.as_ref().is_some_and(this_one) { o.take() } else { None }
+        });
+        if let Some(open) = taken {
             let _ = open.tx.send(String::new());
             // SAFETY: on the main thread; the button is in a view or nowhere.
             unsafe {
@@ -507,10 +521,17 @@ mod menu {
                 willEndForConfiguration: configuration,
                 animator: animator
             ];
+            // It lies over the bar's button until the menu has faded, and
+            // would take the next tap there, opening this menu again only
+            // for it to go with the button.
+            let _: () = msg_send![this, setUserInteractionEnabled: false];
+            let button = this as *const AnyObject as usize;
             if animator.is_null() {
-                dispatch2::DispatchQueue::main().exec_async(close);
+                dispatch2::DispatchQueue::main().exec_async(move || close_from(button));
             } else {
-                let done = RcBlock::new(|| dispatch2::DispatchQueue::main().exec_async(close));
+                let done = RcBlock::new(move || {
+                    dispatch2::DispatchQueue::main().exec_async(move || close_from(button))
+                });
                 let _: () = msg_send![animator, addCompletion: &*done];
             }
         }
