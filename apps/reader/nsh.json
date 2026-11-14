@@ -5,6 +5,21 @@
   "build": 1,
   "rust": ".",
   "icon": "../../design/logo/logo.png",
+  "capabilities": {
+    "network": { "hosts": ["*"] },
+    "webview": { "hosts": ["*"] },
+    "clipboard": true,
+    "statusBar": true,
+    "openUrl": { "schemes": ["http", "https"] },
+    "fs": {
+      "read": [
+        "${dataDir}",
+        "${homeDir}/.local/share/app.lofu.reader",
+        "${homeDir}/Library/Application Support/app.lofu.reader"
+      ]
+    },
+    "host": ["lofu.secret.read", "lofu.secret.write", "lofu.share"]
+  },
   "window": {
     "titleBar": {
       "style": "hidden",

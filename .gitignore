@@ -1,3 +1,4 @@
+.nsh/
 node_modules/
 target/
 data/
@@ -10,3 +11,4 @@ apps/extension/.output/
 apps/extension/.wxt/
 apps/extension/e2e/screens/
 apps/reader/e2e/screens/
+apps/reader/android/screens/

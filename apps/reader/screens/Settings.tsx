@@ -45,10 +45,12 @@ export function Settings(props: { onDone: () => void; onCancel?: () => void; fir
   const error = signal("");
   const busy = signal(false);
   let tokenInput: InputRef | null = null;
-  void loadSettings().then((s) => {
-    server.set(s.server);
-    token.set(s.token);
-  });
+  void loadSettings()
+    .then((s) => {
+      server.set(s.server);
+      token.set(s.token);
+    })
+    .catch((e) => error.set((e as Error).message));
 
   const connect = async () => {
     if (busy()) return;
@@ -66,6 +68,7 @@ export function Settings(props: { onDone: () => void; onCancel?: () => void; fir
     try {
       await api.check(s);
       await saveSettings(s);
+      tokenInput?.blur();
       props.onDone();
     } catch (e) {
       error.set((e as Error).message);
@@ -176,7 +179,9 @@ export function Settings(props: { onDone: () => void; onCancel?: () => void; fir
 
   /** The saved server and token: Connect has something to do once they're edited. */
   const saved = signal({ server: "", token: "" });
-  void loadSettings().then((s) => saved.set(s));
+  void loadSettings()
+    .then((s) => saved.set(s))
+    .catch(() => {});
   const edited = () =>
     normalizeServer(server()) !== saved().server || token().trim() !== saved().token;
 

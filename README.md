@@ -1,13 +1,13 @@
 # lofu
 
-Self-hosted bookmarks and read-later, in the spirit of Raindrop.io and Pocket. It runs on a home server and you reach it over your LAN or Tailscale. Clients: web, iOS, macOS, and a CLI built for agents.
+Self-hosted bookmarks and read-later, in the spirit of Raindrop.io and Pocket. It runs on a home server and you reach it over your LAN or Tailscale. Clients: web, Android, iOS, macOS, and a CLI built for agents.
 
 ```
 apps/server       Bun + Hono API, SQLite, job queue, extraction workers, search indexer
 packages/shared   zod schemas (API contract → OpenAPI) and URL normalization
 crates/lofu-cli   `lofu` CLI in Rust
 apps/extension    Browser extension (WXT; Chrome/Edge/Brave and Firefox)
-apps/reader       The app on nsh (TSX) for macOS, iOS and the web: library, search, reading, highlights; see its README
+apps/reader       The app on nsh (TSX) for Android, macOS, iOS and the web: library, search, reading, highlights; see its README
 skills/lofu       Agent skill describing the CLI
 docker/           compose stack (server + Meilisearch) and Dockerfile
 ```

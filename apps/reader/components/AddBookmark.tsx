@@ -16,10 +16,11 @@ const intoLabel = (s: Source) =>
  */
 export function AddBookmark(props: {
   source: Source;
+  initialText?: string;
   onDone: (b: Bookmark) => void;
   onCancel?: () => void;
 }) {
-  const url = signal("");
+  const url = signal(props.initialText ?? "");
   const error = signal("");
   const busy = signal(false);
 
@@ -27,7 +28,7 @@ export function AddBookmark(props: {
   // first; iOS asks "Allow Paste?" when the app reads it, so check that it
   // holds text before reading.
   const fromClipboard = signal(false);
-  if (platform.os !== "web") {
+  if (platform.os !== "web" && !props.initialText) {
     void Clipboard.hasText()
       .then((has) => (has ? Clipboard.readText() : ""))
       .then((t) => {

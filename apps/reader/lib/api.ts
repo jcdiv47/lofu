@@ -1,5 +1,6 @@
 import { Secrets, ShareExtension } from "lofu/native";
-import { Storage } from "nsh";
+import { platform, Storage } from "nsh";
+import { readAndroidToken, writeAndroidToken } from "./android";
 
 /** The subset of the lofu API the app uses (shapes from packages/shared/src/schemas.ts). */
 export interface Bookmark {
@@ -140,7 +141,13 @@ export async function loadSettings(): Promise<Settings> {
   if (current) return current;
   const server = (await Storage.getItem("server")) ?? "";
   let token = (await Storage.getItem("token")) ?? "";
-  if (keychain) {
+  if (platform.os === "android") {
+    if (token) {
+      await writeAndroidToken(token);
+      await Storage.removeItem("token");
+    }
+    token = await readAndroidToken();
+  } else if (keychain) {
     // Logins from before the Keychain move there on first use.
     if (token && Secrets.set("token", token)) await Storage.removeItem("token");
     token = Secrets.get("token") ?? token;
@@ -153,9 +160,12 @@ export const normalizeServer = (s: string) => s.trim().replace(/\/+$/, "");
 
 export async function saveSettings(s: Settings): Promise<void> {
   const next = { server: normalizeServer(s.server), token: s.token.trim() };
-  await Storage.setItem("server", next.server);
-  if (keychain && Secrets.set("token", next.token)) await Storage.removeItem("token");
+  if (platform.os === "android") {
+    await writeAndroidToken(next.token);
+    await Storage.removeItem("token");
+  } else if (keychain && Secrets.set("token", next.token)) await Storage.removeItem("token");
   else await Storage.setItem("token", next.token);
+  await Storage.setItem("server", next.server);
   current = next;
   shareLogin(next);
 }
