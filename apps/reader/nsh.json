@@ -18,7 +18,7 @@
         "${homeDir}/Library/Application Support/app.lofu.reader"
       ]
     },
-    "host": ["lofu.secret.read", "lofu.secret.write", "lofu.share"]
+    "host": ["lofu.secret.read", "lofu.secret.write", "lofu.share", "lofu.keyboard.keepAway"]
   },
   "window": {
     "titleBar": {

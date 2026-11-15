@@ -58,7 +58,7 @@ import trashIcon from "../assets/icons/trash.svg";
 import upDownIcon from "../assets/icons/updown.svg";
 import videoIcon from "../assets/icons/video.svg";
 import windowIcon from "../assets/icons/window.svg";
-import { glass, hasGlass, look } from "../lib/look";
+import { backdropBlur, glass, hasGlass, look } from "../lib/look";
 import {
   nativeControls,
   nativeScrollEdges,
@@ -199,8 +199,8 @@ export function BottomEdge(props: { height: number }) {
       class="absolute right-0 bottom-0 left-0"
       style={{
         height: props.height,
-        backgroundColor: `${look().paper}99`,
-        backdropFilter: "blur(10px)",
+        backgroundColor: `${look().paper}${backdropBlur ? "99" : "e0"}`,
+        backdropFilter: backdropBlur ? "blur(10px)" : undefined,
         maskImage: "linear-gradient(to top, #000 0%, #000 45%, #0000 100%)",
         pointerEvents: "none",
       }}
@@ -231,8 +231,8 @@ export function TopEdge(props: {
           26,
         // A progressive blur, as the system's scroll edge effect: the page
         // under the bar is blurred and washed with paper, easing off below it.
-        backgroundColor: `${look().paper}b3`,
-        backdropFilter: "blur(10px)",
+        backgroundColor: `${look().paper}${backdropBlur ? "b3" : "e6"}`,
+        backdropFilter: backdropBlur ? "blur(10px)" : undefined,
         maskImage: "linear-gradient(to bottom, #000 0%, #000 72%, #0000 100%)",
         pointerEvents: "none",
       }}

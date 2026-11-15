@@ -143,13 +143,59 @@ try {
   await Bun.sleep(700);
   check(true, "connect with a real bearer token");
   await shot("01-library");
+  await tap("home-menu");
+  await wait("home-menu-panel");
+  adb("shell", "input", "keyevent", "KEYCODE_BACK");
+  await Bun.sleep(600);
+  check(
+    !nodes().some((n) => n["resource-id"] === "home-menu-panel") &&
+      nodes().some((n) => n["resource-id"] === "source-all"),
+    "Android back closes the Library menu, not the app",
+  );
   await tap("All bookmarks");
+  await tap("list-menu");
+  await wait("list-menu-panel");
+  await shot("07-list-menu");
+  await tap("menu-sort-by");
+  await tap("menu-sort:name-asc");
+  await tap("list-menu");
+  await wait("Sort by, By name (A-Z)");
+  adb("shell", "input", "keyevent", "KEYCODE_BACK");
+  await Bun.sleep(600);
+  check(
+    !nodes().some((n) => n["resource-id"] === "sort-button"),
+    "no Sort/View/Filter row on Android: the ••• menu has them",
+  );
+  check(true, "the list's ••• menu opens and its Sort by applies");
+  await tap("list-menu");
+  await tap("menu-view:moodboard");
+  await wait("Nothing phone reading test");
+  await tap("list-menu");
+  await tap("menu-view:list");
+  await tap("list-menu");
+  await wait("list-menu-panel");
+  adb("shell", "input", "keyevent", "KEYCODE_BACK");
+  await Bun.sleep(600);
+  check(
+    !nodes().some((n) => n["resource-id"] === "list-menu-panel") &&
+      nodes().some((n) => n["resource-id"] === "list-menu"),
+    "the ••• menu switches views, and Android back closes it",
+  );
   await tap("Nothing phone reading test");
   await wait("article");
   await wait("This saved article");
   await Bun.sleep(700);
   check(true, "open and render saved article");
   await shot("02-reader");
+  {
+    const a = (await wait("article")).bounds!.match(/\d+/g)!.map(Number);
+    adb("shell", "input", "tap", String((a[0]! + a[2]!) / 2), String(a[1]! + 400));
+    await Bun.sleep(1200);
+    check(
+      !adb("shell", "dumpsys", "input_method").includes("mInputShown=true"),
+      "a press on the read-only article raises no keyboard",
+    );
+  }
   await tap("reader-menu");
   await tap("Add to Favorites");
   await Bun.sleep(500);
@@ -214,7 +260,7 @@ try {
   await shot("failure");
   console.error(
     nodes()
-      .filter((n) => n.text && n["package"] === pkg)
+      .filter((n) => n.text && n.package === pkg)
       .map((n) => n.text)
       .join("\n")
       .replaceAll(token, "[redacted]"),

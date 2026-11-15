@@ -1,4 +1,5 @@
 import { host, platform, signal } from "nsh";
+import { BackHandler } from "nsh/mobile";
 
 /** Untrusted share text, held through first-launch connection until confirmed. */
 export const incomingShare = signal("");
@@ -21,4 +22,21 @@ export const writeAndroidToken = async (token: string) => {
 };
 export const shareAndroidUrl = async (url: string) => {
   await host.call("lofu.share", url);
+};
+
+/**
+ * Android's back button takes `handler` while the calling component lives
+ * (a menu or card drawn over the page: back closes it, not the page or app).
+ */
+export function onAndroidBack(handler: () => void) {
+  if (platform.os !== "android") return;
+  BackHandler.on("press", () => {
+    handler();
+    return true;
+  });
+}
+
+/** Android: keeps the keyboard down for the read-only editor labelled `label` (`LofuActivity`). */
+export const keepAndroidKeyboardAway = (label: string) => {
+  if (platform.os === "android") void host.call("lofu.keyboard.keepAway", label).catch(() => {});
 };

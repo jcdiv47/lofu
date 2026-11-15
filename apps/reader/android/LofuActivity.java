@@ -44,9 +44,44 @@ public final class LofuActivity extends Activity {
             startActivity(Intent.createChooser(send, "Share link"));
             reply.resolve(true);
         });
+        // A read-only RichEditor (the article) focuses nsh's hidden input at the caret on
+        // every press, which raises the keyboard: inputs inside a view labelled with one of
+        // these labels keep it down. Selecting and copying still work.
+        view.handle("lofu.keyboard.keepAway", (data, reply) -> {
+            quietLabels.add((String)data);
+            reply.resolve(true);
+        });
+        view.getViewTreeObserver().addOnGlobalFocusChangeListener((old, now) -> {
+            if (now instanceof android.widget.TextView && insideQuiet(now))
+                ((android.widget.TextView)now).setShowSoftInputOnFocus(false);
+            keepKeyboardAway();
+        });
+        // nsh also asks for the keyboard itself on a press: down again once it shows.
+        getWindow().getDecorView().getViewTreeObserver().addOnGlobalLayoutListener(this::keepKeyboardAway);
         setContentView(view);
         view.loadAssetBundle("nsh", true);
         receive(getIntent());
+    }
+
+    private final java.util.Set<String> quietLabels = new java.util.HashSet<>();
+
+    private void keepKeyboardAway() {
+        android.view.View now = getCurrentFocus();
+        if (now == null || !insideQuiet(now)) return;
+        android.view.WindowInsets insets = now.getRootWindowInsets();
+        if (insets != null && android.os.Build.VERSION.SDK_INT >= 30
+            && !insets.isVisible(android.view.WindowInsets.Type.ime())) return;
+        android.view.inputmethod.InputMethodManager imm =
+            (android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
+        if (imm != null) imm.hideSoftInputFromWindow(now.getWindowToken(), 0);
+    }
+
+    private boolean insideQuiet(android.view.View v) {
+        for (android.view.ViewParent p = v.getParent(); p instanceof android.view.View; p = p.getParent()) {
+            CharSequence label = ((android.view.View)p).getContentDescription();
+            if (label != null && quietLabels.contains(label.toString())) return true;
+        }
+        return false;
     }
 
     private SecretKey key() throws Exception {

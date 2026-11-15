@@ -1,7 +1,8 @@
-import { type JSX, Text, View, type ViewRef } from "nsh";
+import { type JSX, Scroll, signal, Text, View, type ViewRef } from "nsh";
 import { Menu as DrawnMenu, MenuItem, MenuSeparator, Slider } from "nsh/base";
 import { isAvailable, Menu } from "nsh/desktop";
 import { type MenuEntry, systemMenu } from "../lib/actions";
+import { onAndroidBack } from "../lib/android";
 import type { Bookmark } from "../lib/api";
 import {
   filterCounts,
@@ -466,8 +467,7 @@ const filterSummary = (f: ListFilter) => {
   return parts.length ? parts.join(", ") : "Off";
 };
 
-/** The phone list's menu (iOS): what's picked is applied here, the filter through `setFilter`. */
-export async function phoneListMenu(o: {
+export type ListMenuOptions = {
   source: Source;
   filter: ListFilter;
   setFilter: (f: ListFilter) => void;
@@ -475,7 +475,15 @@ export async function phoneListMenu(o: {
   list: Bookmark[];
   /** A search keeps the server's order: no *Sort by*. */
   searching: boolean;
-}) {
+};
+
+/** The phone list's menu (iOS): what's picked is applied here, the filter through `setFilter`. */
+export async function phoneListMenu(o: ListMenuOptions) {
+  applyListChoice(o, await systemMenu("", listMenuEntries(o)));
+}
+
+/** The phone list's menu as entries: the system's menu (iOS) or `PanelMenu` (Android, the web) draws them. */
+export function listMenuEntries(o: ListMenuOptions): MenuEntry[] {
   const s = o.source;
   const view = currentView(s);
   const f = o.filter;
@@ -567,7 +575,7 @@ export async function phoneListMenu(o: {
           },
         ]
       : [];
-  const id = await systemMenu("", [
+  return [
     ...viewChoices.map((c) => ({
       id: `view:${c.value}`,
       title: c.label,
@@ -595,8 +603,15 @@ export async function phoneListMenu(o: {
       subtitle: `${view.label} in every list`,
       symbol: "square.on.square",
     },
-  ]);
+  ];
+}
+
+/** Applies what was picked from the phone list's menu (an entry's id), if anything. */
+export function applyListChoice(o: ListMenuOptions, id: string | null) {
   if (!id) return;
+  const s = o.source;
+  const view = currentView(s);
+  const f = o.filter;
   const [kind, value = ""] = id.split(/:(.*)/s);
   switch (kind) {
     case "view":
@@ -671,5 +686,157 @@ export function FilterButton(props: {
         ))}
       </If>
     </DrawnMenu>
+  );
+}
+
+/** The drawn menu's icons for the system menu's SF Symbols; the rest go without. */
+const symbolIcons: Record<string, IconName> = {
+  "list.bullet": "list",
+  "square.grid.2x2": "grid",
+  "text.justify.left": "headlines",
+  "rectangle.3.group": "moodboard",
+  "arrow.up.arrow.down": "sort",
+  "line.3.horizontal.decrease.circle": "filter",
+  "line.3.horizontal.decrease.circle.fill": "filter",
+  clock: "clock",
+  textformat: "sortAz",
+  macwindow: "window",
+  star: "star",
+  highlighter: "highlighter",
+  "note.text": "note",
+  number: "hash",
+  photo: "image",
+  "play.rectangle": "video",
+  link: "link",
+  "xmark.circle": "close",
+};
+
+/**
+ * The system's menu (`MenuEntry`), drawn where there is none (Android, the
+ * web): a panel under the bar's •••, a submenu taking its place with a way
+ * back, as `Home`'s menu. A pick closes it (`onPick`); a press outside it or
+ * Android's back button closes it, or goes back from a submenu.
+ */
+export function PanelMenu(props: {
+  items: () => MenuEntry[];
+  top: number;
+  right: number;
+  /** The height it may take; longer menus scroll. */
+  maxHeight: number;
+  onPick: (id: string) => void;
+  onClose: () => void;
+  testID?: string;
+}) {
+  /** The submenus open, as indexes from the top level down. */
+  const path = signal<number[]>([]);
+  const shown = signal(false);
+  setTimeout(() => shown.set(true), 0);
+  const level = () => {
+    let items = props.items();
+    let title = "";
+    for (const k of path()) {
+      const e = items[k];
+      if (!e || !("children" in e)) return { items: props.items(), title: "" };
+      items = e.children;
+      title = e.title;
+    }
+    return { items, title };
+  };
+  const back = () => path.set(path().slice(0, -1));
+  onAndroidBack(() => (path().length ? back() : props.onClose()));
+  const text = (e: { title: string; subtitle?: string }) => (
+    <View class="min-w-0 flex-1">
+      <Text style={{ color: look().ink, fontSize: 16, lineHeight: 21 }}>{e.title}</Text>
+      <If when={e.subtitle}>
+        <Text style={{ color: look().inkSoft, fontSize: 13, lineHeight: 17 }}>{e.subtitle}</Text>
+      </If>
+    </View>
+  );
+  const icon = (symbol?: string) => {
+    const name = symbol ? symbolIcons[symbol] : undefined;
+    return name ? <Icon name={name} size={18} color={look().inkSoft} /> : null;
+  };
+  const row = (e: MenuEntry, k: number) => {
+    if ("separator" in e)
+      return <View class="mx-4 my-1" style={{ height: 1, backgroundColor: look().rule }} />;
+    const sub = "children" in e;
+    const checked = !sub && e.checked;
+    const testID = sub ? `menu-${e.title.toLowerCase().replace(/\W+/g, "-")}` : `menu-${e.id}`;
+    return (
+      <View
+        role={sub ? "menuitem" : e.checked === undefined ? "menuitem" : "menuitemradio"}
+        accessibilityLabel={e.subtitle ? `${e.title}, ${e.subtitle}` : e.title}
+        accessibilityState={!sub && e.checked !== undefined ? { checked: !!e.checked } : undefined}
+        testID={testID}
+        onPress={() => (sub ? path.set([...path(), k]) : props.onPick(e.id))}
+        class="min-h-12 flex-row items-center gap-3 rounded-2xl py-2 pr-4 pl-3"
+        activeStyle={{ backgroundColor: look().selected }}
+      >
+        <View class="w-5 items-center">
+          <If when={checked}>
+            <Icon name="check" size={17} color={look().stamp} />
+          </If>
+        </View>
+        {text(e)}
+        {sub ? <Icon name="chevron" size={14} color={look().inkSoft} /> : icon(e.symbol)}
+      </View>
+    );
+  };
+  return (
+    <>
+      <View
+        class="absolute inset-0"
+        accessibilityLabel="Close menu"
+        onPress={props.onClose}
+        style={{ backgroundColor: "#00000024" }}
+      />
+      <View
+        testID={props.testID}
+        class="absolute overflow-hidden rounded-[26px]"
+        style={{
+          top: props.top,
+          right: props.right,
+          width: 290,
+          maxHeight: props.maxHeight,
+          backgroundColor: look().card,
+          borderWidth: 1,
+          borderColor: look().rule,
+          boxShadow: "0px 4px 12px rgb(0 0 0 / 0.14), 0px 16px 40px rgb(0 0 0 / 0.24)",
+          opacity: shown() ? 1 : 0,
+          transform: shown() ? "scale(1)" : "scale(0.9)",
+          transformOrigin: "top right",
+          transitionProperty: "opacity, transform",
+          transitionDuration: 160,
+          transitionTimingFunction: "ease-out",
+        }}
+      >
+        <Scroll style={{ maxHeight: props.maxHeight }} contentStyle={{ padding: 6 }}>
+          {() => {
+            const { items, title } = level();
+            return (
+              <>
+                <If when={path().length}>
+                  <View
+                    role="button"
+                    accessibilityLabel={`Back from ${title}`}
+                    testID="menu-back"
+                    onPress={back}
+                    class="h-12 flex-row items-center gap-2 rounded-2xl px-3"
+                    activeStyle={{ backgroundColor: look().selected }}
+                  >
+                    <Icon name="back" size={17} color={look().inkSoft} />
+                    <Text style={{ color: look().ink, fontSize: 16, fontWeight: "600" }}>
+                      {title}
+                    </Text>
+                  </View>
+                  <View class="mx-4 my-1" style={{ height: 1, backgroundColor: look().rule }} />
+                </If>
+                {items.map(row)}
+              </>
+            );
+          }}
+        </Scroll>
+      </View>
+    </>
   );
 }
