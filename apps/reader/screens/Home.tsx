@@ -32,6 +32,7 @@ import {
   systemMenu,
   systemMenus,
 } from "../lib/actions";
+import { onAndroidBack } from "../lib/android";
 import { glass, look } from "../lib/look";
 import {
   type CollectionSort,
@@ -565,6 +566,7 @@ async function openSystemMenu(onNewCollection: () => void) {
  */
 function HomeMenu(props: { top: number; onClose: () => void; onNewCollection: () => void }) {
   const page = signal<"root" | "collections" | "tags">("root");
+  onAndroidBack(() => (page() === "root" ? props.onClose() : page.set("root")));
   const shown = signal(false);
   setTimeout(() => shown.set(true), 0);
   const item = (
@@ -697,6 +699,7 @@ function HomeMenu(props: { top: number; onClose: () => void; onNewCollection: ()
 /** Names a new collection: a small glass card over the page, above the keyboard. */
 function NewCollection(props: { top: number; onClose: () => void }) {
   const name = signal("");
+  onAndroidBack(props.onClose);
   const busy = signal(false);
   const error = signal("");
   const create = async () => {

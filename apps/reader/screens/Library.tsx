@@ -28,9 +28,13 @@ import {
   MoodboardTile,
 } from "../components/BookmarkCard";
 import {
+  applyListChoice,
   currentSort,
   currentView,
   FilterButton,
+  type ListMenuOptions,
+  listMenuEntries,
+  PanelMenu,
   phoneListMenu,
   SortButton,
   sortLabel,
@@ -111,6 +115,8 @@ const SEARCH_H = 48;
 /** The phone's grids: their margins and the room between cards. */
 const PHONE_PAD = 16;
 const PHONE_GAP = 12;
+/** Moodboard tiles drawn at a time on Android, a batch more near the end. */
+const MOODBOARD_BATCH = 40;
 /**
  * The narrowest a phone's card or tile gets at each *Cover* size: on an
  * iPhone in portrait, three columns at the smallest, two at the default,
@@ -449,6 +455,8 @@ export function Library(props: {
   // it's known, the column counts), so the grid is built again only when a
   // column comes or goes, not on every frame.
   const width = signal(0);
+  /** The phone's page height, which the list's drawn menu keeps inside. */
+  const height = signal(0);
   const measured = computed(() => width() > 0);
   const columnsOf = (min: number) =>
     Math.max(1, Math.floor((width() - PAD * 2 + GAP) / (min + GAP)));
@@ -625,15 +633,15 @@ export function Library(props: {
     </View>
   );
 
-  // Phones: the list's menu, from the bar's ••• (iOS: the system's).
-  const openMenu = () =>
-    phoneListMenu({
-      source: props.source,
-      filter: filter(),
-      setFilter: (f) => filter.set(f),
-      list: bookmarksIn(props.source),
-      searching: searching(),
-    });
+  // Phones: the list's menu, from the bar's ••• (iOS: the system's; Android: `PanelMenu`).
+  const menuOptions = (): ListMenuOptions => ({
+    source: props.source,
+    filter: filter(),
+    setFilter: (f) => filter.set(f),
+    list: bookmarksIn(props.source),
+    searching: searching(),
+  });
+  const openMenu = () => phoneListMenu(menuOptions());
   effect(() => {
     const m = props.menu;
     if (!m?.() || !systemMenus) return;
@@ -686,9 +694,9 @@ export function Library(props: {
     </If>
   );
 
-  /** Phones without the system's menu (the web, Android): the controls over the list. */
+  /** The web's phone layout: the controls over the list (iOS and Android: the bar's •••). */
   const controlsBar = () => (
-    <If when={!systemMenus}>
+    <If when={!systemMenus && platform.os !== "android"}>
       <View class="flex-row items-center gap-0.5 px-2 pb-1">
         <If when={!searching()}>
           <SortButton source={props.source} />
@@ -860,10 +868,27 @@ export function Library(props: {
         // Masonry, as on wide windows: the items dealt to columns in turn,
         // each column a list laid out in the one scroll view.
         const n = phoneTileColumns();
+        /**
+         * Android: plain columns, a batch more as the end comes near. Its
+         * lists laid out in the one scroll view (`viewport="parent"`) left
+         * tiles, or a whole column, out (nsh 0.5.0).
+         */
+        const plain = platform.os === "android";
+        const batch = signal(MOODBOARD_BATCH);
         const cols = () => {
-          const all = items();
+          const all = plain ? items().slice(0, batch()) : items();
           return Array.from({ length: n }, (_, c) => all.filter((_, k) => k % n === c));
         };
+        const tile = (i: () => Item) => (
+          <MoodboardTile
+            b={i().b}
+            show={show}
+            touch
+            snippet={i().snippet}
+            showCollection={showCollection}
+            onOpen={() => open(i().b)}
+          />
+        );
         return (
           <Scroll
             testID="library-list"
@@ -872,6 +897,11 @@ export function Library(props: {
             onRefresh={pull.onRefresh}
             keyboardDismissMode="on-drag"
             keyboardShouldPersistTaps="handled"
+            onScroll={(e) => {
+              if (!plain || e.offset.y + e.size.height * 3 < e.contentSize.height) return;
+              if (batch() < items().length) batch.set(batch() + MOODBOARD_BATCH);
+              else void loadMore();
+            }}
           >
             {header()}
             <If when={items().length} else={phoneEmpty()}>
@@ -885,26 +915,23 @@ export function Library(props: {
                 }}
               >
                 {Array.from({ length: n }, (_, c) => (
-                  <View class="min-w-0 flex-1">
-                    <List
-                      each={cols()[c] ?? []}
-                      viewport="parent"
-                      keyExtractor={(i) => i.b.id}
-                      estimatedItemSize={220}
-                      contentStyle={{ rowGap: PHONE_GAP }}
-                      onLoadMore={() => void loadMore()}
-                    >
-                      {(i) => (
-                        <MoodboardTile
-                          b={i().b}
-                          show={show}
-                          touch
-                          snippet={i().snippet}
-                          showCollection={showCollection}
-                          onOpen={() => open(i().b)}
-                        />
-                      )}
-                    </List>
+                  <View class="min-w-0 flex-1" style={plain ? { rowGap: PHONE_GAP } : undefined}>
+                    {plain ? (
+                      <Each of={cols()[c] ?? []} key={(i) => i.b.id}>
+                        {(i) => tile(i)}
+                      </Each>
+                    ) : (
+                      <List
+                        each={cols()[c] ?? []}
+                        viewport="parent"
+                        keyExtractor={(i) => i.b.id}
+                        estimatedItemSize={220}
+                        contentStyle={{ rowGap: PHONE_GAP }}
+                        onLoadMore={() => void loadMore()}
+                      >
+                        {(i) => tile(i)}
+                      </List>
+                    )}
                   </View>
                 ))}
               </View>
@@ -961,11 +988,31 @@ export function Library(props: {
         when={props.wide}
         else={
           <>
-            <View class="flex-1" onLayout={(e) => width.set(e.bounds.size.width)}>
+            <View
+              class="flex-1"
+              onLayout={(e) => {
+                width.set(e.bounds.size.width);
+                height.set(e.bounds.size.height);
+              }}
+            >
               {phoneList}
             </View>
             <BottomEdge height={SEARCH_H + searchBottom() + 24} />
             {phoneSearch()}
+            <If when={props.menu?.() && !systemMenus}>
+              <PanelMenu
+                testID="list-menu-panel"
+                items={() => listMenuEntries(menuOptions())}
+                top={8}
+                right={12 + sideRight()}
+                maxHeight={Math.max(240, (height() || 600) - 16)}
+                onPick={(id) => {
+                  props.menu?.set(false);
+                  applyListChoice(menuOptions(), id);
+                }}
+                onClose={() => props.menu?.set(false)}
+              />
+            </If>
             <If when={platform.os === "ios"}>
               {/* Made again with each layout: it hands UIKit the new scroll view. */}
               {() => {

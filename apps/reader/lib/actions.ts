@@ -3,6 +3,7 @@ import { Clipboard, openUrl, platform } from "nsh";
 import { AlertDialog } from "nsh/base";
 import { isAvailable, Menu } from "nsh/desktop";
 import { promptText } from "../components/Prompt";
+import { shareAndroidUrl } from "./android";
 import { api, type Bookmark } from "./api";
 import { type OpenIn, prefs, sortedCollections } from "./prefs";
 import {
@@ -118,6 +119,7 @@ export type At = { x: number; y: number };
  * none, and the menus offer *Copy link* only.
  */
 export const canShare = (() => {
+  if (platform.os === "android") return true;
   try {
     return Share.available();
   } catch {
@@ -127,6 +129,10 @@ export const canShare = (() => {
 
 /** Shares the bookmark's link with the system's share sheet. */
 export function shareBookmark(b: Bookmark, at?: At) {
+  if (platform.os === "android") {
+    void shareAndroidUrl(b.url).catch(() => notice("Cannot share", "Try Copy Link instead."));
+    return;
+  }
   if (!canShare || !Share.url(b.url, at?.x ?? -1, at?.y ?? -1)) {
     void Clipboard.writeText(b.url);
   }

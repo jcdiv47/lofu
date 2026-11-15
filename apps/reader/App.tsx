@@ -36,6 +36,7 @@ import {
   shareBookmark,
   showBookmarkMenu,
 } from "./lib/actions";
+import { incomingShare, listenForShares } from "./lib/android";
 import type { Bookmark } from "./lib/api";
 import { loadSettings, shareLogin } from "./lib/api";
 import { glass, hasGlass, look } from "./lib/look";
@@ -120,14 +121,17 @@ const pageAnimation = platform.os === "ios" || platform.os === "android" ? "defa
 
 function App() {
   const ready = signal<"settings" | "app" | null>(null);
-  void loadSettings().then((s) => {
-    if (s.server && s.token) {
-      // Logins from before the share extension reach it this way.
-      shareLogin(s);
-      ready.set("app");
-      void start();
-    } else ready.set("settings");
-  });
+  cleanup(listenForShares());
+  void loadSettings()
+    .then((s) => {
+      if (s.server && s.token) {
+        // Logins from before the share extension reach it this way.
+        shareLogin(s);
+        ready.set("app");
+        void start();
+      } else ready.set("settings");
+    })
+    .catch(() => ready.set("settings"));
 
   // Catch up whenever the app comes back to the front (a browser tab too).
   effect(() => {
@@ -159,6 +163,32 @@ function App() {
         if (r === "settings") return <Settings first onDone={onConnected} />;
         return wide() ? <Desktop onReconnect={onConnected} /> : <Phone onReconnect={onConnected} />;
       }}
+      {() =>
+        ready() === "app" && incomingShare() ? (
+          <Dialog
+            open
+            onCancel={() => incomingShare.set("")}
+            onOpenChange={(e) => {
+              if (!e.open) incomingShare.set("");
+            }}
+            backdropClass="bg-black/40"
+            class="m-auto overflow-hidden rounded-[20px]"
+            style={{ width: Math.min(440, windowSize().width - 32), backgroundColor: look().paper }}
+          >
+            <View class="gap-5 p-5" style={{ backgroundColor: look().paper }}>
+              <Text style={{ color: look().ink, fontSize: 20, fontWeight: "700" }}>
+                Save shared link
+              </Text>
+              <AddBookmark
+                source={{ kind: "all" }}
+                initialText={incomingShare()}
+                onDone={() => incomingShare.set("")}
+                onCancel={() => incomingShare.set("")}
+              />
+            </View>
+          </Dialog>
+        ) : null
+      }
       <PromptHost />
     </View>
   );
@@ -529,7 +559,8 @@ function Phone(props: { onReconnect: () => void }) {
   cleanup(() => setEditor(null));
   // No header background: iOS 26 draws its bar as Liquid Glass over the page,
   // with the content scrolling under it; the app only tints it.
-  const headerClass = () => `text-[${look().ink}] tint-[${look().stamp}]`;
+  const headerClass = () =>
+    `${platform.os === "android" ? `bg-[${look().paper}] ` : ""}text-[${look().ink}] tint-[${look().stamp}]`;
   /** Pages that keep an opaque bar (forms, the web view) draw it in the paper. */
   const solidHeaderClass = () => `bg-[${look().paper}] ${headerClass()}`;
   return (
@@ -588,8 +619,8 @@ function Phone(props: { onReconnect: () => void }) {
               <NavPage
                 animation={pageAnimation}
                 title={sourceTitle(route.source)}
-                headerLargeTitle
-                headerTransparent
+                headerLargeTitle={platform.os === "ios"}
+                headerTransparent={platform.os === "ios"}
                 headerClass={headerClass()}
                 style={{ backgroundColor: look().paper }}
                 ios={{ headerRightSymbol: "ellipsis" }}
@@ -599,7 +630,15 @@ function Phone(props: { onReconnect: () => void }) {
                     accessibilityLabel="View, sort and filter"
                     testID="list-menu"
                     onPress={() => listMenu.set(true)}
-                  />
+                  >
+                    {platform.os === "android" ? (
+                      <RoundGlassButton
+                        name="more"
+                        label="View, sort and filter"
+                        onPress={() => listMenu.set(true)}
+                      />
+                    ) : null}
+                  </View>
                 }
               >
                 <WebBar title={sourceTitle(route.source)} onBack={() => nav.pop()} />
@@ -625,7 +664,7 @@ function Phone(props: { onReconnect: () => void }) {
               <NavPage
                 animation={pageAnimation}
                 title={route.bookmark.domain.replace(/^www\./, "")}
-                headerTransparent
+                headerTransparent={platform.os === "ios"}
                 headerClass={headerClass()}
                 style={{ backgroundColor: look().paper }}
                 ios={{ headerRightSymbol: "ellipsis" }}
@@ -634,7 +673,16 @@ function Phone(props: { onReconnect: () => void }) {
                     role="button"
                     accessibilityLabel="More"
                     onPress={() => void showBookmarkMenu(b(), { inReader: true, onGone: back })}
-                  />
+                  >
+                    {platform.os === "android" ? (
+                      <RoundGlassButton
+                        name="more"
+                        label="More"
+                        testID="reader-menu"
+                        onPress={() => void showBookmarkMenu(b(), { inReader: true, onGone: back })}
+                      />
+                    ) : null}
+                  </View>
                 }
               >
                 <WebBar

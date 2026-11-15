@@ -58,6 +58,7 @@ import {
   showBookmarkMenu,
   toolbarActions,
 } from "../lib/actions";
+import { keepAndroidKeyboardAway } from "../lib/android";
 import {
   type ArticleImage,
   api,
@@ -1060,6 +1061,7 @@ export function Reader(props: {
               // Once its views are up: a press focuses its text view, which
               // would raise iOS's keyboard (Keyboard in src/lib.rs).
               setTimeout(() => Keyboard.keepAway(ARTICLE), 0);
+              keepAndroidKeyboardAway(ARTICLE);
             }}
             editable={false}
             testID="article"
@@ -1071,6 +1073,9 @@ export function Reader(props: {
               if (!restoring) selection.set(s);
             }}
             bubbleMenu={bubble()}
+            // Android's own selection bar (Copy, Select all) floats over the
+            // selection: the app's bubble goes under it, in sight.
+            bubbleMenuPlacement={platform.os === "android" ? "bottom" : undefined}
             classes={{
               // Centred by its margins, not by padding worked out from the
               // width: every block and run of text reads these classes, so a

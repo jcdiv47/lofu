@@ -82,6 +82,14 @@ export const hasGlass = (() => {
 })();
 
 /**
+ * Whether views blur what's behind them (`backdropFilter`). Not on Android:
+ * nsh 0.5.0 draws it there from a bitmap of the page, uploaded again each
+ * frame anything under it moves, and a page transition dropped to ~15 fps on
+ * a Nothing Phone (2). There a more opaque paper stands in.
+ */
+export const backdropBlur = platform.os !== "android";
+
+/**
  * A glass surface: the system's material where there is one, and a blurred,
  * mostly opaque paper where there isn't (the web, older systems), which keeps
  * text over it readable. The system's glass ignores the view's background
@@ -90,7 +98,7 @@ export const hasGlass = (() => {
  */
 export const glass = (opts?: { shadow?: boolean; edge?: boolean }) => ({
   glassEffect: "regular" as const,
-  backdropFilter: "blur(24px) saturate(160%)",
+  backdropFilter: backdropBlur ? "blur(24px) saturate(160%)" : undefined,
   backgroundColor: hasGlass ? undefined : look().glassFallback,
   borderWidth: opts?.edge === false || hasGlass ? 0 : 1,
   borderColor: look().glassEdge,

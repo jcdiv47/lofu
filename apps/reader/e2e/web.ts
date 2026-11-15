@@ -61,7 +61,11 @@ const isDecorated = (quote: string) => `(() => {
 })()`;
 
 // Wide enough for the library's title beside its controls, as the Mac's window keeps.
-const page = await launch({ profile: "/tmp/lofu-reader-e2e", width: 1100, height: 1000 });
+const page = await launch({
+  profile: process.env.READER_PROFILE ?? "/tmp/lofu-reader-e2e",
+  width: 1100,
+  height: 1000,
+});
 try {
   await page.goto(APP);
   await connect(page, SERVER, TOKEN);

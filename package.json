@@ -21,7 +21,9 @@
     "ext:build": "bun run --cwd apps/extension build && bun run --cwd apps/extension build:firefox",
     "ext:e2e": "bun run --cwd apps/extension e2e",
     "reader:web": "nsh run apps/reader/App.tsx --target web",
-    "reader:test": "cd apps/reader && nsh check && nsh test"
+    "reader:test": "cd apps/reader && nsh check && nsh test",
+    "reader:android": "bun apps/reader/android/package.ts",
+    "reader:android:test": "bun apps/reader/android/package.ts --test && bun apps/reader/android/device.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.5",

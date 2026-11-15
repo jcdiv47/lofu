@@ -1,6 +1,7 @@
 import { TextPrompt } from "lofu/native";
 import { keyboardFrame, safeArea, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
+import { onAndroidBack } from "../lib/android";
 import { glass, look } from "../lib/look";
 import { GlassButton, GlassTint } from "./ui";
 
@@ -74,6 +75,7 @@ function PromptCard(props: { ask: Ask }) {
     asking.set(null);
     props.ask.done(ok);
   };
+  onAndroidBack(() => close(false));
   const submit = async () => {
     if (!text().trim() || busy()) return;
     busy.set(true);
