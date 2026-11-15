@@ -879,14 +879,14 @@ export function Library(props: {
           const all = plain ? items().slice(0, batch()) : items();
           return Array.from({ length: n }, (_, c) => all.filter((_, k) => k % n === c));
         };
-        const tile = (b: Item) => (
+        const tile = (i: () => Item) => (
           <MoodboardTile
-            b={b.b}
+            b={i().b}
             show={show}
             touch
-            snippet={b.snippet}
+            snippet={i().snippet}
             showCollection={showCollection}
-            onOpen={() => open(b.b)}
+            onOpen={() => open(i().b)}
           />
         );
         return (
@@ -918,7 +918,7 @@ export function Library(props: {
                   <View class="min-w-0 flex-1" style={plain ? { rowGap: PHONE_GAP } : undefined}>
                     {plain ? (
                       <Each of={cols()[c] ?? []} key={(i) => i.b.id}>
-                        {(i) => tile(i())}
+                        {(i) => tile(i)}
                       </Each>
                     ) : (
                       <List
@@ -929,7 +929,7 @@ export function Library(props: {
                         contentStyle={{ rowGap: PHONE_GAP }}
                         onLoadMore={() => void loadMore()}
                       >
-                        {(i) => tile(i())}
+                        {(i) => tile(i)}
                       </List>
                     )}
                   </View>
