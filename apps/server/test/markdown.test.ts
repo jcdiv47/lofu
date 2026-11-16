@@ -219,7 +219,7 @@ describe("inline SVG figures are kept as pictures of their own", () => {
 
   test("what could run or fetch is taken out; it stands on its own", () => {
     const { figures } = convertArticle(
-      `<figure>${chart(`<script>alert(1)</script><foreignObject><p>x</p></foreignObject><image href="https://tracker.example/x.png" width="5" height="5"></image><use href="#g"></use><style>@import url(https://x.example/a.css)</style><a href="javascript:alert(1)"><circle r="1"></circle></a><set attributeName="href" to="javascript:alert(1)"></set>`)}</figure>`,
+      `<figure>${chart(`<script>alert(1)</script><foreignObject><p>x</p></foreignObject><image href="https://tracker.example/x.png" width="5" height="5"></image><use href="#g"></use><style>@import url(https://x.example/a.css)</style><rect fill="url(https://x.example/p.svg#p)" filter="url( 'https://x.example/f.svg#f')" width="1"></rect><a href="javascript:alert(1)"><circle r="1"></circle></a><set attributeName="href" to="javascript:alert(1)"></set>`)}</figure>`,
       "https://example.com/post",
     );
     const svg = figures[0]!.svg;
@@ -240,6 +240,7 @@ describe("inline SVG figures are kept as pictures of their own", () => {
     expect(svg).toContain('xmlns="http://www.w3.org/2000/svg"');
     expect(svg).toContain('width="640"');
     expect(svg).toContain('href="#g"');
+    expect(svg).not.toContain("x.example");
     expect(svg).toContain("<linearGradient");
     expect(svg).not.toContain("currentColor");
     // Lines drawn in a light color for a dark page: a dark background goes behind it.
@@ -250,6 +251,13 @@ describe("inline SVG figures are kept as pictures of their own", () => {
       "https://example.com/post",
     ).figures[0]!.svg;
     expect(light).toContain('fill="#ffffff"/>');
+  });
+
+  test("a figure with its own stylesheet keeps the classes it styles", () => {
+    const styled = `<figure><svg viewBox="0 0 640 300" aria-label="Styled"><style>.bar{fill:#e8590c}</style><rect class="bar" width="9"></rect><rect class="bar" width="8"></rect><rect class="bar" width="7"></rect></svg></figure>`;
+    const { figures } = convertArticle(styled, "https://example.com/post");
+    expect(figures[0]!.svg).toContain('class="bar"');
+    expect(figures[0]!.svg).toContain(".bar{fill:#e8590c}");
   });
 
   test("saved with the article, served by hash, and named in its search text", async () => {

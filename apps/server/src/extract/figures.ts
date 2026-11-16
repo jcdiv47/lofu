@@ -116,14 +116,17 @@ export function figureOf(svg: SvgEl, named: boolean): Figure | null {
   for (const style of [...svg.querySelectorAll("style")]) {
     if (REMOTE_CSS.test(style.textContent ?? "")) style.remove();
   }
+  // Classes stay for the figure's own stylesheet; without one they're the page's.
+  const ownStyle = count(svg.querySelectorAll("style")) > 0;
   for (const el of [svg, ...svg.querySelectorAll("*")]) {
     for (const { name, value } of [...el.attributes]) {
       const n = name.toLowerCase();
       if (
         n.startsWith("on") ||
-        n === "class" ||
+        (n === "class" && !ownStyle) ||
         ((n === "href" || n === "xlink:href" || n === "src") && !LOCAL_HREF.test(value)) ||
-        (n === "style" && REMOTE_CSS.test(value))
+        // `style`, and paint by presentation attribute (`fill="url(…)"`, `filter`).
+        REMOTE_CSS.test(value)
       ) {
         el.removeAttribute(name);
       }
