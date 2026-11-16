@@ -47,3 +47,26 @@ test("an image whose URL the parser changed is matched by position", () => {
   const placed = placeImages(d, [img(`${src}#other`, 100, 50, null)], 600);
   expect(imageAttrs(placed)).toEqual([{ src, width: 100, height: 50 }]);
 });
+
+test("a figure the server took out of the page loads from its path", () => {
+  const d = doc("![Success by method](lofu:figure/0123456789abcdef0123456789abcdef)");
+  const placed = placeImages(
+    d,
+    [
+      img(
+        "lofu:figure/0123456789abcdef0123456789abcdef",
+        640,
+        300,
+        "https://lofu.test/figures/0123456789abcdef0123456789abcdef",
+      ),
+    ],
+    600,
+  );
+  expect(imageAttrs(placed)).toEqual([
+    {
+      src: "https://lofu.test/figures/0123456789abcdef0123456789abcdef",
+      width: 600,
+      height: 281,
+    },
+  ]);
+});

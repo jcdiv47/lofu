@@ -3,6 +3,7 @@ import { OpenAPIHono } from "@hono/zod-openapi";
 import { compress } from "hono/compress";
 import { cors } from "hono/cors";
 import type { AppContext } from "./context.ts";
+import { FIGURE_HASH } from "./extract/figures.ts";
 import { bookmarkRoutes } from "./routes/bookmarks.ts";
 import { importRoutes } from "./routes/imports.ts";
 import { miscRoutes } from "./routes/misc.ts";
@@ -63,6 +64,26 @@ export function createApp(ctx: AppContext) {
   app.get("/math/:sig", (c) =>
     ctx.math.serve(c.req.param("sig"), c.req.query("t"), c.req.query("c"), c.req.query("i")),
   );
+
+  // Figures taken out of saved articles (extract/figures.ts). The path is a
+  // hash of the picture: only someone who has the page knows it.
+  app.get("/figures/:hash", (c) => {
+    const hash = c.req.param("hash");
+    const svg = FIGURE_HASH.test(hash) ? ctx.bookmarks.figure(hash) : null;
+    if (svg === null) return c.json({ error: "no such figure" }, 404);
+    return new Response(svg, {
+      headers: {
+        "content-type": "image/svg+xml",
+        // Content-addressed: a picture never changes under its path.
+        "cache-control": "public, max-age=31536000, immutable",
+        "x-content-type-options": "nosniff",
+        // An SVG opened on its own must not run scripts on the server's origin.
+        "content-security-policy":
+          "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox",
+        "cross-origin-resource-policy": "cross-origin",
+      },
+    });
+  });
 
   app.use("/v1/*", compress({ threshold: 2048 }));
   // Clients may gzip large uploads (the browser extension sends rendered

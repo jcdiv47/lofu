@@ -15,6 +15,8 @@ export function markdownToText(md: string): string {
   return restore(
     hide(md)
       .replace(/```[^\n]*\n/g, "\n")
+      // A figure's name is its text (extract/figures.ts); other images' alt text is often noise.
+      .replace(/!\[([^\]]*)]\(lofu:figure\/[^)]*\)/g, "\n$1\n")
       .replace(/!\[[^\]]*]\([^)]*\)/g, " ")
       .replace(/\[([^\]]*)]\([^)]*\)/g, "$1")
       .replace(/<[^>]+>/g, " ")

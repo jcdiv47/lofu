@@ -1,3 +1,5 @@
+import type { Figure } from "./figures.ts";
+
 export type ExtractRequest =
   /** Extract an article from a fetched page. */
   | { id: number; kind: "extract"; html: string; url: string }
@@ -13,6 +15,8 @@ export interface MarkdownOutput {
   /** zstd-compressed markdown / plain text. */
   markdown: Uint8Array;
   text: Uint8Array;
+  /** Inline SVG figures the Markdown points at (extract/figures.ts). */
+  figures: Figure[];
 }
 
 export interface ExtractOutput {
@@ -20,6 +24,8 @@ export interface ExtractOutput {
   html: Uint8Array;
   markdown: Uint8Array;
   text: Uint8Array;
+  /** Inline SVG figures the Markdown points at (extract/figures.ts). */
+  figures: Figure[];
   title: string | null;
   excerpt: string | null;
   coverUrl: string | null;

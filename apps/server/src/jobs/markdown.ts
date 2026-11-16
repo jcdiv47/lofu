@@ -17,7 +17,7 @@ export function markdownHandler(deps: { bookmarks: BookmarkStore; pool: ExtractP
       const out = await pool.markdown(dec.decode(Bun.zstdDecompressSync(c.html)), c.url);
       const before = dec.decode(Bun.zstdDecompressSync(c.markdown));
       if (dec.decode(Bun.zstdDecompressSync(out.markdown)) === before) return;
-      bookmarks.saveMarkdown(job.bookmark_id, c.extractedAt, out.markdown, out.text);
+      bookmarks.saveMarkdown(job.bookmark_id, c.extractedAt, out.markdown, out.text, out.figures);
     },
     giveUp(job, error) {
       console.error(`converting ${job.bookmark_id} to Markdown failed:`, error.message);

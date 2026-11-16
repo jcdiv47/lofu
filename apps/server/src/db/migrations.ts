@@ -138,4 +138,20 @@ export const migrations: string[] = [
   ALTER TABLE bookmarks ADD COLUMN sort REAL NOT NULL DEFAULT 0;
   UPDATE bookmarks SET sort = -created_at;
   `,
+
+  /*
+   * 5: inline SVG figures taken out of saved articles (extract/figures.ts),
+   * zstd-compressed, served by hash from /figures/<hash>. Written with the
+   * article's Markdown, which points at them; they go with its content.
+   */ `
+  CREATE TABLE figures (
+    bookmark_id TEXT NOT NULL REFERENCES contents(bookmark_id) ON DELETE CASCADE,
+    hash        TEXT NOT NULL,
+    svg         BLOB NOT NULL,
+    width       INTEGER NOT NULL,
+    height      INTEGER NOT NULL,
+    PRIMARY KEY (bookmark_id, hash)
+  ) WITHOUT ROWID;
+  CREATE INDEX figures_hash ON figures(hash);
+  `,
 ];
