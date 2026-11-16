@@ -143,6 +143,12 @@ const failure = (message: string, status: number) =>
  * is narrower at 3×). A screenshot of 2560×1600 comes to a fifth of its bytes.
  */
 export const ARTICLE_IMAGE_WIDTH = 1360;
+/**
+ * Bumped when what `/img` serves at a width changes, so caches (the proxy's
+ * own, and apps' offline copies, kept by URL) take the new one: 2 turns
+ * heavy animated GIFs into stills.
+ */
+const IMAGE_VARIANT = 2;
 /** The widths `/img` resizes to; anything else is refused, so the variants a URL can have stay few. */
 const IMAGE_WIDTHS: readonly number[] = [ARTICLE_IMAGE_WIDTH];
 /** Formats resized (static ones `Bun.Image` decodes everywhere; a GIF may be animated). */
@@ -160,8 +166,53 @@ interface Served {
   bytes: Uint8Array<ArrayBuffer>;
 }
 
-/** `bytes` at most `width` wide, as WebP; unchanged when already narrower, not resizable, or not smaller. */
+/**
+ * Decoded frames an animated GIF may take, at the width it's shown, and
+ * still play. Apps decode every frame of an animation before showing it
+ * (nsh: all frames, in an image budget of 128 MiB on phones and 256 MiB on
+ * desktops), so an animated diagram of 342 frames (1 GB decoded) never shows.
+ * Past this, the reader gets its first frame as a still.
+ */
+const ANIMATION_MAX_BYTES = 32 * 1024 * 1024;
+
+/**
+ * Frames in a GIF: its image descriptors, counted up to `max` (enough to
+ * tell). Null when the bytes aren't a GIF this can walk.
+ */
+export function gifFrames(b: Uint8Array, max = Number.POSITIVE_INFINITY): number | null {
+  if (b.length < 13 || String.fromCharCode(...b.subarray(0, 3)) !== "GIF") return null;
+  const table = (flags: number) => (flags & 0x80 ? 3 * 2 ** ((flags & 7) + 1) : 0);
+  let i = 13 + table(b[10]!);
+  const skipBlocks = () => {
+    while (i < b.length && b[i] !== 0) i += b[i]! + 1;
+    i++;
+  };
+  let frames = 0;
+  while (i < b.length && frames < max) {
+    const kind = b[i];
+    if (kind === 0x3b) break; // trailer
+    if (kind === 0x21) {
+      i += 2; // extension introducer and label
+      skipBlocks();
+    } else if (kind === 0x2c) {
+      frames++;
+      if (i + 10 > b.length) break;
+      i += 10 + table(b[i + 9]!) + 1; // descriptor, local table, LZW code size
+      skipBlocks();
+    } else {
+      return frames || null;
+    }
+  }
+  return frames;
+}
+
+/**
+ * `bytes` at most `width` wide, as WebP; unchanged when already narrower, not
+ * resizable, or not smaller. An animated GIF too heavy to play becomes its
+ * first frame.
+ */
 export async function resizeImage(served: Served, width: number): Promise<Served> {
+  if (served.type === "image/gif") return stillGif(served, width);
   if (!RESIZABLE.has(served.type)) return served;
   const release = await resizes.acquire();
   try {
@@ -175,6 +226,27 @@ export async function resizeImage(served: Served, width: number): Promise<Served
     return bytes.byteLength < served.bytes.byteLength ? { type: "image/webp", bytes } : served;
   } catch {
     return served; // Undecodable here: the client may still manage.
+  } finally {
+    release();
+  }
+}
+
+/** An animated GIF's first frame (at most `width` wide) when playing it would take too much memory. */
+async function stillGif(served: Served, width: number): Promise<Served> {
+  const release = await resizes.acquire();
+  try {
+    const opts = { maxPixels: RESIZE_MAX_PIXELS };
+    const meta = await new Bun.Image(served.bytes, opts).metadata();
+    const shown = Math.min(meta.width, width);
+    const frameBytes = shown * Math.ceil((meta.height * shown) / meta.width) * 4;
+    const frames = gifFrames(served.bytes, Math.ceil(ANIMATION_MAX_BYTES / frameBytes) + 1) ?? 1;
+    if (frames <= 1 || frames * frameBytes <= ANIMATION_MAX_BYTES) return served;
+    let image = new Bun.Image(served.bytes, opts);
+    if (meta.width > width) image = image.resize(width);
+    const bytes = (await image.webp({ quality: 80 }).bytes()) as Uint8Array<ArrayBuffer>;
+    return { type: "image/webp", bytes };
+  } catch {
+    return served;
   } finally {
     release();
   }
@@ -233,7 +305,8 @@ export class ImageProxy {
    */
   path(url: string, width?: number): string | null {
     if (!/^https?:\/\//i.test(url)) return null;
-    return `/img/${this.sign(url)}?u=${encodeURIComponent(url)}${width ? `&w=${width}` : ""}`;
+    const variant = width ? `&w=${width}&v=${IMAGE_VARIANT}` : "";
+    return `/img/${this.sign(url)}?u=${encodeURIComponent(url)}${variant}`;
   }
 
   /**
@@ -269,7 +342,9 @@ export class ImageProxy {
     }
     const width = w === undefined ? 0 : Number(w);
     if (width && !IMAGE_WIDTHS.includes(width)) return failure("unsupported width", 400);
-    const key = new Bun.CryptoHasher("sha256").update(`${width}\n${url}`).digest("hex");
+    // The variant is in the key: what an older one kept isn't served for a newer.
+    const id = width ? `${width}\n${IMAGE_VARIANT}\n${url}` : `0\n${url}`;
+    const key = new Bun.CryptoHasher("sha256").update(id).digest("hex");
 
     const hit = this.cache?.get(key);
     if (hit) return this.respond(hit.type, Bun.file(hit.path), "hit");

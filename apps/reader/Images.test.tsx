@@ -70,3 +70,16 @@ test("a figure the server took out of the page loads from its path", () => {
     },
   ]);
 });
+
+test("a paragraph of pictures only is marked, so its line takes the picture's height", () => {
+  const d = doc("![a](https://x.test/a.png)\n\nText with ![b](https://x.test/b.png) inside.");
+  const placed = placeImages(
+    d,
+    [img("https://x.test/a.png", 800, 400, null), img("https://x.test/b.png", 20, 20, null)],
+    600,
+  );
+  const aligns = (placed.content ?? []).map((n) => n.attrs?.textAlign ?? null);
+  expect(aligns).toEqual(["right", null]);
+  // The parsed document is kept as it was.
+  expect((d.content ?? []).map((n) => n.attrs?.textAlign ?? null)).toEqual([null, null]);
+});

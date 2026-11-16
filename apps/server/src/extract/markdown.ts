@@ -54,12 +54,12 @@ interface Doc {
 }
 
 /** Bump when the output changes, so saved articles are converted again (jobs/markdown.ts). */
-export const MARKDOWN_VERSION = 3;
+export const MARKDOWN_VERSION = 4;
 
 /** Extractors whose Markdown is plain text rather than converted HTML (jobs/extract.ts). */
 export const PLAIN_EXTRACTORS = ["pdftotext", "text", "markdown"];
 
-const RAW = /<(svg|sup|sub|iframe|video|audio|td|th|math)\b/i;
+const RAW = /<(svg|sup|sub|iframe|video|audio|td|th|math|figcaption)\b/i;
 
 /** An article's Markdown and the inline SVG figures it points at (extract/figures.ts). */
 export function convertArticle(html: string, url: string): { markdown: string; figures: Figure[] } {
@@ -76,6 +76,7 @@ export function articleMarkdown(html: string, url: string): string {
 function tidy(doc: Doc, url: string): Figure[] {
   const outermost = (sel: string) =>
     [...doc.body.querySelectorAll(sel)].filter((e) => !e.parentElement?.closest(sel));
+  dropAltCaptions(doc);
   const captions = new Map<El, string>();
   const figures = new Map<string, Figure>();
   for (const svg of outermost("svg")) replaceSvg(doc, svg, captions, figures);
@@ -85,6 +86,22 @@ function tidy(doc: Doc, url: string): Figure[] {
   // Innermost first: a nested table is laid out before the one around it.
   for (const t of [...doc.body.querySelectorAll("table")].reverse()) fixTable(doc, t);
   return [...figures.values()];
+}
+
+/**
+ * A figure's caption that only repeats its image's alt text goes: pages
+ * hide such a caption from sight (it's for screen readers, claude.com's
+ * "sr-only"), and the Markdown keeps the alt text with the image anyway.
+ */
+function dropAltCaptions(doc: Doc) {
+  const norm = (s: string | null) => (s ?? "").replace(/\s+/g, " ").trim();
+  for (const caption of [...doc.body.querySelectorAll("figure figcaption")]) {
+    const text = norm(caption.textContent);
+    const figure = caption.closest("figure");
+    if (!text || !figure) continue;
+    const alts = [...figure.querySelectorAll("img[alt]")].map((i) => norm(i.getAttribute("alt")));
+    if (alts.includes(text)) caption.remove();
+  }
 }
 
 // --- svg -------------------------------------------------------------------

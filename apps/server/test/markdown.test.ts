@@ -113,6 +113,19 @@ describe("articleMarkdown: what Markdown can't express doesn't come out as raw H
     expect(md(post)).toBe("**#301** posted 2024-10-30\n\n> Quoted question\n\nThe answer.");
   });
 
+  test("a caption that only repeats its image's alt text goes", () => {
+    expect(
+      md(
+        '<figure><img src="https://x.test/a.gif" alt="Animated diagram of a run."> <figcaption>Animated  diagram of a run.</figcaption></figure>',
+      ),
+    ).toBe("![Animated diagram of a run.](https://x.test/a.gif)");
+    expect(
+      md(
+        '<figure><img src="https://x.test/a.png" alt="A run"><figcaption>Figure 1: a run.</figcaption></figure>',
+      ),
+    ).toContain("Figure 1: a run.");
+  });
+
   test("text that looks like a tag, and code, are left alone", () => {
     expect(md("<p>The &lt;think&gt; token and &lt;sup&gt;x&lt;/sup&gt;</p>")).toBe(
       "The \\<think> token and \\<sup>x\\</sup>",
