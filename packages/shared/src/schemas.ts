@@ -144,15 +144,18 @@ export const ContentFormat = z.enum(["none", "markdown", "html", "text"]);
 
 export const ContentImage = z
   .object({
-    /** The image's URL as it appears in the content. */
+    /**
+     * The image's URL as it appears in the content. `lofu:figure/<hash>` is a
+     * figure the server took out of the page (an inline SVG chart or diagram).
+     */
     src: z.string(),
     /** Its size in pixels; null until measured, or when it couldn't be. */
     width: z.number().int().nullable(),
     height: z.number().int().nullable(),
     /**
      * Where to load it from instead, relative to the server: a signed proxy
-     * that fetches it without the Referer hotlink protection rejects. Null
-     * for `data:` URLs.
+     * that fetches it without the Referer hotlink protection rejects, or
+     * `/figures/<hash>` for a figure. Null for `data:` URLs.
      */
     proxy: z.string().nullable(),
   })

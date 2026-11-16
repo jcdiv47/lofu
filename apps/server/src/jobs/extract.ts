@@ -137,6 +137,7 @@ export function extractHandler(deps: {
         html: out.html,
         markdown: out.markdown,
         text: out.text,
+        figures: out.figures,
         rawBytes,
         extractor: via ? `${out.extractor ?? "defuddle"}+${via}` : out.extractor,
         type: detectType(row.domain, out.ogType, out.wordCount),

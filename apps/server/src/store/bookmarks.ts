@@ -8,10 +8,14 @@ import {
   type UpdateBookmark,
 } from "@lofu/shared";
 import type { Db } from "../db/index.ts";
+import type { Figure } from "../extract/figures.ts";
 import type { ImageProxy, ImageSizes } from "../extract/images.ts";
 import type { Hooks } from "./hooks.ts";
 import { type JobStore, Priority } from "./jobs.ts";
 import { type BookmarkRow, toBookmark } from "./rows.ts";
+
+const enc = new TextEncoder();
+const dec = new TextDecoder();
 
 export class NotFoundError extends Error {}
 
@@ -37,6 +41,8 @@ export interface ExtractedContent {
   html: Uint8Array; // zstd
   markdown: Uint8Array; // zstd
   text: Uint8Array; // zstd
+  /** Inline SVG figures the Markdown points at (extract/figures.ts). */
+  figures?: Figure[];
   rawBytes: number;
   extractor: string | null;
   type: BookmarkType;
@@ -455,7 +461,13 @@ export class BookmarkStore {
    * Replaces an article's Markdown and text, unless it was extracted again in
    * the meantime. Bumps `seq`: the text is the bookmark's search document.
    */
-  saveMarkdown(id: string, extractedAt: number, markdown: Uint8Array, text: Uint8Array): boolean {
+  saveMarkdown(
+    id: string,
+    extractedAt: number,
+    markdown: Uint8Array,
+    text: Uint8Array,
+    figures: Figure[] = [],
+  ): boolean {
     const saved = this.db.transaction(() => {
       const changes = this.db
         .query(
@@ -463,6 +475,7 @@ export class BookmarkStore {
         )
         .run(markdown, text, id, extractedAt).changes;
       if (changes === 0) return false;
+      this.saveFigures(id, figures);
       // Measured again for images the new Markdown gained; the old sizes serve until then.
       this.jobs.enqueue("images", id, null, Priority.bulk);
       this.touch(id);
@@ -470,6 +483,35 @@ export class BookmarkStore {
     })();
     if (saved) this.hooks.changed();
     return saved;
+  }
+
+  /** Replaces the article's figures (extract/figures.ts); within the caller's transaction. */
+  private saveFigures(id: string, figures: Figure[]): void {
+    this.db.query("DELETE FROM figures WHERE bookmark_id = ?").run(id);
+    const insert = this.db.query(
+      "INSERT OR IGNORE INTO figures (bookmark_id, hash, svg, width, height) VALUES (?, ?, ?, ?, ?)",
+    );
+    for (const f of figures) {
+      insert.run(id, f.hash, Bun.zstdCompressSync(enc.encode(f.svg)), f.width, f.height);
+    }
+  }
+
+  /** A figure's SVG by its hash (any article's: the same picture is the same file). */
+  figure(hash: string): string | null {
+    const row = this.db
+      .query<{ svg: Uint8Array }, [string]>("SELECT svg FROM figures WHERE hash = ? LIMIT 1")
+      .get(hash);
+    return row ? dec.decode(Bun.zstdDecompressSync(row.svg)) : null;
+  }
+
+  /** The sizes of an article's figures, by hash. */
+  figureSizes(id: string): Map<string, [number, number]> {
+    const rows = this.db
+      .query<{ hash: string; width: number; height: number }, [string]>(
+        "SELECT hash, width, height FROM figures WHERE bookmark_id = ?",
+      )
+      .all(id);
+    return new Map(rows.map((r) => [r.hash, [r.width, r.height]]));
   }
 
   /** Called by the extract job with results computed off-thread. */
@@ -496,6 +538,7 @@ export class BookmarkStore {
              extracted_at = excluded.extracted_at, images = NULL`,
         )
         .run(id, c.html, c.markdown, c.text, c.rawBytes, c.extractor, now);
+      this.saveFigures(id, c.figures ?? []);
       this.jobs.enqueue("images", id);
       this.db
         .query(

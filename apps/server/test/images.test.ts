@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ImageCache } from "../src/extract/imageCache.ts";
 import { imageSize } from "../src/extract/imageSize.ts";
-import { ARTICLE_IMAGE_WIDTH, markdownImages, measureImage } from "../src/extract/images.ts";
+import {
+  ARTICLE_IMAGE_WIDTH,
+  gifFrames,
+  markdownImages,
+  measureImage,
+  resizeImage,
+} from "../src/extract/images.ts";
 import { JobStore } from "../src/store/jobs.ts";
 import { pngHeader, served } from "./fixtures.ts";
 import { setupServer } from "./harness.ts";
@@ -108,7 +114,7 @@ describe("article images", () => {
     ]);
     expect((await api("GET", `/v1/bookmarks/${id}?content=html`)).data.images).toBeNull();
     expect(list[0]!.proxy).toBe(sys.ctx.images.path(list[0]!.src, ARTICLE_IMAGE_WIDTH));
-    expect(list[0]!.proxy).toEndWith(`&w=${ARTICLE_IMAGE_WIDTH}`);
+    expect(list[0]!.proxy).toEndWith(`&w=${ARTICLE_IMAGE_WIDTH}&v=2`);
   });
 
   test("a wide picture comes resized as WebP, fetched from its site once", async () => {
@@ -239,4 +245,56 @@ test("the image cache keeps the most recently used within its size, across resta
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+/**
+ * An animated GIF: a first frame covering the canvas, then 1×1 frames.
+ * Its LZW is uncompressed: 7-bit literals with a clear code every 126, so
+ * every code is one byte.
+ */
+function animatedGif(w: number, h: number, frames: number): Uint8Array<ArrayBuffer> {
+  const palette = Array.from({ length: 128 }, (_, i) => [i * 2, 255 - i * 2, 128]).flat();
+  const b = [...Buffer.from("GIF89a"), w & 255, w >> 8, h & 255, h >> 8, 0xf6, 0, 0, ...palette];
+  const frame = (fw: number, fh: number) => {
+    b.push(0x2c, 0, 0, 0, 0, fw & 255, fw >> 8, fh & 255, fh >> 8, 0, 7);
+    const codes: number[] = [];
+    for (let i = 0; i < fw * fh; i++) {
+      if (i % 126 === 0) codes.push(128);
+      codes.push(i % 128);
+    }
+    codes.push(129);
+    for (let i = 0; i < codes.length; i += 255) {
+      const block = codes.slice(i, i + 255);
+      b.push(block.length, ...block);
+    }
+    b.push(0);
+  };
+  frame(w, h);
+  for (let i = 1; i < frames; i++) frame(1, 1);
+  b.push(0x3b);
+  return new Uint8Array(b);
+}
+
+describe("animated GIFs", () => {
+  test("frames are counted, up to what's asked", () => {
+    expect(gifFrames(animatedGif(10, 10, 5))).toBe(5);
+    expect(gifFrames(animatedGif(10, 10, 5), 2)).toBe(2);
+    expect(gifFrames(new Uint8Array([1, 2, 3]))).toBeNull();
+  });
+
+  test("one too heavy to play comes as a still of its first frame; a light one plays", async () => {
+    // 12 frames of 1360 × 700: 46 MB decoded, past what apps decode.
+    const heavy = await resizeImage({ type: "image/gif", bytes: animatedGif(1360, 700, 12) }, 1360);
+    expect(heavy.type).toBe("image/webp");
+    expect(await new Bun.Image(heavy.bytes).metadata()).toEqual({
+      width: 1360,
+      height: 700,
+      format: "webp",
+    });
+    const light = animatedGif(100, 100, 12);
+    expect(await resizeImage({ type: "image/gif", bytes: light }, 1360)).toEqual({
+      type: "image/gif",
+      bytes: light,
+    });
+  });
 });

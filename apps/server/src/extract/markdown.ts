@@ -13,6 +13,7 @@
  */
 import { dirname, join } from "node:path";
 import { parseHTML } from "linkedom";
+import { FIGURE_SCHEME, type Figure, figureOf } from "./figures.ts";
 
 // Not in Defuddle's package exports; the Node build loads it from here too.
 const { createMarkdownContent } = require(
@@ -53,39 +54,66 @@ interface Doc {
 }
 
 /** Bump when the output changes, so saved articles are converted again (jobs/markdown.ts). */
-export const MARKDOWN_VERSION = 2;
+export const MARKDOWN_VERSION = 4;
 
 /** Extractors whose Markdown is plain text rather than converted HTML (jobs/extract.ts). */
 export const PLAIN_EXTRACTORS = ["pdftotext", "text", "markdown"];
 
-const RAW = /<(svg|sup|sub|iframe|video|audio|td|th|math)\b/i;
+const RAW = /<(svg|sup|sub|iframe|video|audio|td|th|math|figcaption)\b/i;
 
-export function articleMarkdown(html: string, url: string): string {
-  if (!RAW.test(html)) return createMarkdownContent(html, url);
+/** An article's Markdown and the inline SVG figures it points at (extract/figures.ts). */
+export function convertArticle(html: string, url: string): { markdown: string; figures: Figure[] } {
+  if (!RAW.test(html)) return { markdown: createMarkdownContent(html, url), figures: [] };
   const { document } = parseHTML(`<!doctype html><html><body>${html}</body></html>`);
-  tidy(document as unknown as Doc, url);
-  return createMarkdownContent(document.body.innerHTML, url);
+  const figures = tidy(document as unknown as Doc, url);
+  return { markdown: createMarkdownContent(document.body.innerHTML, url), figures };
 }
 
-function tidy(doc: Doc, url: string) {
+export function articleMarkdown(html: string, url: string): string {
+  return convertArticle(html, url).markdown;
+}
+
+function tidy(doc: Doc, url: string): Figure[] {
   const outermost = (sel: string) =>
     [...doc.body.querySelectorAll(sel)].filter((e) => !e.parentElement?.closest(sel));
-  const captions = new Set<El>();
-  for (const svg of outermost("svg")) replaceSvg(doc, svg, captions);
+  dropAltCaptions(doc);
+  const captions = new Map<El, string>();
+  const figures = new Map<string, Figure>();
+  for (const svg of outermost("svg")) replaceSvg(doc, svg, captions, figures);
   for (const math of outermost("math")) replaceProseMath(doc, math);
   for (const el of [...doc.body.querySelectorAll("sup, sub")].reverse()) replaceScript(doc, el);
   for (const el of outermost("iframe, video, audio")) replaceEmbed(doc, el, url);
   // Innermost first: a nested table is laid out before the one around it.
   for (const t of [...doc.body.querySelectorAll("table")].reverse()) fixTable(doc, t);
+  return [...figures.values()];
+}
+
+/**
+ * A figure's caption that only repeats its image's alt text goes: pages
+ * hide such a caption from sight (it's for screen readers, claude.com's
+ * "sr-only"), and the Markdown keeps the alt text with the image anyway.
+ */
+function dropAltCaptions(doc: Doc) {
+  const norm = (s: string | null) => (s ?? "").replace(/\s+/g, " ").trim();
+  for (const caption of [...doc.body.querySelectorAll("figure figcaption")]) {
+    const text = norm(caption.textContent);
+    const figure = caption.closest("figure");
+    if (!text || !figure) continue;
+    const alts = [...figure.querySelectorAll("img[alt]")].map((i) => norm(i.getAttribute("alt")));
+    if (alts.includes(text)) caption.remove();
+  }
 }
 
 // --- svg -------------------------------------------------------------------
 
 /**
- * A MathJax formula becomes its text. A diagram becomes its accessible name
- * in italics, once when a page ships one copy per layout. An icon goes.
+ * A MathJax formula becomes its text. A figure (a chart, a diagram) becomes
+ * a picture of its own (extract/figures.ts) named by its accessible name;
+ * one that isn't (a smaller drawing, one only the page's stylesheet colors)
+ * becomes that name in italics; either once when a page ships one copy per
+ * layout. An icon goes.
  */
-function replaceSvg(doc: Doc, svg: El, captions: Set<El>) {
+function replaceSvg(doc: Doc, svg: El, captions: Map<El, string>, figures: Map<string, Figure>) {
   if (svg.querySelector("[data-mml-node]")) {
     const text = mathText(svg.querySelector('[data-mml-node="math"]') ?? svg).trim();
     svg.replaceWith(doc.createTextNode(text));
@@ -95,25 +123,37 @@ function replaceSvg(doc: Doc, svg: El, captions: Set<El>) {
   const label = (svg.getAttribute("aria-label") || title?.textContent || "")
     .replace(/\s+/g, " ")
     .trim();
-  if (!label) {
-    svg.remove();
-    return;
-  }
   let prev = svg.previousSibling;
   while (prev && prev.nodeType === 3 && !prev.textContent?.trim()) prev = prev.previousSibling;
-  if (prev && captions.has(prev as El) && prev.textContent === label) {
+  if (label && prev && captions.get(prev as El) === label) {
     svg.remove();
     return;
   }
-  const em = doc.createElement("em");
-  em.textContent = label;
+  const figure = figureOf(
+    svg as unknown as Parameters<typeof figureOf>[0],
+    Boolean(label || svg.closest("figure")),
+  );
+  if (!figure && !label) {
+    svg.remove();
+    return;
+  }
+  let shown: El;
+  if (figure) {
+    figures.set(figure.hash, figure);
+    shown = doc.createElement("img");
+    shown.setAttribute("src", FIGURE_SCHEME + figure.hash);
+    shown.setAttribute("alt", label);
+  } else {
+    shown = doc.createElement("em");
+    shown.textContent = label;
+  }
   // A figure on its own is a paragraph; one inside a sentence stays inline.
-  let caption = em;
+  let caption = shown;
   if (!svg.parentElement || !INLINE.has(svg.parentElement.localName)) {
     caption = doc.createElement("p");
-    caption.append(em);
+    caption.append(shown);
   }
-  captions.add(caption);
+  if (label) captions.set(caption, label);
   svg.replaceWith(caption);
 }
 

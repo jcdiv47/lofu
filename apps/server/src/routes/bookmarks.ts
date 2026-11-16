@@ -12,6 +12,7 @@ import {
   UpdateHighlight,
 } from "@lofu/shared";
 import type { AppContext } from "../context.ts";
+import { FIGURE_SCHEME } from "../extract/figures.ts";
 import { ARTICLE_IMAGE_WIDTH, markdownImages } from "../extract/images.ts";
 import { resolveLink } from "../extract/links.ts";
 import { body, IdParam, json, notFound } from "./util.ts";
@@ -86,12 +87,25 @@ export function bookmarkRoutes(app: OpenAPIHono, ctx: AppContext) {
       if (content !== null && format === "markdown") {
         formulas = await ctx.math.list(content);
         const sizes = bookmarks.imageSizes(id) ?? {};
-        images = markdownImages(content).map((src) => ({
-          src,
-          width: sizes[src]?.[0] ?? null,
-          height: sizes[src]?.[1] ?? null,
-          proxy: ctx.images.path(src, ARTICLE_IMAGE_WIDTH),
-        }));
+        const figures = content.includes(FIGURE_SCHEME) ? bookmarks.figureSizes(id) : null;
+        images = markdownImages(content).map((src) => {
+          if (figures && src.startsWith(FIGURE_SCHEME)) {
+            const hash = src.slice(FIGURE_SCHEME.length);
+            const size = figures.get(hash);
+            return {
+              src,
+              width: size?.[0] ?? null,
+              height: size?.[1] ?? null,
+              proxy: `/figures/${hash}`,
+            };
+          }
+          return {
+            src,
+            width: sizes[src]?.[0] ?? null,
+            height: sizes[src]?.[1] ?? null,
+            proxy: ctx.images.path(src, ARTICLE_IMAGE_WIDTH),
+          };
+        });
       }
       return c.json({ ...b, content, contentFormat: format, images, formulas }, 200);
     },

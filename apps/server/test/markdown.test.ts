@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { articleMarkdown, MARKDOWN_VERSION, PLAIN_EXTRACTORS } from "../src/extract/markdown.ts";
+import { FIGURE_HASH, FIGURE_SCHEME } from "../src/extract/figures.ts";
+import {
+  articleMarkdown,
+  convertArticle,
+  MARKDOWN_VERSION,
+  PLAIN_EXTRACTORS,
+} from "../src/extract/markdown.ts";
 import { setupServer } from "./harness.ts";
 
 const md = (html: string) => articleMarkdown(html, "https://example.com/post");
@@ -107,6 +113,19 @@ describe("articleMarkdown: what Markdown can't express doesn't come out as raw H
     expect(md(post)).toBe("**#301** posted 2024-10-30\n\n> Quoted question\n\nThe answer.");
   });
 
+  test("a caption that only repeats its image's alt text goes", () => {
+    expect(
+      md(
+        '<figure><img src="https://x.test/a.gif" alt="Animated diagram of a run."> <figcaption>Animated  diagram of a run.</figcaption></figure>',
+      ),
+    ).toBe("![Animated diagram of a run.](https://x.test/a.gif)");
+    expect(
+      md(
+        '<figure><img src="https://x.test/a.png" alt="A run"><figcaption>Figure 1: a run.</figcaption></figure>',
+      ),
+    ).toContain("Figure 1: a run.");
+  });
+
   test("text that looks like a tag, and code, are left alone", () => {
     expect(md("<p>The &lt;think&gt; token and &lt;sup&gt;x&lt;/sup&gt;</p>")).toBe(
       "The \\<think> token and \\<sup>x\\</sup>",
@@ -158,5 +177,111 @@ describe("saved articles are converted again when the conversion changes", () =>
     await sys.runner.idle();
     expect(content(id, "markdown")).toBe("x");
     expect(bookmarks.get(id).seq).toBe(after);
+  });
+});
+
+describe("inline SVG figures are kept as pictures of their own", () => {
+  const { sys, api, app, base } = setupServer();
+  const text = (id: string) =>
+    new TextDecoder().decode(Bun.zstdDecompressSync(sys.ctx.bookmarks.contentBlob(id, "text")!));
+  const chart = (extra = "") =>
+    `<svg viewBox="0 0 640 300" role="img" aria-label="Success by method" onload="alert(1)" class="c" style="width:100%">${extra}<rect x="0" width="10" height="10" fill="#17191c"></rect><line x1="0" x2="5" stroke="#a6b4c9"></line><line x1="0" x2="5" stroke="currentColor"></line><text x="1">22%</text><lineargradient id="g"></lineargradient></svg>`;
+
+  test("a figure becomes an image named by its label; icons and small drawings don't", () => {
+    const { markdown, figures } = convertArticle(
+      `<p>Before.</p><figure>${chart()}${chart().replace("640 300", "320 150")}</figure><p>Star <svg width="24" height="24" aria-label="star"><path d="M0"></path><path d="M1"></path><path d="M2"></path></svg> it</p>`,
+      "https://example.com/post",
+    );
+    expect(figures).toHaveLength(1);
+    const [f] = figures;
+    expect(markdown).toBe(
+      `Before.\n\n![Success by method](${FIGURE_SCHEME}${f!.hash})\n\nStar *star* it`,
+    );
+    expect([f!.width, f!.height]).toEqual([640, 300]);
+    expect(f!.hash).toMatch(FIGURE_HASH);
+  });
+
+  test("a drawing the page's stylesheet colors, or an unnamed one outside a figure, isn't one", () => {
+    const slice = (d: string) => `<path style="fill:currentColor" d="${d}"><title>x</title></path>`;
+    const pie = `<svg viewBox="0 0 200 200" role="img" aria-label="Where the tasks come from">${slice("M0 0L1 1Z")}${slice("M0 0L2 2Z")}${slice("M0 0L3 3Z")}</svg>`;
+    expect(convertArticle(`<figure>${pie}</figure>`, "https://example.com/post")).toEqual({
+      markdown: "*Where the tasks come from*",
+      figures: [],
+    });
+    const backdrop = `<svg viewBox="0 0 1440 700"><path d="M0 0h1440v700H0z" fill="#3C6EB4"></path><path d="M1 1" fill="#fff"></path><path d="M2 2" fill="#fff"></path></svg>`;
+    expect(
+      convertArticle(`<div>${backdrop}</div><p>Text.</p>`, "https://example.com/post"),
+    ).toEqual({
+      markdown: "Text.",
+      figures: [],
+    });
+  });
+
+  test("what could run or fetch is taken out; it stands on its own", () => {
+    const { figures } = convertArticle(
+      `<figure>${chart(`<script>alert(1)</script><foreignObject><p>x</p></foreignObject><image href="https://tracker.example/x.png" width="5" height="5"></image><use href="#g"></use><style>@import url(https://x.example/a.css)</style><rect fill="url(https://x.example/p.svg#p)" filter="url( 'https://x.example/f.svg#f')" width="1"></rect><a href="javascript:alert(1)"><circle r="1"></circle></a><set attributeName="href" to="javascript:alert(1)"></set>`)}</figure>`,
+      "https://example.com/post",
+    );
+    const svg = figures[0]!.svg;
+    for (const bad of [
+      "script",
+      "foreignObject",
+      "tracker.example",
+      "@import",
+      "javascript:",
+      "onload",
+      "<set",
+      "class=",
+      "style=",
+    ]) {
+      expect(svg).not.toContain(bad);
+    }
+    expect(svg).toStartWith("<svg");
+    expect(svg).toContain('xmlns="http://www.w3.org/2000/svg"');
+    expect(svg).toContain('width="640"');
+    expect(svg).toContain('href="#g"');
+    expect(svg).not.toContain("x.example");
+    expect(svg).toContain("<linearGradient");
+    expect(svg).not.toContain("currentColor");
+    // Lines drawn in a light color for a dark page: a dark background goes behind it.
+    expect(svg).toMatch(/^<svg[^>]*><rect x="0" y="0" width="640" height="300" fill="#17191c"\/>/);
+    // A light box with dark text was drawn for a light page.
+    const light = convertArticle(
+      `<figure><svg viewBox="0 0 640 300" aria-label="Boxes"><rect fill="#E5EEF3" width="9"></rect><rect fill="#E5EEF3" width="9"></rect><text fill="#05283D">a</text><text>b</text></svg></figure>`,
+      "https://example.com/post",
+    ).figures[0]!.svg;
+    expect(light).toContain('fill="#ffffff"/>');
+  });
+
+  test("a figure with its own stylesheet keeps the classes it styles", () => {
+    const styled = `<figure><svg viewBox="0 0 640 300" aria-label="Styled"><style>.bar{fill:#e8590c}</style><rect class="bar" width="9"></rect><rect class="bar" width="8"></rect><rect class="bar" width="7"></rect></svg></figure>`;
+    const { figures } = convertArticle(styled, "https://example.com/post");
+    expect(figures[0]!.svg).toContain('class="bar"');
+    expect(figures[0]!.svg).toContain(".bar{fill:#e8590c}");
+  });
+
+  test("saved with the article, served by hash, and named in its search text", async () => {
+    const r = await api("POST", "/v1/bookmarks", {
+      url: `${base}/figure-page`,
+      html: `<html><head><title>Figures</title></head><body><article><h1>Figures</h1><p>${"Words about planning with world models. ".repeat(40)}</p><figure>${chart()}</figure><p>${"More words about the results of the experiments. ".repeat(20)}</p></article></body></html>`,
+    });
+    await sys.runner.idle();
+    const id = r.data.id;
+    const got = (await api("GET", `/v1/bookmarks/${id}?content=markdown`)).data;
+    const image = got.images.find((i: { src: string }) => i.src.startsWith(FIGURE_SCHEME));
+    expect(image).toMatchObject({ width: 640, height: 300 });
+    expect(image.proxy).toMatch(/^\/figures\/[0-9a-f]{32}$/);
+    expect(text(id)).toContain("Success by method");
+
+    const res = await app.request(image.proxy);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/svg+xml");
+    expect(res.headers.get("content-security-policy")).toContain("sandbox");
+    expect(await res.text()).toStartWith("<svg");
+    expect((await app.request(`/figures/${"0".repeat(32)}`)).status).toBe(404);
+
+    // Gone with the article.
+    await api("DELETE", `/v1/bookmarks/${id}`);
+    expect((await app.request(image.proxy)).status).toBe(404);
   });
 });

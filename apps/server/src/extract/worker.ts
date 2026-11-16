@@ -9,7 +9,7 @@ import { Defuddle } from "defuddle/node";
 import { parseHTML } from "linkedom";
 import { assetUrl } from "./assetUrl.ts";
 import { detectBlockPage } from "./blocked.ts";
-import { articleMarkdown } from "./markdown.ts";
+import { convertArticle } from "./markdown.ts";
 import { formulaSvg } from "./mathSvg.ts";
 import type { ExtractRequest, ExtractResponse, MarkdownOutput } from "./protocol.ts";
 import { type SiteDocument, type SiteTransform, siteFor } from "./sites/index.ts";
@@ -33,10 +33,11 @@ self.onmessage = async (ev: MessageEvent<ExtractRequest>) => {
     }
     const { html, url } = ev.data;
     if (ev.data.kind === "markdown") {
-      const markdown = articleMarkdown(html, url);
+      const { markdown, figures } = convertArticle(html, url);
       const out: MarkdownOutput = {
         markdown: zstd(markdown),
         text: zstd(markdownToText(markdown)),
+        figures,
       };
       const msg: ExtractResponse = { id, ok: true, out };
       self.postMessage(msg, [out.markdown.buffer, out.text.buffer]);
@@ -53,7 +54,7 @@ self.onmessage = async (ev: MessageEvent<ExtractRequest>) => {
       input = document;
     }
     const r = await Defuddle(input, url);
-    const markdown = articleMarkdown(r.content, url);
+    const { markdown, figures } = convertArticle(r.content, url);
     const text = markdownToText(markdown);
     const meta = fix?.meta;
     const ogType =
@@ -62,6 +63,7 @@ self.onmessage = async (ev: MessageEvent<ExtractRequest>) => {
       html: zstd(r.content),
       markdown: zstd(markdown),
       text: zstd(text),
+      figures,
       title: nonEmpty(meta?.title) ?? nonEmpty(r.title),
       excerpt:
         nonEmpty(meta?.excerpt) ??

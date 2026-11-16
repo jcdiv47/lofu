@@ -176,7 +176,31 @@ export function placeImages(
       n.attrs.height = Math.max(1, Math.round((img.height * width) / img.width));
     }
   });
+  markPictureParagraphs(out);
   return out;
+}
+
+/**
+ * Marks the paragraphs that hold only pictures (`textAlign: "right"`, which
+ * their class centres; classes select a node by its attributes only). A
+ * paragraph's fixed line height would double such a line: on macOS a line
+ * of fixed height keeps its baseline centred, so a picture standing above
+ * the baseline grows it as much again below (nsh's CoreText engine,
+ * `attachment_metrics`), a blank as tall as the picture under it. Their
+ * class sets no line height. Paragraphs already aligned (cells, formulas,
+ * the note) keep theirs.
+ */
+function markPictureParagraphs(n: RichNodeJSON) {
+  if (n.type === "paragraph" && !n.attrs?.textAlign) {
+    const kids = n.content ?? [];
+    const pictures = kids.filter((k) => k.type === "image").length;
+    const rest = kids.every(
+      (k) => k.type === "image" || k.type === "hardBreak" || (k.type === "text" && !k.text?.trim()),
+    );
+    if (pictures > 0 && rest) n.attrs = { ...n.attrs, textAlign: "right" };
+    return;
+  }
+  n.content?.forEach(markPictureParagraphs);
 }
 
 /** Classes lowering formula pictures in text by their depth (lib/math.ts `depthTitle`). */
@@ -1096,6 +1120,8 @@ export function Reader(props: {
                 horizontalRule: `my-8 border-t border-[${look().rule}]`,
                 // Paragraphs in cells (compactCells).
                 "paragraph[textAlign=left]": "text-[15px] leading-[22px] mb-0",
+                // A paragraph of pictures only (markPictureParagraphs): no line height.
+                "paragraph[textAlign=right]": "text-center leading-[0px] mb-5",
                 // A formula of its own (typesetMath).
                 "paragraph[textAlign=center]": "text-center text-[18px] leading-[30px] mb-5",
                 // Formulas in text lowered to the baseline (depthTitle).

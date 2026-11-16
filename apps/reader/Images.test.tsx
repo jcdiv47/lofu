@@ -47,3 +47,39 @@ test("an image whose URL the parser changed is matched by position", () => {
   const placed = placeImages(d, [img(`${src}#other`, 100, 50, null)], 600);
   expect(imageAttrs(placed)).toEqual([{ src, width: 100, height: 50 }]);
 });
+
+test("a figure the server took out of the page loads from its path", () => {
+  const d = doc("![Success by method](lofu:figure/0123456789abcdef0123456789abcdef)");
+  const placed = placeImages(
+    d,
+    [
+      img(
+        "lofu:figure/0123456789abcdef0123456789abcdef",
+        640,
+        300,
+        "https://lofu.test/figures/0123456789abcdef0123456789abcdef",
+      ),
+    ],
+    600,
+  );
+  expect(imageAttrs(placed)).toEqual([
+    {
+      src: "https://lofu.test/figures/0123456789abcdef0123456789abcdef",
+      width: 600,
+      height: 281,
+    },
+  ]);
+});
+
+test("a paragraph of pictures only is marked, so its line takes the picture's height", () => {
+  const d = doc("![a](https://x.test/a.png)\n\nText with ![b](https://x.test/b.png) inside.");
+  const placed = placeImages(
+    d,
+    [img("https://x.test/a.png", 800, 400, null), img("https://x.test/b.png", 20, 20, null)],
+    600,
+  );
+  const aligns = (placed.content ?? []).map((n) => n.attrs?.textAlign ?? null);
+  expect(aligns).toEqual(["right", null]);
+  // The parsed document is kept as it was.
+  expect((d.content ?? []).map((n) => n.attrs?.textAlign ?? null)).toEqual([null, null]);
+});
