@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  BUN_VERSION: 1.4.4
+  NSH_VERSION: v0.5.1
+
+jobs:
+  # Lint, typecheck and the Bun tests (server + shared), with Meilisearch,
+  # poppler and Chromium present so the search, PDF and browser tests run
+  # instead of being skipped.
+  server:
+    name: Lint, typecheck, test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      meilisearch:
+        image: getmeili/meilisearch:v1.56
+        env:
+          MEILI_MASTER_KEY: ci-master-key-not-a-secret
+          MEILI_NO_ANALYTICS: "true"
+        ports:
+          - 7700:7700
+        options: >-
+          --health-cmd "curl -sf http://localhost:7700/health"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      MEILI_URL: http://127.0.0.1:7700
+      MEILI_MASTER_KEY: ci-master-key-not-a-secret
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Install poppler
+        run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends poppler-utils
+      - uses: browser-actions/setup-chrome@v2
+        id: chrome
+      # Ubuntu 24.04's AppArmor keeps Chromium from making its sandbox.
+      - name: Allow Chromium's sandbox
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun test
+        env:
+          LOFU_CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+
+  # The built extension driven in Chrome for Testing against a real server.
+  # Branded Chrome no longer loads unpacked extensions.
+  extension:
+    name: Extension e2e
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: browser-actions/setup-chrome@v2
+        id: chrome
+      - name: Allow Chromium's sandbox
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: bun install --frozen-lockfile
+      - run: bun run ext:build
+      - run: bun run ext:e2e
+        env:
+          LOFU_CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: extension-screens
+          path: apps/extension/e2e/screens/
+          if-no-files-found: ignore
+
+  cli:
+    name: CLI (Rust)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check -p lofu-cli
+      - run: cargo clippy -p lofu-cli --all-targets -- -D warnings
+      - run: cargo test -p lofu-cli
+      - run: cargo build --release -p lofu-cli
+
+  # nsh's headless tests. They run on macOS: the app's share sheet (and the
+  # menu items that depend on it) exists only on Apple hosts and Android.
+  reader:
+    name: Reader (nsh)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/reader
+          cache-directories: apps/reader/.nsh
+      - name: Install nsh
+        run: |
+          asset=nsh-macos-arm64.tar.gz
+          base=https://github.com/longbridge/nsh/releases/download/$NSH_VERSION
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$base/$asset"
+          curl -fsSLO "$base/$asset.sha256"
+          shasum -a 256 -c "$asset.sha256"
+          tar -xzf "$asset"
+          echo "$RUNNER_TEMP/nsh/bin" >> "$GITHUB_PATH"
+      - run: nsh --version
+      - run: bun install --frozen-lockfile
+      - run: bun run reader:test
