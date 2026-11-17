@@ -14,6 +14,7 @@
 # $LOFU_PROD_DIR holds:
 #   .env          yours: MEILI_MASTER_KEY, LOFU_DATA, ports, LOFU_BACKUP_COPY_TO
 #   compose.yaml  docker/compose.yaml as of the deployed commit
+#   compose.tailscale.yaml  the Tailscale sidecar, likewise (when TS_HOSTNAME is set)
 #   release.env   the deployed image (LOFU_IMAGE, LOFU_TAG, LOFU_COMMIT)
 #   previous.env  the release before it and the backup taken first (for rollback)
 set -euo pipefail
@@ -25,10 +26,31 @@ dir=${LOFU_PROD_DIR:-$HOME/lofu-prod}
 project=lofu-prod
 image=${LOFU_PROD_IMAGE:-ghcr.io/jcdiv47/lofu-server}
 
+# With TS_HOSTNAME set, the server is reached through its own tailnet node
+# (compose.tailscale.yaml) instead of a loopback port.
+tailscale_on() { [ -n "$(env_value "$dir/.env" TS_HOSTNAME)" ]; }
+
 compose() {
-  local envs=(--env-file "$dir/.env")
-  [ -f "$dir/release.env" ] && envs+=(--env-file "$dir/release.env")
-  docker compose -p "$project" --project-directory "$dir" -f "$dir/compose.yaml" "${envs[@]}" "$@"
+  local args=(-f "$dir/compose.yaml")
+  [ -f "$dir/compose.tailscale.yaml" ] && args+=(-f "$dir/compose.tailscale.yaml")
+  args+=(--env-file "$dir/.env")
+  [ -f "$dir/release.env" ] && args+=(--env-file "$dir/release.env")
+  docker compose -p "$project" --project-directory "$dir" "${args[@]}" "$@"
+}
+
+# Stages the compose files of a commit in $dir/next/; install_compose puts them in place.
+stage_compose() { # sha
+  rm -rf "$dir/next" && mkdir -p "$dir/next"
+  git -C "$repo" show "$1:docker/compose.yaml" >"$dir/next/compose.yaml"
+  if tailscale_on; then
+    git -C "$repo" show "$1:docker/compose.tailscale.yaml" >"$dir/next/compose.tailscale.yaml" 2>/dev/null ||
+      die "$1 has no docker/compose.tailscale.yaml, but TS_HOSTNAME is set"
+  fi
+}
+
+install_compose() {
+  rm -f "$dir/compose.yaml" "$dir/compose.tailscale.yaml"
+  mv "$dir/next/"* "$dir/" && rmdir "$dir/next"
 }
 
 load_env() {
@@ -132,7 +154,8 @@ cmd_deploy() {
     die "no image $image:$sha. Has CI finished for it? (A private package also needs: docker login ghcr.io)"
 
   mkdir -p "$data/server" "$data/meili"
-  git -C "$repo" show "$sha:docker/compose.yaml" >"$dir/compose.next.yaml"
+  if tailscale_on; then mkdir -p "$data/tailscale"; fi
+  stage_compose "$sha"
 
   # Migrations run on startup and only go forward, and a build refuses a
   # newer schema, so this backup is the way back if the new release fails.
@@ -142,7 +165,7 @@ cmd_deploy() {
   if [ -f "$dir/release.env" ]; then
     { cat "$dir/release.env"; echo "BACKUP=$backup"; } >"$dir/previous.env"
   fi
-  mv "$dir/compose.next.yaml" "$dir/compose.yaml"
+  install_compose
   printf 'LOFU_IMAGE=%s\nLOFU_TAG=%s\nLOFU_COMMIT=%s\n' "$image" "$sha" "$sha" >"$dir/release.env"
 
   if ! wait_healthy "$sha"; then
@@ -161,7 +184,7 @@ cmd_rollback() {
   backup=$(env_value "$dir/previous.env" BACKUP)
   echo "rolling back to $tag"
   have_image "$image:$tag" || die "no image $image:$tag"
-  git -C "$repo" show "$tag:docker/compose.yaml" >"$dir/compose.next.yaml"
+  stage_compose "$tag"
 
   compose stop server
   # Restore the backup only if the failed release migrated the schema: the
@@ -179,7 +202,7 @@ cmd_rollback() {
     fi
   fi
 
-  mv "$dir/compose.next.yaml" "$dir/compose.yaml"
+  install_compose
   grep -v '^BACKUP=' "$dir/previous.env" >"$dir/release.env"
   rm "$dir/previous.env"
   wait_healthy "$tag" || die "the previous release didn't come up either; see: docker/prod.sh logs server"
@@ -205,6 +228,10 @@ cmd_status() {
   compose ps
   echo "deployed: $(env_value "$dir/release.env" LOFU_TAG)"
   if server_running; then echo "health: $(health || true)"; fi
+  if tailscale_on; then
+    echo "url: https://$(compose exec -T tailscale tailscale status --json --peers=false |
+      sed -n 's/^ *"DNSName": "\(.*\)\.",*$/\1/p' | head -n 1)"
+  fi
 }
 
 case ${1:-} in

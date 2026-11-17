@@ -1,0 +1,60 @@
+# Tailscale sidecar, after https://github.com/tailscale-dev/ScaleTail. It gives
+# lofu its own tailnet node, https://<TS_HOSTNAME>.<tailnet>.ts.net, with a
+# real certificate (which iOS App Transport Security requires), and doesn't
+# take a port on the host. docker/prod.sh adds this file when TS_HOSTNAME is
+# set in its .env.
+#
+# The server shares the sidecar's network namespace and listens on its
+# loopback only, so the one way in is Tailscale Serve's HTTPS. Nothing is
+# published on the host; use `docker/prod.sh exec server ...` for admin.
+
+configs:
+  ts-serve:
+    content: |
+      {"TCP":{"443":{"HTTPS":true}},
+       "Web":{"$${TS_CERT_DOMAIN}:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8787"}}}},
+       "AllowFunnel":{"$${TS_CERT_DOMAIN}:443":false}}
+
+services:
+  tailscale:
+    image: tailscale/tailscale:v1.104.7@sha256:72c1e19e0aedca96b8533bbb0b4368564410ff20b17e53b804eb6c1f04a31be4
+    hostname: ${TS_HOSTNAME:?set TS_HOSTNAME}
+    restart: unless-stopped
+    environment:
+      # Only needed for the first login; the node's identity is in the state dir.
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_AUTH_ONCE: "true"
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_USERSPACE: "false"
+      TS_ENABLE_HEALTH_CHECK: "true"
+      TS_LOCAL_ADDR_PORT: 127.0.0.1:41234
+      # Keep Docker's DNS so the server still finds meilisearch and browser.
+      TS_ACCEPT_DNS: "false"
+    configs:
+      - source: ts-serve
+        target: /config/serve.json
+    volumes:
+      - ${LOFU_DATA:?set LOFU_DATA}/tailscale:/var/lib/tailscale
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add: [NET_ADMIN]
+    # The server's networks move here, since it uses this namespace.
+    networks: [default, browser]
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:41234/healthz"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+      start_interval: 2s
+
+  server:
+    network_mode: service:tailscale
+    networks: !reset []
+    ports: !reset []
+    environment:
+      LOFU_HOST: 127.0.0.1
+    depends_on:
+      tailscale:
+        condition: service_healthy

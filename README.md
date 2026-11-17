@@ -36,15 +36,16 @@ Checks: `bun test` (needs Meilisearch for the search tests; they're skipped if `
 Production runs from its own directory (`~/lofu-prod`), with its own data, compose project and ports, so nothing you do in a checkout touches it. It runs the image CI built for a commit on `main` (`ghcr.io/jcdiv47/lofu-server:<sha>`), never a local build.
 
 ```sh
-docker/prod.sh init                 # writes ~/lofu-prod/.env with a fresh MEILI_MASTER_KEY; review it
+docker/prod.sh init                 # writes ~/lofu-prod/.env with a fresh MEILI_MASTER_KEY
+$EDITOR ~/lofu-prod/.env            # add a Tailscale auth key (TS_AUTHKEY)
 docker/prod.sh deploy               # origin/main, or: docker/prod.sh deploy <commit>
 docker/prod.sh exec server bun src/admin.ts token create phone
-tailscale serve --bg --https=443 http://127.0.0.1:8788
+docker/prod.sh status               # shows https://lofu.<tailnet>.ts.net
 ```
 
 `deploy` pulls the image before it changes anything, so a commit CI hasn't built (or whose tests failed) is refused. Then it snapshots the database, starts the new release, waits for every container to report healthy, and checks that `/health` reports the commit it deployed. If that fails, `docker/prod.sh rollback` brings back the previous release. Migrations only go forward and a build refuses a newer schema, so if the failed release migrated, rollback restores the pre-deploy snapshot (keeping the newer database under `backups/failed-*`) and rebuilds the search index. `docker/prod.sh status` shows what's deployed. Any other arguments go to `docker compose` (`docker/prod.sh logs -f server`). Set `LOFU_PROD_DIR` to keep production somewhere else.
 
-The server binds to loopback only and the other two containers publish nothing to your network (Meilisearch takes `127.0.0.1:7701` for debugging). `tailscale serve` (not `tailscale funnel`, which would put it on the internet) gives you `https://<machine>.<tailnet>.ts.net` with a real certificate, which iOS App Transport Security requires.
+lofu joins your tailnet as its own machine through a Tailscale sidecar container (`docker/compose.tailscale.yaml`, after [ScaleTail](https://github.com/tailscale-dev/ScaleTail)). It serves `https://<TS_HOSTNAME>.<tailnet>.ts.net` with a real certificate, which iOS App Transport Security requires. Funnel is off, so the server isn't on the internet. The server shares the sidecar's network and listens on its loopback, so Tailscale's HTTPS is the only way in, and nothing is published on the host except Meilisearch on `127.0.0.1:7701` for debugging. The auth key is only used once: the node's identity is kept in `<LOFU_DATA>/tailscale`. To serve from the host's own Tailscale instead, leave `TS_HOSTNAME` empty and run `tailscale serve --bg --https=443 http://127.0.0.1:8788`.
 
 Two stacks must never share a data directory, because the server must be the only process writing its database. `prod.sh` and `docker/compose.sh` refuse to start when another compose project has the directory mounted.
 
