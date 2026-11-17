@@ -2,6 +2,7 @@
 name = "lofu-reader-native"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 publish = false
 
 # Not a member of the repository's workspace: nsh builds it into the app's

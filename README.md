@@ -129,3 +129,7 @@ The OpenAPI 3.1 document is served at `/openapi.json`, generated from the zod sc
 3. **Permanent copies**: single-file archives via `monolith`; periodic broken-link checks.
 4. **Clients**: the nsh app (`apps/reader`) runs on macOS, iOS and the web: a sidebar and card grid on the Mac, a native navigation stack on the phone, both over a `/v1/sync` mirror (findings in `apps/reader/README.md`; a Linux desktop app is deferred). The apps keep the reading list and changes on the device for offline use, track reading progress, and edit titles, tags, notes, collections and tags. Next: verify long-press selection, highlighting and reading progress on an iPhone by hand. The extension's Safari build comes along with the Apple apps.
 5. Semantic search (a Meilisearch embedder, e.g. Ollama → `MEILI_EMBEDDER`), suggested tags, text-to-speech.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The reader's icons come from Lucide (ISC) and the agent skills under `.claude/`, `.agents/` and `.hermes/` from emilkowalski/skills (MIT); [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) has their licenses and those of what lofu ships or runs.
