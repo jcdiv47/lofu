@@ -33,14 +33,42 @@ Checks: `bun test` (needs Meilisearch for the search tests; they're skipped if `
 
 ## Running on the home server
 
+Production runs from its own directory (`~/lofu-prod`), with its own data, compose project and ports, so nothing you do in a checkout touches it. It runs the image CI built for a commit on `main` (`ghcr.io/jcdiv47/lofu-server:<sha>`), never a local build.
+
 ```sh
-cp docker/.env.example docker/.env  # set MEILI_MASTER_KEY
-bun run stack:up                    # builds and starts server, Meilisearch and the browser
-bun run stack:token create phone
-tailscale serve --bg --https=443 http://127.0.0.1:8787
+docker/prod.sh init                 # writes ~/lofu-prod/.env with a fresh MEILI_MASTER_KEY
+$EDITOR ~/lofu-prod/.env            # add a Tailscale auth key (TS_AUTHKEY)
+docker/prod.sh deploy               # origin/main, or: docker/prod.sh deploy <commit>
+docker/prod.sh exec server bun src/admin.ts token create phone
+docker/prod.sh status               # shows https://lofu.<tailnet>.ts.net
 ```
 
-The server binds to loopback only and the other two containers publish nothing to your network (Meilisearch takes `127.0.0.1:7700` for debugging). `tailscale serve` (not `tailscale funnel`, which would put it on the internet) gives you `https://<machine>.<tailnet>.ts.net` with a real certificate, which iOS App Transport Security requires. Back up `data/server/` (SQLite). `data/meili/` is derived and can be rebuilt with `bun src/admin.ts reindex`. Update the browser container now and then: `docker compose -f docker/compose.yaml pull browser && bun run stack:up`.
+`deploy` pulls the image before it changes anything, so a commit CI hasn't built (or whose tests failed) is refused. Then it snapshots the database, starts the new release, waits for every container to report healthy, and checks that `/health` reports the commit it deployed. If that fails, `docker/prod.sh rollback` brings back the previous release. Migrations only go forward and a build refuses a newer schema, so if the failed release migrated, rollback restores the pre-deploy snapshot (keeping the newer database under `backups/failed-*`) and rebuilds the search index. `docker/prod.sh status` shows what's deployed. Any other arguments go to `docker compose` (`docker/prod.sh logs -f server`). Set `LOFU_PROD_DIR` to keep production somewhere else.
+
+lofu joins your tailnet as its own machine through a Tailscale sidecar container (`docker/compose.tailscale.yaml`, after [ScaleTail](https://github.com/tailscale-dev/ScaleTail)). It serves `https://<TS_HOSTNAME>.<tailnet>.ts.net` with a real certificate, which iOS App Transport Security requires. Funnel is off, so the server isn't on the internet. The server shares the sidecar's network and listens on its loopback, so Tailscale's HTTPS is the only way in, and nothing is published on the host except Meilisearch on `127.0.0.1:7701` for debugging. The auth key is only used once: the node's identity is kept in `<LOFU_DATA>/tailscale`. To serve from the host's own Tailscale instead, leave `TS_HOSTNAME` empty and run `tailscale serve --bg --https=443 http://127.0.0.1:8788`.
+
+Two stacks must never share a data directory, because the server must be the only process writing its database. `prod.sh` and `docker/compose.sh` refuse to start when another compose project has the directory mounted.
+
+### Backups
+
+Back up `<LOFU_DATA>/server/lofu.db`, and take the copy with `docker/prod.sh backup`, not `cp`: copying the files of a live SQLite database can produce a torn copy. The command writes a checked snapshot (`VACUUM INTO`) to `<LOFU_DATA>/server/backups/` and keeps the newest 14 there. It also copies each one to `LOFU_BACKUP_COPY_TO` (a directory, or an rsync target) if you set it in `.env`. To run it nightly:
+
+```sh
+mkdir -p ~/.config/systemd/user
+cp docker/systemd/lofu-backup.* ~/.config/systemd/user/   # edit the path in the .service if your checkout isn't ~/Code/lofu
+systemctl --user enable --now lofu-backup.timer
+loginctl enable-linger "$USER"                            # run it while you're logged out
+```
+
+`<LOFU_DATA>/meili/` is derived: delete it and run `admin.ts reindex` to rebuild it.
+
+### Updates
+
+The Bun base image, Meilisearch and the headless browser are pinned by digest. Dependabot (`.github/dependabot.yml`) opens a PR when one has an update. Take the browser's promptly, because it runs the scripts of pages you save. Merging a PR builds a new image, which you deploy as usual. Meilisearch only gets patch updates. A minor release can't open the previous index, so upgrade it by hand: bump the tag, delete `<LOFU_DATA>/meili`, deploy, and run `admin.ts reindex`.
+
+### Development stack
+
+`bun run stack:up` builds the image from your checkout and runs it as compose project `lofu` on `127.0.0.1:8787`, with data in `data/` (`docker/.env`, from `docker/.env.example`). It goes through `docker/compose.sh`, which adds an untracked `docker/compose.override.yaml` when there is one. Use the override to publish the API on your LAN or to allow extra CORS origins on one machine, and keep `compose.yaml` loopback-only.
 
 ### What a saved page can't do
 

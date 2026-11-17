@@ -11,7 +11,9 @@ describe("auth", () => {
     ).toBe(401);
   });
   test("health and openapi are public", async () => {
-    expect((await app.request("/health")).status).toBe(200);
+    const health = await app.request("/health");
+    expect(health.status).toBe(200);
+    expect(((await health.json()) as any).commit).toBeString();
     const doc = (await (await app.request("/openapi.json")).json()) as any;
     expect(doc.paths["/v1/bookmarks"]).toBeDefined();
   });

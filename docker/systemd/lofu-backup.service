@@ -1,0 +1,9 @@
+# Nightly database snapshot of the production stack (docker/prod.sh backup).
+# Install as a user unit; README.md "Backups" has the commands.
+[Unit]
+Description=lofu database backup
+
+[Service]
+Type=oneshot
+# The checkout that holds docker/prod.sh. %h is your home directory.
+ExecStart=%h/Code/lofu/docker/prod.sh backup

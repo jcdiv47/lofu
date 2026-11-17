@@ -132,3 +132,60 @@ jobs:
       - run: nsh --version
       - run: bun install --frozen-lockfile
       - run: bun run reader:test
+
+  # The server image production runs (docker/prod.sh deploy). Built on every
+  # run so a broken Dockerfile fails the PR; pushed to GHCR, tagged with the
+  # commit, only from main and only after the server tests pass.
+  image:
+    name: Server image
+    needs: [server]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/lofu-server
+      PUSH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/server.Dockerfile
+          build-args: LOFU_COMMIT=${{ github.sha }}
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # The image starts, migrates an empty database, answers /health with
+      # its commit, and has the PDF tools.
+      - name: Smoke test
+        run: |
+          docker run -d --name lofu -p 127.0.0.1:8787:8787 \
+            -e LOFU_HOST=0.0.0.0 -e LOFU_DATA_DIR=/tmp/data -e LOFU_BROWSER=off \
+            "$IMAGE:$GITHUB_SHA"
+          for _ in $(seq 30); do
+            curl -sf http://127.0.0.1:8787/health && break
+            sleep 1
+          done
+          echo
+          curl -sf http://127.0.0.1:8787/health | grep -q "\"commit\":\"$GITHUB_SHA\""
+          docker exec lofu sh -c 'command -v pdftotext pdfinfo'
+          docker exec lofu bun src/admin.ts backup
+      - name: Server logs
+        if: failure()
+        run: docker logs lofu
+      - uses: docker/login-action@v4
+        if: env.PUSH == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push
+        if: env.PUSH == 'true'
+        run: |
+          docker push "$IMAGE:$GITHUB_SHA"
+          docker tag "$IMAGE:$GITHUB_SHA" "$IMAGE:main"
+          docker push "$IMAGE:main"

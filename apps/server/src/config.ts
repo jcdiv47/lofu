@@ -12,6 +12,8 @@ function int(name: string, fallback: number): number {
 const dataDir = resolve(process.env.LOFU_DATA_DIR ?? "./data");
 
 export const config = {
+  /** The git commit this build came from, baked into the image (docker/server.Dockerfile). */
+  commit: process.env.LOFU_COMMIT || "dev",
   port: int("LOFU_PORT", 8787),
   host: process.env.LOFU_HOST ?? "127.0.0.1",
   dataDir,
