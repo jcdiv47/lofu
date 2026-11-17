@@ -51,7 +51,12 @@ export function createApp(ctx: AppContext) {
   );
 
   app.get("/health", async (c) =>
-    c.json({ ok: true, version: VERSION, search: ctx.searcher ? await ctx.meiliHealthy() : null }),
+    c.json({
+      ok: true,
+      version: VERSION,
+      commit: ctx.config.commit,
+      search: ctx.searcher ? await ctx.meiliHealthy() : null,
+    }),
   );
 
   // Article images for readers' <img>, which can't send a token: the URL's

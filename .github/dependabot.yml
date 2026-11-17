@@ -1,0 +1,27 @@
+# Pinned images and actions, and a PR when they have updates. Merging one to
+# main builds a new server image; `docker/prod.sh deploy` ships it.
+version: 2
+updates:
+  # Meilisearch and the headless browser in docker/compose.yaml. The browser
+  # runs the scripts of pages you save, so take its updates promptly.
+  - package-ecosystem: docker-compose
+    directory: /docker
+    schedule:
+      interval: weekly
+    ignore:
+      # A minor Meilisearch release can't open the previous one's index; that
+      # upgrade is done by hand (see the comment in compose.yaml).
+      - dependency-name: getmeili/meilisearch
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+  # The Bun base image in docker/server.Dockerfile.
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
