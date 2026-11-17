@@ -132,4 +132,4 @@ The OpenAPI 3.1 document is served at `/openapi.json`, generated from the zod sc
 
 ## License
 
-MIT, see [LICENSE](LICENSE). The reader's icons come from Lucide (ISC); [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) has their license and those of what lofu ships or runs.
+MIT, see [LICENSE](LICENSE). The reader's icons come from Lucide (ISC) and the agent skills under `.claude/`, `.agents/` and `.hermes/` from emilkowalski/skills (MIT); [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) has their licenses and those of what lofu ships or runs.

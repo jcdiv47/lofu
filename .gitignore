@@ -12,9 +12,3 @@ apps/extension/.wxt/
 apps/extension/e2e/screens/
 apps/reader/e2e/screens/
 apps/reader/android/screens/
-
-# Agent skills installed locally (skills-lock.json), not part of lofu
-.agents/skills/
-.claude/skills/
-.hermes/skills/
-skills-lock.json
