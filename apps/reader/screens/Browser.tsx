@@ -9,6 +9,7 @@ import { GlassButton, GlassGroup, GlassTint, IconButton, RoundGlassButton } from
 import { openInBrowser } from "../lib/actions";
 import { glass, look } from "../lib/look";
 import { contentLeft, nativeToolbar, useToolbar } from "../lib/toolbar";
+import { isAppLinkRefusal } from "../lib/web";
 
 /**
  * The room before the page's title that the window toolbar's Close and its
@@ -253,7 +254,11 @@ export function Browser(props: {
           desktop={{ allowsBackForwardNavigationGestures: true }}
           onNavigationStateChange={(e) => at.set(e)}
           onLoadStart={() => failed.set(null)}
-          onError={(e) => failed.set(e.message || "The page didn't load.")}
+          onError={(e) => {
+            // A page sending the reader to its app (`zhihu://…`) stays put.
+            if (isAppLinkRefusal(e)) return;
+            failed.set(e.message || "The page didn't load.");
+          }}
         />
         <If when={failed()}>
           {(message) => (
