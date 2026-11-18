@@ -28,7 +28,7 @@ import {
   prefetchArticles,
   setKeepMode,
 } from "../lib/articles";
-import { onDisk } from "../lib/files";
+import { onDisk, picturesOnDisk } from "../lib/files";
 import { fonts, look } from "../lib/look";
 import { type OpenIn, prefs, setPrefs } from "../lib/prefs";
 import { bookmarks, offline } from "../lib/store";
@@ -555,7 +555,11 @@ function OfflineReading() {
       title="Reading offline"
       footer={
         <View class="gap-3">
-          <Note>Every article you open is kept here, with its pictures.</Note>
+          <Note>
+            {picturesOnDisk
+              ? "Every article you open is kept here, with its pictures."
+              : "Every article you open is kept here. Its pictures load from the server."}
+          </Note>
           <View class="flex-row flex-wrap justify-end gap-2">
             <Button
               label={`Remove from ${here === "this Mac" ? "This Mac" : "This Device"}…`}
