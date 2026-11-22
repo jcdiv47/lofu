@@ -83,6 +83,7 @@ import {
   toTextRange,
   withoutRange,
 } from "../lib/docIndex";
+import { nativeEditMenu, useEditMenuItem } from "../lib/editMenu";
 import { isFootnoteNumber, numberFootnotes, raiseFootnotes } from "../lib/footnotes";
 import { readingTime } from "../lib/format";
 import { fonts, glass, look } from "../lib/look";
@@ -855,6 +856,8 @@ export function Reader(props: {
     }
   };
   const removeHighlight = (p: Placed) => removeHighlights([p.highlight]);
+  // iOS: Highlight sits in the system's menu, beside Copy (src/editmenu.rs).
+  const editMenu = useEditMenuItem(ARTICLE, "Highlight", () => void addHighlight());
 
   /** Highlights the text has lost (the page changed, or the extraction did):
    * shown as quotes, to keep or remove. */
@@ -889,6 +892,8 @@ export function Reader(props: {
   const iosGlass = nativeControls && platform.os === "ios";
   const bubble = () => {
     const s = selection();
+    // iOS: Highlight is in the system's menu over the selection.
+    if (nativeEditMenu && s && !s.empty) return undefined;
     // The system's glass button where there is one: it answers the touch.
     if (iosGlass) {
       if (s && !s.empty) return <GlassButton label="Highlight" onPress={addHighlight} />;
@@ -1084,13 +1089,19 @@ export function Reader(props: {
               view = r;
               // Once its views are up: a press focuses its text view, which
               // would raise iOS's keyboard (Keyboard in src/lib.rs).
-              setTimeout(() => Keyboard.keepAway(ARTICLE), 0);
+              setTimeout(() => {
+                Keyboard.keepAway(ARTICLE);
+                editMenu.attach();
+              }, 0);
               keepAndroidKeyboardAway(ARTICLE);
             }}
             editable={false}
             testID="article"
             accessibilityLabel={ARTICLE}
-            onFocus={() => Keyboard.keepAway(ARTICLE)}
+            onFocus={() => {
+              Keyboard.keepAway(ARTICLE);
+              editMenu.attach();
+            }}
             class="flex-1"
             style={{ opacity: fade }}
             onSelectionChange={({ selection: s }) => {

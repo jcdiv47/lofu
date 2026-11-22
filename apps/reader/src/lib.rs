@@ -44,11 +44,13 @@ fn native(registry: &mut Registry) {
     registry.module::<Controls>();
     registry.module::<TextPrompt>();
     registry.module::<Keyboard>();
+    registry.module::<EditMenu>();
     registry.module::<ShareExtension>();
     registry.module::<files::Files>();
     registry.module::<files::Secrets>();
 }
 
+mod editmenu;
 mod files;
 mod sidebar;
 mod toolbar;
@@ -236,6 +238,35 @@ impl Keyboard {
         quiet::keep_away(label);
         #[cfg(not(target_os = "ios"))]
         let _ = label;
+    }
+}
+
+/// An item of the app's in the system's edit menu over a read-only
+/// `RichEditor` (iOS, `src/editmenu.rs`): the reader's *Highlight* beside
+/// Copy and Select All. nsh opens that menu itself and takes no items of the
+/// app's for an editor.
+#[module]
+pub struct EditMenu;
+
+#[module]
+impl EditMenu {
+    /// Whether `offer` puts items in the menu here: iOS.
+    pub fn available() -> bool {
+        cfg!(target_os = "ios")
+    }
+
+    /// Puts an item titled `title` first in the edit menu of the editor
+    /// labelled `label` (its `accessibilityLabel`). Again for the same views
+    /// only changes the title; call it after the editor mounts and when it
+    /// takes the focus, should nsh have made its text view again.
+    pub fn offer(label: String, title: String) {
+        editmenu::offer(label, title)
+    }
+
+    /// The label of the editor whose item was chosen, or "" after a second
+    /// without one. The app asks again at once.
+    pub async fn next() -> String {
+        editmenu::next().await
     }
 }
 
