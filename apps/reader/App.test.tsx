@@ -369,6 +369,11 @@ test("desktop: + saves a page into the collection being shown", async () => {
   await app.waitFor("text:new.example/post");
   expect(posts).toEqual([{ url: "https://new.example/post", collectionId: "c1" }]);
   expect(app.shows("id:add-url")).toBe(false);
+
+  // The form stays through the dialog's fade out, then goes: opened again, it starts empty.
+  await app.press("label:Add bookmark");
+  await app.waitFor("id:add-url");
+  expect(app.value("id:add-url")).toBe("");
 });
 
 test("phone: the Library page's search narrows it to the names that match", async () => {

@@ -15,7 +15,7 @@ concurrency:
 
 env:
   BUN_VERSION: 1.4.4
-  NSH_VERSION: v0.5.1
+  NSH_VERSION: v0.6.1
 
 jobs:
   # Lint, typecheck and the Bun tests (server + shared), with Meilisearch,
