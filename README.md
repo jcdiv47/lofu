@@ -297,4 +297,4 @@ See [`CLAUDE.md`](CLAUDE.md) for core architectural invariants (single-writer `s
 
 Licensed under the [MIT License](LICENSE).
 
-Reader icons are from [Lucide](https://lucide.dev) (ISC), and agent skills under `.claude/`, `.agents/`, and `.hermes/` are from [emilkowalski/skills](https://github.com/emilkowalski/skills) (MIT). See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for full third-party license notices.
+Reader icons are from [Lucide](https://lucide.dev) (ISC). See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for full third-party license notices.
