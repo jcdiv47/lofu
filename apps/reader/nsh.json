@@ -8,6 +8,7 @@
   "capabilities": {
     "network": { "hosts": ["*"] },
     "webview": { "hosts": ["*"] },
+    "application": true,
     "clipboard": true,
     "statusBar": true,
     "openUrl": { "schemes": ["http", "https"] },

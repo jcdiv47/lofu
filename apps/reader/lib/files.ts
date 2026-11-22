@@ -17,10 +17,11 @@ export const onDisk = (() => {
 
 /**
  * Whether an image on `os` may show a file of the app's own by its path
- * (`filePath`). nsh 0.5.1 lets images load from local paths on desktops
+ * (`filePath`). nsh 0.6.1 lets images load from local paths on desktops
  * only: on iOS and Android an app that declares capabilities gets no
  * `fs.read` roots for images, `${dataDir}` included (`native_files` in
  * nsh-core's `access.rs`), so a picture shown from a file stays blank.
+ * Fixed on nsh's `main` after 0.6.1 (longbridge/nsh#2292).
  */
 export const showsFiles = (os: string) => os === "macos" || os === "windows" || os === "linux";
 

@@ -201,6 +201,16 @@ function Desktop(props: { onReconnect: () => void }) {
   const settingsOpen = signal(false);
   const adding = signal(false);
   const editing = signal<Bookmark | null>(null);
+  // What the add and edit dialogs show stays until their fade out ends.
+  const edited = signal<Bookmark | null>(null);
+  const addShown = signal(false);
+  effect(() => {
+    const b = editing();
+    if (b) edited.set(b);
+  });
+  effect(() => {
+    if (adding()) addShown.set(true);
+  });
   useOpeners((r) => nav.push(r));
   setEditor((b) => editing.set(b));
   cleanup(() => setEditor(null));
@@ -321,12 +331,15 @@ function Desktop(props: { onReconnect: () => void }) {
       <GlassDialog
         open={!!editing()}
         onClose={() => editing.set(null)}
+        onGone={() => {
+          if (!untracked(editing)) edited.set(null);
+        }}
         backdropClass="bg-black/25"
         class="m-auto w-[480px] overflow-hidden rounded-[26px]"
         style={{ ...glass(), borderCurve: "continuous" }}
       >
         <GlassTint radius={26} />
-        <If when={editing()}>
+        <If when={edited()}>
           {(b) => (
             <View class="gap-5 p-6">
               <Text style={{ color: look().ink, fontSize: 19, fontWeight: "700" }}>
@@ -344,12 +357,15 @@ function Desktop(props: { onReconnect: () => void }) {
       <GlassDialog
         open={adding()}
         onClose={() => adding.set(false)}
+        onGone={() => {
+          if (!untracked(adding)) addShown.set(false);
+        }}
         backdropClass="bg-black/25"
         class="m-auto w-[440px] overflow-hidden rounded-[26px]"
         style={{ ...glass(), borderCurve: "continuous" }}
       >
         <GlassTint radius={26} />
-        <If when={adding()}>
+        <If when={addShown()}>
           <View class="gap-5 p-6">
             <Text style={{ color: look().ink, fontSize: 19, fontWeight: "700" }}>Add bookmark</Text>
             <AddBookmark
@@ -365,49 +381,28 @@ function Desktop(props: { onReconnect: () => void }) {
 }
 
 /**
- * A dialog on glass that fades in and closes at once. nsh (0.4 and 0.5) fades
- * a closing dialog out as a picture of it, which `renderInContext` takes
- * without the Liquid Glass, the blur or the backdrop: a flat grey panel
- * flashes over an undimmed page (longbridge/nsh#1719). So the fade is only
- * the way in. `open` going false removes the dialog in the same update that
- * would change its `animation`, so the change wouldn't reach it in time:
- * `animation` turns to `"none"` first and the dialog closes a frame later.
- * Escape and a press on the backdrop close it through `onClose` too, rather
- * than natively with the fade.
+ * A dialog on glass that fades in and out. Since nsh 0.6 a fade keeps the
+ * dialog's live views, glass and backdrop included, until it ends
+ * (longbridge/nsh#1719); before, it faded out a picture without them.
  */
 function GlassDialog(props: {
   open: boolean;
   onClose: () => void;
+  /** It has gone, its fade out over. */
+  onGone?: () => void;
   backdropClass: string;
   class: string;
   style: ViewStyle;
   children: JSX.Element;
 }) {
-  const shown = signal(false);
-  const fade = signal(true);
-  effect(() => {
-    if (props.open) {
-      fade.set(true);
-      shown.set(true);
-      return;
-    }
-    if (!untracked(shown)) return;
-    fade.set(false);
-    // A frame later: a timer would run in this turn, and its close would
-    // reach the platform in the same batch as the new `animation`.
-    const frame = requestAnimationFrame(() => shown.set(false));
-    cleanup(() => cancelAnimationFrame(frame));
-  });
   return (
     <Dialog
-      open={shown()}
-      animation={fade() ? "fade" : "none"}
-      closeOnEscape={false}
-      closeOnBackdropPress={false}
-      onCancel={() => props.onClose()}
+      open={props.open}
+      animation="fade"
       onOpenChange={(e) => {
         if (!e.open) props.onClose();
       }}
+      onClose={() => props.onGone?.()}
       backdropClass={props.backdropClass}
       class={props.class}
       style={props.style}

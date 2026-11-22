@@ -79,6 +79,6 @@ test("a picture's file is named by its article and URL, in the characters files 
 
 test("pictures are kept as files only where nsh shows an image from a file", () => {
   expect(["macos", "windows", "linux"].every(showsFiles)).toBe(true);
-  // nsh 0.5.1 grants images no local paths on phones, fs.read or not.
+  // nsh 0.6.1 grants images no local paths on phones, fs.read or not.
   expect(["ios", "android", "web"].some(showsFiles)).toBe(false);
 });
