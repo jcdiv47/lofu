@@ -204,7 +204,14 @@ mod ios {
                     a.to_vec()
                 })
                 .unwrap_or_default();
-            if let Some((label, title)) = offered(this) {
+            // Only over a selection: nsh's text view offers Copy for what
+            // the editor asked (a caret gets Select All alone).
+            let selected: bool = msg_send![
+                this,
+                canPerformAction: sel!(copy:),
+                withSender: Option::<&AnyObject>::None
+            ];
+            if selected && let Some((label, title)) = offered(this) {
                 let handler = RcBlock::new(move |_: *mut AnyObject| {
                     let tx = events().0.lock().unwrap_or_else(|e| e.into_inner());
                     let _ = tx.send(label.clone());
