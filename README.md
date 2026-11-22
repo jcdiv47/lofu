@@ -1,163 +1,289 @@
-# lofu
+<div align="center">
+  <img src="design/logo/icon-192.png" alt="lofu logo" width="96" height="96" />
+  <h1>lofu</h1>
+  <p><strong>Self-hosted bookmarks and read-later, built for speed, offline reading, and AI agents.</strong></p>
+  <p>
+    <a href="https://github.com/jcdiv47/lofu/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/jcdiv47/lofu/ci.yml?branch=main&logo=githubactions&logoColor=white&label=CI" alt="CI" /></a>
+    <a href="https://github.com/jcdiv47/lofu/commits/main"><img src="https://img.shields.io/github/last-commit/jcdiv47/lofu" alt="Last Commit" /></a>
+    <a href="https://github.com/jcdiv47/lofu/issues"><img src="https://img.shields.io/github/issues/jcdiv47/lofu" alt="Open Issues" /></a>
+    <a href="https://github.com/jcdiv47/lofu/pkgs/container/lofu-server"><img src="https://img.shields.io/badge/ghcr.io-lofu--server-2496ED?logo=docker&logoColor=white" alt="Container Image" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/jcdiv47/lofu" alt="MIT License" /></a>
+  </p>
+  <p>
+    <a href="#features">Features</a> &middot;
+    <a href="#quick-start">Quick Start</a> &middot;
+    <a href="#self-hosting">Self-Hosting</a> &middot;
+    <a href="#clients">Clients</a> &middot;
+    <a href="#importing-from-raindropio">Migration</a> &middot;
+    <a href="#api">API</a> &middot;
+    <a href="#architecture-and-benchmarks">Architecture</a> &middot;
+    <a href="#development">Development</a>
+  </p>
+</div>
 
-Self-hosted bookmarks and read-later, in the spirit of Raindrop.io and Pocket. It runs on a home server and you reach it over your LAN or Tailscale. Clients: web, Android, iOS, macOS, and a CLI built for agents.
+**lofu** is a self-hosted bookmark manager and read-later server in the spirit of Raindrop.io and Pocket. It runs on your home server and is reached privately over your LAN or Tailscale, with native apps for macOS, iOS, Android, and the web, a browser extension for Chromium and Firefox, and a fast Rust CLI designed for both humans and AI agents.
 
-```
-apps/server       Bun + Hono API, SQLite, job queue, extraction workers, search indexer
-packages/shared   zod schemas (API contract → OpenAPI) and URL normalization
-crates/lofu-cli   `lofu` CLI in Rust
-apps/extension    Browser extension (WXT; Chrome/Edge/Brave and Firefox)
-apps/reader       The app on nsh (TSX) for Android, macOS, iOS and the web: library, search, reading, highlights; see its README
-skills/lofu       Agent skill describing the CLI
-docker/           compose stack (server + Meilisearch) and Dockerfile
-```
+## Features
 
-Still to come: the Safari extension. See the roadmap below.
+- **Clean content extraction**: Extracts readable Markdown, HTML, and plain text on a worker-thread pool with site-specific adapters (GitHub, WeChat, V2EX, Xiaohongshu, Zhihu, arXiv), PDF full-text extraction via Poppler, headless Chromium fallback for JS-only and bot-walled pages, inline SVG figure & MathJax rendering, and zstd storage compression.
+- **Fast full-text search**: Meilisearch-backed indexing (including CJK) hydrated from SQLite with local snippet highlighting.
+- **Native offline-first clients**: Cross-platform [Native Shell](https://nsh.dev) reader for macOS, iOS, Android, and web with delta sync (`/v1/sync`), offline article caching, W3C text-quote highlights, collections, tags, and reading progress.
+- **Browser extension**: Saves pages directly from your logged-in browser session (handling login walls and bot checks), shows a saved-page badge on the toolbar, and offers opt-in auto-repair for failed extractions.
+- **Rust CLI & AI agent skill**: A 2.6 MB static `lofu` binary with sub-millisecond startup, compact JSON output when piped, and a ready-to-use [`SKILL.md`](skills/lofu/SKILL.md) for coding agents.
+- **Zero-trust home-server deployment**: Tailscale sidecar for automatic HTTPS without exposing ports to the public internet, immutable CI-built GHCR images with rollback, automated SQLite snapshots, and SSRF/container isolation.
+- **Raindrop.io migration**: Idempotent CSV importer preserving collections, tags, notes, highlights, favorites, and original save timestamps.
 
-## Quick start (development)
+## Repository Layout
+
+| Path | Description |
+| --- | --- |
+| [`apps/server`](apps/server) | Bun + Hono API, SQLite storage, durable job queue, extraction workers, search indexer |
+| [`apps/reader`](apps/reader/README.md) | Cross-platform [Native Shell](https://nsh.dev) app (macOS, iOS, Android, web) for library, search, reading, and highlights |
+| [`apps/extension`](apps/extension) | WXT browser extension for Chrome, Edge, Brave, and Firefox |
+| [`crates/lofu-cli`](crates/lofu-cli) | Static Rust CLI (`lofu`) for humans and AI agents |
+| [`packages/shared`](packages/shared) | Zod schemas (API contract &rarr; OpenAPI 3.1), URL normalization, and highlight anchoring |
+| [`skills/lofu`](skills/lofu/SKILL.md) | Agent skill documenting the `lofu` CLI |
+| [`docker/`](docker) | Production and development Compose stacks, Tailscale sidecar, Dockerfile, and backup units |
+
+## Quick Start
+
+**Prerequisites:** [Bun](https://bun.sh) 1.4+, Docker (for Meilisearch), and [Rust](https://rustup.rs) (optional, for the CLI).
 
 ```sh
 bun install
-cp .env.example .env              # set MEILI_MASTER_KEY
-bun run services:up               # Meilisearch in Docker on 127.0.0.1:7700
-bun run --cwd apps/server token create laptop   # prints a token once
-bun run dev                       # API on http://127.0.0.1:8787
+cp .env.example .env                             # set MEILI_MASTER_KEY
+bun run services:up                              # Meilisearch in Docker on 127.0.0.1:7700
+bun run --cwd apps/server token create laptop    # prints an API token once
+bun run dev                                      # API on http://127.0.0.1:8787
+```
 
-bun run cli:build                 # → target/release/lofu
+Build and try the CLI:
+
+```sh
+bun run cli:build                                # → target/release/lofu
 ./target/release/lofu login --url http://127.0.0.1:8787 --token lofu_...
 lofu add https://www.paulgraham.com/greatwork.html -t essays
 lofu search great work
 ```
 
-Checks: `bun test` (needs Meilisearch for the search tests; they're skipped if `MEILI_URL` is unset), `bun run typecheck` (TypeScript 7), `bun run lint` (Biome), `cargo clippy`.
+### Local Docker Stack
 
-## Running on the home server
-
-Production runs from its own directory (`~/lofu-prod`), with its own data, compose project and ports, so nothing you do in a checkout touches it. It runs the image CI built for a commit on `main` (`ghcr.io/jcdiv47/lofu-server:<sha>`), never a local build.
+To run the full containerized stack built from your checkout (compose project `lofu` on `127.0.0.1:8787`, data in `data/`, configured via `docker/.env` from [`docker/.env.example`](docker/.env.example)):
 
 ```sh
-docker/prod.sh init                 # writes ~/lofu-prod/.env with a fresh MEILI_MASTER_KEY
-$EDITOR ~/lofu-prod/.env            # add a Tailscale auth key (TS_AUTHKEY)
-docker/prod.sh deploy               # origin/main, or: docker/prod.sh deploy <commit>
-docker/prod.sh exec server bun src/admin.ts token create phone
-docker/prod.sh status               # shows https://lofu.<tailnet>.ts.net
+bun run stack:up
 ```
 
-`deploy` pulls the image before it changes anything, so a commit CI hasn't built (or whose tests failed) is refused. Then it snapshots the database, starts the new release, waits for every container to report healthy, and checks that `/health` reports the commit it deployed. If that fails, `docker/prod.sh rollback` brings back the previous release. Migrations only go forward and a build refuses a newer schema, so if the failed release migrated, rollback restores the pre-deploy snapshot (keeping the newer database under `backups/failed-*`) and rebuilds the search index. `docker/prod.sh status` shows what's deployed. Any other arguments go to `docker compose` (`docker/prod.sh logs -f server`). Set `LOFU_PROD_DIR` to keep production somewhere else.
+`stack:up` runs through [`docker/compose.sh`](docker/compose.sh), which automatically includes an untracked `docker/compose.override.yaml` if present. Use that override to publish the API on your LAN or allow extra CORS origins on a single machine while keeping [`docker/compose.yaml`](docker/compose.yaml) loopback-only.
 
-lofu joins your tailnet as its own machine through a Tailscale sidecar container (`docker/compose.tailscale.yaml`, after [ScaleTail](https://github.com/tailscale-dev/ScaleTail)). It serves `https://<TS_HOSTNAME>.<tailnet>.ts.net` with a real certificate, which iOS App Transport Security requires. Funnel is off, so the server isn't on the internet. The server shares the sidecar's network and listens on its loopback, so Tailscale's HTTPS is the only way in, and nothing is published on the host except Meilisearch on `127.0.0.1:7701` for debugging. The auth key is only used once: the node's identity is kept in `<LOFU_DATA>/tailscale`. To serve from the host's own Tailscale instead, leave `TS_HOSTNAME` empty and run `tailscale serve --bg --https=443 http://127.0.0.1:8788`.
+## Self-Hosting
 
-Two stacks must never share a data directory, because the server must be the only process writing its database. `prod.sh` and `docker/compose.sh` refuse to start when another compose project has the directory mounted.
+Production runs from its own directory (`~/lofu-prod`, configurable via `LOFU_PROD_DIR`), with its own data, Compose project, and ports so work in a git checkout never touches production. It runs immutable images built by CI for commits on `main` (`ghcr.io/jcdiv47/lofu-server:<sha>`), never a local build.
+
+```sh
+docker/prod.sh init                              # writes ~/lofu-prod/.env with a fresh MEILI_MASTER_KEY
+$EDITOR ~/lofu-prod/.env                         # add a Tailscale auth key (TS_AUTHKEY)
+docker/prod.sh deploy                            # deploys origin/main, or: docker/prod.sh deploy <commit>
+docker/prod.sh exec server bun src/admin.ts token create phone
+docker/prod.sh status                            # shows deployed commit & https://lofu.<tailnet>.ts.net
+```
+
+How [`docker/prod.sh`](docker/prod.sh) keeps deployments safe:
+
+- **Pre-pull gate**: `deploy` pulls the target image before modifying anything, refusing commits CI hasn't built or whose tests failed.
+- **Health verification & rollback**: It snapshots the database, starts the release, waits for every container to report healthy, and verifies `/health` matches the deployed commit. If anything fails, `docker/prod.sh rollback` restores the previous release. Because migrations are forward-only and older builds refuse a newer schema, rollback also restores the pre-deploy SQLite snapshot (preserving the newer database under `backups/failed-*`) and rebuilds the search index.
+- **Single-writer guard**: Two stacks must never share a data directory. Both `prod.sh` and `docker/compose.sh` refuse to start if another Compose project already mounts the same directory.
+- **Compose passthrough**: Any unrecognized arguments pass straight to `docker compose` (for example, `docker/prod.sh logs -f server`).
+
+### Tailscale Networking
+
+lofu joins your tailnet as its own node through a Tailscale sidecar ([`docker/compose.tailscale.yaml`](docker/compose.tailscale.yaml), inspired by [ScaleTail](https://github.com/tailscale-dev/ScaleTail)):
+
+- Serves `https://<TS_HOSTNAME>.<tailnet>.ts.net` with a valid TLS certificate (required by iOS App Transport Security).
+- Tailscale Funnel is disabled so the server is never exposed to the public internet.
+- The server shares the sidecar's network namespace and listens on its loopback — Tailscale HTTPS is the only ingress, and nothing is published on the host except Meilisearch on `127.0.0.1:7701` for debugging.
+- `TS_AUTHKEY` is used only once; node identity persists in `<LOFU_DATA>/tailscale`.
+
+To serve from the host's own Tailscale daemon instead, leave `TS_HOSTNAME` empty in `.env` and run:
+
+```sh
+tailscale serve --bg --https=443 http://127.0.0.1:8788
+```
 
 ### Backups
 
-Back up `<LOFU_DATA>/server/lofu.db`, and take the copy with `docker/prod.sh backup`, not `cp`: copying the files of a live SQLite database can produce a torn copy. The command writes a checked snapshot (`VACUUM INTO`) to `<LOFU_DATA>/server/backups/` and keeps the newest 14 there. It also copies each one to `LOFU_BACKUP_COPY_TO` (a directory, or an rsync target) if you set it in `.env`. To run it nightly:
+Back up `<LOFU_DATA>/server/lofu.db` using `docker/prod.sh backup` rather than `cp` — copying a live SQLite database can produce a torn file. The command writes an integrity-checked snapshot (`VACUUM INTO`) to `<LOFU_DATA>/server/backups/`, retains the newest 14 snapshots, and optionally mirrors each snapshot to `LOFU_BACKUP_COPY_TO` (a local/mounted directory or an `rsync` target) when configured in `.env`.
+
+To schedule nightly backups with a systemd user timer:
 
 ```sh
 mkdir -p ~/.config/systemd/user
 cp docker/systemd/lofu-backup.* ~/.config/systemd/user/   # edit the path in the .service if your checkout isn't ~/Code/lofu
 systemctl --user enable --now lofu-backup.timer
-loginctl enable-linger "$USER"                            # run it while you're logged out
+loginctl enable-linger "$USER"                            # keep running while logged out
 ```
 
-`<LOFU_DATA>/meili/` is derived: delete it and run `admin.ts reindex` to rebuild it.
+`<LOFU_DATA>/meili/` is derived data: delete it and run `admin.ts reindex` to rebuild the search index at any time.
 
 ### Updates
 
-The Bun base image, Meilisearch and the headless browser are pinned by digest. Dependabot (`.github/dependabot.yml`) opens a PR when one has an update. Take the browser's promptly, because it runs the scripts of pages you save. Merging a PR builds a new image, which you deploy as usual. Meilisearch only gets patch updates. A minor release can't open the previous index, so upgrade it by hand: bump the tag, delete `<LOFU_DATA>/meili`, deploy, and run `admin.ts reindex`.
+The Bun base image, Meilisearch, and headless Chromium are pinned by digest. Dependabot ([`.github/dependabot.yml`](.github/dependabot.yml)) opens PRs when updates land — merge headless browser updates promptly since it executes scripts on saved pages. Merging a PR triggers CI to publish a new server image, which you roll out with `docker/prod.sh deploy`.
 
-### Development stack
+Dependabot tracks Meilisearch patch updates only. Because minor Meilisearch releases cannot open an index from an earlier minor version, upgrade manually: bump the tag, delete `<LOFU_DATA>/meili`, deploy, and run `admin.ts reindex`.
 
-`bun run stack:up` builds the image from your checkout and runs it as compose project `lofu` on `127.0.0.1:8787`, with data in `data/` (`docker/.env`, from `docker/.env.example`). It goes through `docker/compose.sh`, which adds an untracked `docker/compose.override.yaml` when there is one. Use the override to publish the API on your LAN or to allow extra CORS origins on one machine, and keep `compose.yaml` loopback-only.
+### Security Model
 
-### What a saved page can't do
+Saving a web page means fetching untrusted URLs and, for JS-only sites, executing untrusted scripts. lofu enforces the following boundaries:
 
-Saving a page means fetching what it points to and, for JavaScript-only pages, running its scripts. So:
+- **SSRF protection (no private network requests)**: Page fetches, every redirect hop, image probes, the image proxy, short-link expansion, and browser requests must resolve to public IP addresses ([`apps/server/src/extract/netguard.ts`](apps/server/src/extract/netguard.ts)). Loopback, private, link-local, CGNAT/Tailscale, and IPv6 equivalents are blocked so a saved page cannot reach your router, tailnet, or sibling containers. Set `LOFU_FETCH_PRIVATE=1` only if you intentionally bookmark internal LAN pages. *(Known residual gaps: a DNS server returning a different IP on a second lookup could send one blind request, and browser WebSockets are not filtered.)*
+- **Isolated headless browser**: In Docker, Chromium (`chromedp/headless-shell`) runs in its own container as `nobody`, read-only filesystem, all capabilities dropped, no volumes, on a private network shared only with the server — a browser exploit cannot reach the database or API keys. Outside Docker, the server spawns local Chromium on demand.
+- **Sandboxed stored content**: `/content?format=html` and `/img` are served with sandbox CSP headers so stored HTML cannot execute on the API's origin.
+- **Loopback-only auth bypass**: `LOFU_AUTH_DISABLED=1` is refused unless the server binds to loopback.
 
-- **No requests to your network.** Page fetches, redirects (each hop), image probes, the image proxy, short-link hops and every request the browser makes must go to public addresses (`apps/server/src/extract/netguard.ts`). Loopback, private, link-local, CGNAT/Tailscale and their IPv6 forms are refused, so a bookmark can't reach your router, the tailnet or the other containers. `LOFU_FETCH_PRIVATE=1` lifts this for bookmarking pages on your LAN. What's left: a DNS server that answers differently on the second lookup can get one blind request through, and the browser's WebSockets aren't checked.
-- **Chromium runs in its own container** (`chromedp/headless-shell`, as `nobody`, read-only, no capabilities, no volumes, on a network shared only with the server), so a browser exploit finds no database or keys. Without Docker, the server launches a local Chromium on demand.
-- **Stored HTML doesn't run on the API's origin**: `/content?format=html` is served with a sandbox CSP, and `/img` with one too.
-- `LOFU_AUTH_DISABLED=1` is refused unless the server listens on loopback.
+## Clients
 
-## Architecture and performance decisions
+### Reader App (macOS, iOS, Android, Web)
 
-Numbers below were measured on the dev box (32 cores, loopback) with the real stack.
-
-| Area | Decision | Why |
-|---|---|---|
-| Runtime | Bun, using built-ins where they exist (`bun:sqlite`, zstd, workers, fetch) | Fewer dependencies and native-speed primitives. |
-| Storage | SQLite in WAL mode, a 64 MiB page cache, 256 MiB mmap, prepared statements only | API list/sync: **~15–18k req/s, p50 ≈ 2 ms** at 32 concurrent requests. |
-| Change feed | One global `seq` number, allocated in memory and assigned on every write | One change number feeds both client delta sync (`/v1/sync`) and the search indexer. It's gap-free because the main thread is the only writer, and there's no counter row to contend on. |
-| Extraction | Defuddle + linkedom on a **worker-thread pool** that replaces timed-out workers | Defuddle costs ~450 ms CPU per large page. Pre-stripping scripts and styles (a candidate for a Rust pre-pass) saved almost nothing, so parallelism is the fix. The API's event loop never blocks. |
-| Fetching | HTTP/2 first for https with fallback to HTTP/1.1 (remembered per host); global + per-host concurrency caps; charset detection | Some sites reject HTTP/1.1 clients (paulgraham.com returns 500). GBK, Big5 and Shift_JIS pages decode correctly. |
-| Hard pages | Unreadable pages are recognized and handled instead of being saved as junk. **401/403 bot walls** and **JavaScript-only pages** fall back to headless Chromium, driven over raw CDP: launched on demand and closed when idle, or in the Docker stack a container of its own. It blocks images, fonts and media, and polls until the page stops looking like a challenge. **Captcha/challenge pages** served with a 200 are detected. Rate-limit captchas (WeChat) slow down that host instead. **PDFs** get full text via poppler, and arXiv titles and abstracts come from the abstract page. | On a real 897-link Raindrop library, honest failures fell from 195 to 126 while extracted pages rose to 736. Weibo, Notion, Feishu and Google Docs now work. The ones that still fail: Cloudflare Turnstile (Medium, linux.do) and the login walls of Zhihu and Xiaohongshu. Those need HTML from your own browser (the `html` field, or the extension). |
-| Site adapters | Per-site steps around the generic pipeline, in `apps/server/src/extract/sites/`. An adapter can set fetch options, replace the fetch (an API), skip a browser fallback that never works, and edit the parsed page in the worker before Defuddle runs (for every HTML source, the extension included). GitHub repos get their README from the API (set `LOFU_GITHUB_TOKEN` to lift the 60-an-hour limit) and files are fetched raw. WeChat keeps only the article and reads its author and date. V2EX is fetched with an honest user agent and keeps replies. Xiaohongshu notes are built from the page state, and its login-wall page fails instead of being stored. Zhihu fails at once with advice instead of a futile browser render. A 403 for our Chrome user agent is retried once with an honest one before the browser. | Re-fetching a sample of 15 real bookmarks: the README of a large GitHub repo went from 104 to 19,870 words. V2EX and two Cloudflare-fronted blogs went from failed to extracted. WeChat articles gained publish dates (missing on all 203 before). 46 of 47 Xiaohongshu bookmarks held the same 97-word error page as `ok`; re-fetched, they fail with advice instead. |
-| Markdown | Defuddle's cleaned HTML, converted by its own converter after rewriting what Markdown can't express (`apps/server/src/extract/markdown.ts`): inline SVG figures (charts, diagrams) become pictures of their own, cleaned of anything that runs or fetches and given a background for the colors they were drawn in, kept with the article and served from `/figures/<hash>` (`extract/figures.ts`), and smaller drawings their accessible name, MathJax formulas their text (xₘₐₓ = (a − b)/σ) while KaTeX and MathML stay TeX (`$…$`, `$$…$$`) for the reader to set (as SVG drawn by MathJax in the extraction workers, served signed from `/math/`), a caption Defuddle took for a formula its text, `sup`/`sub` raised characters, players a link, tables with merged cells a Markdown table (or, for forum layouts, their content). Text that only looks like a tag stays text. Saved articles are converted again from their stored HTML, off-thread, when `MARKDOWN_VERSION` goes up. | Defuddle keeps those as raw HTML, which the app's editor shows as literal tags: 131 of 731 saved articles had some. After the backfill none do, and the other 600 are byte-for-byte unchanged. The backfill took ~1.7 s of worker CPU. |
-| Content storage | Article HTML, markdown and text stored zstd-compressed, in a separate table | 866 MB of fetched HTML for 897 bookmarks became **16 MB** stored. Lists never page in large blobs. `/content` sends the stored zstd bytes unchanged to clients that accept zstd, at zero CPU cost. |
-| Article images | Images stay at their original URLs. After extraction a job reads the first bytes of each one for its size (PNG, GIF, JPEG with EXIF rotation, WebP, AVIF, SVG), and readers load them through `/img/<signature>?u=`, a signed proxy that fetches without a Referer. Article images come with `&w=1360` (twice the reader's measure): JPEG, PNG and WebP wider than that are resized to WebP with `Bun.Image`, off the main thread. What the proxy fetched is kept on disk (`data/server/images/`, derived, least recently used out past `LOFU_IMAGE_CACHE_MB`, 2048 by default), and a picture asked for twice at once is fetched once | nsh's `RichEditor` lays out an image only at an explicit size, so unmeasured images showed at 0×0. WeChat and CSDN answer another site's Referer with a placeholder or a 403. On a real library, 94% of 1,305 images were measured; most of the rest are gone (404) or behind Cloudflare. Bookmarks saved before this are measured by a background backfill at startup. A GitHub README with 471 screenshots went from **122 MB to 35 MB**; a picture the proxy has kept takes **~20 ms** instead of 0.4–2.7 s (the site, every time), and all 471 come in 3.3 s instead of 55 s. |
-| Search | Meilisearch returns **ids only**; bookmarks are hydrated from SQLite, and snippets are cut locally | Letting Meilisearch crop/highlight article bodies cut throughput from **~35k to ~620 req/s**. With local snippets: **~4k req/s** (p50 7.7 ms), or **~13k req/s** with `snippets=false`. |
-| Jobs | Durable SQLite queue; up to 64 jobs in flight (waiting ones are just parked promises); interactive work before bulk; random order within bulk | Importing 1,161 Raindrop rows takes **31 ms**, and the import never starves interactive saves or the other hosts. |
-| Indexing | Incremental and batched, driven by `seq`. The cursor only advances after Meilisearch confirms the write. | Bursts (imports) collapse into a few batches. A Meilisearch outage just means indexing catches up later. |
-| CLI | Rust (clap + ureq), 2.6 MB static binary | `lofu ls`: **0.7 ms** round trip; `--help`: 0.3 ms. A compiled Bun binary would start in ~2 ms and weigh ~86 MB. |
-| Auth | 256-bit bearer tokens, SHA-256 hashed, verified once and cached in memory | No KDF on every request. Revocation takes effect within 60 s. |
-
-## Browser extension
+The reader app in [`apps/reader`](apps/reader/README.md) is a single TSX + Rust codebase built on [Native Shell](https://nsh.dev), running natively on macOS (AppKit), iOS (UIKit), Android, and the web. It maintains an offline local mirror via `/v1/sync`, caches articles for offline reading, tracks reading progress, and supports collections, tags, search, and W3C-anchored highlights.
 
 ```sh
-bun run ext:build      # → apps/extension/.output/chrome-mv3 and firefox-mv3
+nsh run apps/reader                      # native desktop window (macOS)
+bun run reader:web                       # web target on http://127.0.0.1:8790
+nsh run apps/reader --target ios         # iOS Simulator (requires Xcode)
 ```
 
-Chrome/Edge/Brave: open `chrome://extensions`, turn on developer mode, and use *Load unpacked* on `apps/extension/.output/chrome-mv3`. Firefox: `about:debugging` → *Load Temporary Add-on* (or `bun run --cwd apps/extension zip` to produce a zip you can sign). Then enter the server address and a token in the options page.
+See [`apps/reader/README.md`](apps/reader/README.md) for packaging, iOS share extension builds, and platform notes, and [`apps/reader/android/README.md`](apps/reader/android/README.md) for Android APK builds and physical-device testing.
 
-- **Saved-page indicator:** a persistent blue ✓ on the toolbar icon marks pages already in your library (not in Trash). Status is checked on navigation/tab activation and after extension edits; changes from other clients appear on the next activation or periodic refresh. URLs are looked up on your configured server; page contents are not sent for these checks.
-- **Saving:** the toolbar button or <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> saves the page the moment the popup opens. Tags, collection, note and favorite autosave. Right-click menus save a page or a link.
-- **Pages are sent as your browser rendered them**, so pages behind your logins and bot checks (Zhihu, Medium, V2EX) save in full. Bodies over 32 KB are gzipped.
-- **Auto-repair (opt-in):** when you revisit a saved page the server couldn't read, the extension sends it. Repair checks use a local list of those URLs, with no extra URL lookups beyond the saved-page indicator. The options page lists the pages that need a visit.
-- **Permissions:** `tabs` reads page URLs for the saved-page indicator. Saving uses `activeTab`, the access a browser grants when you click the button, use the shortcut or right-click. All-sites access is requested only when you turn on auto-repair. The server allows extension origins through CORS, and every request still needs your token.
+### Browser Extension (Chromium & Firefox)
 
-`bun run ext:e2e` builds the extension and drives it in Chrome for Testing against a real server: popup save of a 403 bot wall, autosave, the "on shelf" state, auto-repair. Screenshots go to `apps/extension/e2e/screens/`.
+```sh
+bun run ext:build                        # → apps/extension/.output/chrome-mv3 and firefox-mv3
+```
 
-## Saving from the iOS share sheet
+- **Chrome / Edge / Brave**: Open `chrome://extensions`, enable *Developer mode*, and click *Load unpacked* pointing to `apps/extension/.output/chrome-mv3`.
+- **Firefox**: Open `about:debugging` &rarr; *Load Temporary Add-on* (or run `bun run --cwd apps/extension zip` to package a signed-ready zip).
+- Open the extension's options page to configure your server URL and API token.
 
-The app's share extension puts *lofu* in every app's share sheet (`apps/reader/share`, see `apps/reader/README.md`). Without it (a build made by `nsh package` alone), a Shortcut does the same, and it saves without opening the app. In the Shortcuts app, make a shortcut and, under its ⓘ, turn on *Show in Share Sheet* and let it receive URLs, Safari web pages and Text. Then add these actions:
+Key capabilities:
 
-1. **Get URLs from Input** (Shortcut Input). Share text from apps like Xiaohongshu or Douyin ("【Title】 http://xhslink.com/a/… 复制本条信息…") gives its link.
-2. **Get Item from List**: First Item.
-3. **Get Contents of URL**: `https://<your server>/v1/bookmarks`. Set Method to POST, add the header `Authorization` = `Bearer lofu_…`, and set Request Body to JSON with one field, `url` = *Item from List*.
-4. **Show Notification**: "Saved to lofu".
+- **Saved-page indicator**: Displays a persistent blue `✓` badge on the toolbar icon for pages already in your library (excluding Trash). Status checks query URLs only; page contents are never sent during checks.
+- **One-action saving**: Clicking the toolbar button or pressing <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> saves immediately; tags, collection, note, and favorite autosave. Context menus save the current page or any link.
+- **Browser-rendered capture**: Sends the DOM as rendered in your browser (gzip-compressed over 32 KB), letting pages behind logins and bot checks (Zhihu, Medium, V2EX) save in full.
+- **Opt-in auto-repair**: Revisiting a bookmark that the server previously failed to extract automatically submits the rendered page from a local repair list. The options page lists pages waiting for a visit.
+- **Minimal permissions**: `tabs` reads URLs for the saved-page badge; saving relies on `activeTab`. All-sites access is requested only if you enable auto-repair.
 
-For a share sheet that hands over nothing, or for Back Tap or the Action button, put **Get Clipboard** in front of step 1 when Shortcut Input has no value. Short links are followed by the server, so a t.co or t.cn link saves the article it points to.
+Run end-to-end extension tests against a real server in Chrome for Testing with `bun run ext:e2e` (screenshots are written to `apps/extension/e2e/screens/`).
+
+### CLI & AI Agent Skill
+
+[`crates/lofu-cli`](crates/lofu-cli) builds a 2.6 MB static Rust binary (`bun run cli:build`). When stdout is not a TTY, it outputs compact JSON directly from the API — making it straightforward to script or pair with coding agents via [`skills/lofu/SKILL.md`](skills/lofu/SKILL.md).
+
+```sh
+lofu add https://example.com/article -t reading,systems --note "Great overview"
+lofu search "consensus algorithms" -t systems -n 5
+lofu content <id> --format text          # clean extracted text for LLM context
+lofu ls -c unsorted --trashed false
+```
+
+### Saving from iOS Share Sheet
+
+The iOS app includes a native share extension ([`apps/reader/share`](apps/reader/share); see [`apps/reader/README.md`](apps/reader/README.md)) that adds **lofu** to every app's share sheet.
+
+If you're running a build without the share extension (e.g., plain `nsh package`), you can achieve the same zero-launch save with an Apple Shortcut. Create a shortcut, open **ⓘ**, enable *Show in Share Sheet*, and allow **URLs**, **Safari web pages**, and **Text**, then add:
+
+1. **Get URLs from Input** (*Shortcut Input*) — extracts links even from wrapped share text (e.g., Xiaohongshu or Douyin).
+2. **Get Item from List**: *First Item*.
+3. **Get Contents of URL**: `https://<your-server>/v1/bookmarks` — Method `POST`, header `Authorization: Bearer lofu_…`, JSON body with `url` set to *Item from List*.
+4. **Show Notification**: `"Saved to lofu"`.
+
+> **Tip:** For apps that share nothing, or for Back Tap / Action button triggers, insert **Get Clipboard** before step 1 when *Shortcut Input* is empty. Short links (`t.co`, `t.cn`, etc.) are expanded server-side automatically.
 
 ## Importing from Raindrop.io
 
+Export your library from Raindrop.io (*Settings &rarr; Export* or the `raindrop` CLI) and pipe or pass the CSV to `lofu`:
+
 ```sh
-raindrop bookmark export --format csv | lofu import raindrop -   # or: lofu import raindrop export.csv
+raindrop bookmark export --format csv | lofu import raindrop -
+# or from a file:
+lofu import raindrop export.csv
 ```
 
-The import takes the CSV export from Raindrop (Settings → Export, or the `raindrop` CLI) and is safe to re-run. Folders become collections. Tags, notes, excerpts, highlights, favorites and the original save dates are carried over. Duplicates within the export are merged, since URLs are compared after normalization. Raindrop's `rdl.ink` screenshot covers are dropped in favor of the page's own image. Unfetchable URLs such as `chrome-extension://` are skipped and listed in the report. Placeholder titles (the URL, a file name, "Webpage: x") aren't kept, so the real title wins. Pages are then fetched in the background at **bulk priority**, so anything you save meanwhile is fetched first. Bulk jobs run in random order and each host is limited to one request per `LOFU_FETCH_HOST_INTERVAL_MS` (default 1 s), so a backlog of WeChat links doesn't block other sites or trip rate limits.
+The import is idempotent and safe to re-run:
+
+- Folders map to collections; tags, notes, excerpts, highlights, favorites, and original save timestamps are preserved.
+- Duplicates within the export are merged via normalized URL comparison.
+- Raindrop's `rdl.ink` screenshot covers are dropped in favor of each page's own image; placeholder titles (raw URLs, filenames, `"Webpage: …"`) are discarded so extracted titles win; unfetchable schemes (e.g., `chrome-extension://`) are skipped and reported.
+- Background fetching runs at **bulk priority** in randomized order, throttled per host by `LOFU_FETCH_HOST_INTERVAL_MS` (default `1000` ms), so newly saved bookmarks stay responsive and bulk imports don't trip host rate limits.
 
 ## API
 
-The OpenAPI 3.1 document is served at `/openapi.json`, generated from the zod schemas in `packages/shared`. Main endpoints:
+The full OpenAPI 3.1 specification is served live at `/openapi.json`, generated directly from the Zod schemas in [`packages/shared`](packages/shared). Request bodies support `Content-Encoding: gzip`.
 
-- `POST /v1/bookmarks`: idempotent on the normalized URL (tracking params, `www.`, fragments and scheme are ignored). Pass `html` to skip fetching (for pages behind a login). Without `html`, short links (t.co, t.cn, xhslink.com, b23.tv, bit.ly…) are followed and wrapper pages (`weibo.cn/sinaurl?u=`, `link.zhihu.com/?target=`) unwrapped first, so the bookmark is the page they lead to. A short link that dies or ends on a login wall or its site's home page is saved as given.
-- Bookmarks: `archived` means **in the Trash** (the field kept its old name). Clients show it as the Trash, and deleting from there deletes for good. `coverProxy` is the cover through the image proxy below (computed, a path relative to the server; null without an http(s) cover), for covers whose hosts refuse hotlinks (WeChat, CSDN).
-- `GET /v1/bookmarks` (keyset pagination; filters `collectionId`, `tags`, `archived`, `favorite`, `type`), `GET|PATCH|DELETE /v1/bookmarks/{id}`, `POST /v1/bookmarks/{id}/refetch`, `GET /v1/bookmarks/{id}/content?format=markdown|html|text`. With `?content=markdown`, `GET /v1/bookmarks/{id}` also lists the article's `images`: each one's `src`, measured `width`/`height`, and `proxy` path.
-- `GET /img/<signature>?u=<url>`: an article image or cover through the server (no token: the signature is the authorization, and only URLs the API handed out are signed)
-- `POST /v1/tags/rename` (`{from, to}`; merges into `to` where a bookmark already has it) and `DELETE /v1/tags/{name}`: change every bookmark with the tag and return `{updated}`
-- `GET /v1/search`, `GET /v1/tags`, `/v1/collections` (deleting one moves its bookmarks to Unsorted), `/v1/bookmarks/{id}/highlights`, `/v1/highlights/{id}`
-- `GET /v1/sync?since=<cursor>`: everything changed since the cursor, deletions included
-- `POST /v1/import/raindrop` (body: the CSV file): returns an import report
-- `GET /v1/bookmarks/lookup?url=`: the bookmark for any variant of a URL. Request bodies may be `Content-Encoding: gzip`.
+| Method & Path | Description |
+| --- | --- |
+| `POST /v1/bookmarks` | Save a bookmark (idempotent on normalized URL). Pass `html` to skip server fetching; otherwise short links (`t.co`, `t.cn`, `xhslink.com`, `b23.tv`, `bit.ly`, …) and wrappers (`weibo.cn/sinaurl?u=`, `link.zhihu.com/?target=`) are unwrapped automatically. |
+| `GET /v1/bookmarks` | List bookmarks with keyset pagination (`collectionId`, `tags`, `archived`, `favorite`, `type`). |
+| `GET /v1/bookmarks/lookup?url=` | Look up a bookmark by any normalized variant of a URL. |
+| `GET \| PATCH \| DELETE /v1/bookmarks/{id}` | Read, update, or permanently delete a bookmark. With `?content=markdown`, also returns measured article `images` (`src`, `width`, `height`, `proxy`). |
+| `POST /v1/bookmarks/{id}/refetch` | Re-queue page extraction. |
+| `GET /v1/bookmarks/{id}/content` | Fetch extracted content (`?format=markdown\|html\|text`), serving stored zstd bytes directly when accepted. |
+| `GET /v1/search` | Full-text search via Meilisearch hydrated from SQLite. |
+| `GET /v1/sync?since=<cursor>` | Incremental delta sync of all changes and deletion tombstones since `<cursor>`. |
+| `GET /v1/tags`, `POST /v1/tags/rename`, `DELETE /v1/tags/{name}` | List tags, rename/merge tags (`{from, to}`), or remove a tag across all bookmarks. |
+| `/v1/collections` | Manage collections (deleting a collection moves its bookmarks to Unsorted). |
+| `/v1/bookmarks/{id}/highlights`, `/v1/highlights/{id}` | Create, list, update, and delete highlights. |
+| `POST /v1/import/raindrop` | Import a Raindrop.io CSV body and return an import report. |
+| `GET /img/<signature>?u=<url>` | Signed image proxy for covers and article images (no bearer token required; only server-issued URLs are signed). |
 
-## Roadmap
+> **Notes on API fields:**
+> - `archived` represents **Trash** (the field keeps its original name). Deleting a bookmark already in the Trash removes it permanently.
+> - `coverProxy` is a computed server-relative proxy path (or `null` without an HTTP(S) cover) for cover images hosted on domains that reject hotlinks (such as WeChat and CSDN).
+> - If a short link is dead or lands on a login wall or site homepage, lofu saves the original URL rather than overwriting it with the dead target.
 
-1. More importers as needed: Netscape bookmark HTML (browsers), Pocket export.
-2. Per-site cookies for the browser fallback (Zhihu and other login walls); screenshot thumbnails.
-3. **Permanent copies**: single-file archives via `monolith`; periodic broken-link checks.
-4. **Clients**: the nsh app (`apps/reader`) runs on macOS, iOS and the web: a sidebar and card grid on the Mac, a native navigation stack on the phone, both over a `/v1/sync` mirror (findings in `apps/reader/README.md`; a Linux desktop app is deferred). The apps keep the reading list and changes on the device for offline use, track reading progress, and edit titles, tags, notes, collections and tags. Next: verify long-press selection, highlighting and reading progress on an iPhone by hand. The extension's Safari build comes along with the Apple apps.
-5. Semantic search (a Meilisearch embedder, e.g. Ollama → `MEILI_EMBEDDER`), suggested tags, text-to-speech.
+## Architecture and Benchmarks
+
+All performance numbers below were measured on the dev box (32 cores, loopback) running the real stack.
+
+### Core Design Decisions
+
+| Area | Decision | Measured Impact & Rationale |
+| --- | --- | --- |
+| **Runtime** | Bun, preferring built-ins (`bun:sqlite`, zstd, workers, `fetch`) | Fewer dependencies and native-speed primitives. |
+| **Storage** | SQLite in WAL mode, 64 MiB page cache, 256 MiB mmap, prepared statements only | API list/sync: **~15–18k req/s, p50 ≈ 2 ms** at 32 concurrent requests. |
+| **Change feed** | Single global `seq` counter allocated in memory on every write | Feeds both client delta sync (`/v1/sync`) and the search indexer; gap-free with a single main-thread writer and zero counter-row contention. |
+| **Search** | Meilisearch returns **IDs only**; SQLite hydrates records and snippets are cut locally | Letting Meilisearch crop/highlight bodies cut throughput from **~35k to ~620 req/s**. Local snippets deliver **~4k req/s** (p50 7.7 ms), or **~13k req/s** with `snippets=false`. |
+| **Content storage** | Article HTML, Markdown, and text stored zstd-compressed in a separate table | 866 MB of fetched HTML across 897 bookmarks compressed to **16 MB**. Lists never page in large blobs, and `/content` streams stored zstd bytes at zero CPU cost. |
+| **Job queue** | Durable SQLite queue, up to 64 jobs in flight; interactive saves preempt randomized bulk jobs | Importing 1,161 Raindrop rows takes **31 ms** without starving interactive saves or other hosts. |
+| **Indexing** | Incremental, batched, driven by `seq`; cursor advances only after Meilisearch confirms | Bursts collapse into a few batches; a Meilisearch outage simply catches up upon recovery. |
+| **CLI** | Rust (`clap` + `ureq`), 2.6 MB static binary | `lofu ls`: **0.7 ms** round trip; `--help`: **0.3 ms** (vs. ~2 ms startup and ~86 MB for a compiled Bun binary). |
+| **Auth** | 256-bit bearer tokens, SHA-256 hashed, verified once and cached in memory | Avoids per-request KDF overhead; revocation takes effect within 60 s. |
+
+### Content Extraction & Media Pipeline
+
+- **Worker-thread extraction**: Defuddle + linkedom run on a worker-thread pool that replaces timed-out workers. Defuddle costs ~450 ms CPU per large page (pre-stripping scripts/styles saved almost nothing), so worker parallelism keeps the API event loop responsive.
+- **Fetching**: Attempts HTTP/2 first for HTTPS with remembered per-host HTTP/1.1 fallback (some hosts such as `paulgraham.com` return 500 on HTTP/1.1), global + per-host concurrency limits, and CJK charset detection (GBK, Big5, Shift_JIS).
+- **Hard pages & bot walls**: Unreadable responses are detected rather than stored as junk. 401/403 bot walls and JS-only shells fall back to headless Chromium over raw CDP (blocking images, fonts, and media and polling until challenges clear). HTTP 200 captcha/challenge pages are detected, WeChat rate-limit captchas back off that host, PDFs are extracted via Poppler, and arXiv papers pull titles/abstracts from their abstract pages. On a real 897-link Raindrop library, honest failures dropped from **195 to 126** while extracted pages rose to **736** (Weibo, Notion, Feishu, and Google Docs now extract cleanly; Cloudflare Turnstile and Zhihu/Xiaohongshu login walls remain best saved via the browser extension).
+- **Site adapters** ([`apps/server/src/extract/sites/`](apps/server/src/extract/sites)): Per-site hooks can customize fetch behavior, call APIs directly, skip futile browser fallbacks, or rewrite parsed DOM before Defuddle runs (for both server fetches and extension captures). Includes adapters for GitHub (API READMEs with optional `LOFU_GITHUB_TOKEN`, raw files), WeChat (article body, author, publish date), V2EX (honest UA + replies), Xiaohongshu (page-state extraction + login-wall detection), and Zhihu (fast fail with actionable advice). On a 15-bookmark sample, a large GitHub README grew from **104 to 19,870 words**, all 203 WeChat articles gained missing publish dates, and 46 of 47 Xiaohongshu error pages stopped being stored as `ok`.
+- **Clean Markdown, SVG figures & Math** ([`apps/server/src/extract/markdown.ts`](apps/server/src/extract/markdown.ts)): Rewrites HTML constructs that raw Markdown drops before conversion — inline SVG diagrams are sanitized and stored as images under `/figures/<hash>` ([`extract/figures.ts`](apps/server/src/extract/figures.ts)), KaTeX/MathML stay TeX (`$…$`, `$$…$$`) and are rendered as signed SVGs via MathJax (`/math/`), merged-cell tables are flattened cleanly, and tag-like prose stays text. Bumping `MARKDOWN_VERSION` re-converts stored HTML off-thread. Across 731 saved articles, 131 with raw HTML were cleaned with zero changes to the other 600 in **~1.7 s** of worker CPU.
+- **Article images & proxy cache**: Images stay at their original URLs, are probed for dimensions (PNG, GIF, JPEG with EXIF rotation, WebP, AVIF, SVG) so native readers lay them out without 0&times;0 jumps, and load through `/img/<signature>?u=` without a `Referer` (avoiding WeChat/CSDN hotlink blocks). With `&w=1360`, wide JPEG/PNG/WebP assets are resized to WebP off the main thread via `Bun.Image`, deduplicated in-flight, and LRU-cached on disk (`data/server/images/`, bounded by `LOFU_IMAGE_CACHE_MB`, default `2048`). On a real library, **94% of 1,305 images** were measured; a GitHub README with 471 screenshots shrank from **122 MB to 35 MB**, with cached images serving in **~20 ms** (vs. 0.4–2.7 s origin fetches) and all 471 loading in **3.3 s** instead of **55 s**.
+
+## Development
+
+Run the full verification suite before opening a PR:
+
+```sh
+bun test                         # server & shared tests (Meilisearch tests skip if MEILI_URL is unset)
+bun run typecheck                # TypeScript 7 (server, shared, extension)
+bun run lint                     # Biome check
+cargo clippy -p lofu-cli         # Rust CLI lints
+bun run ext:e2e                  # browser extension end-to-end tests in Chrome for Testing
+bun run reader:test              # Native Shell reader headless checks
+```
+
+See [`CLAUDE.md`](CLAUDE.md) for core architectural invariants (single-writer `seq` ordering, append-only SQLite migrations, bounded prepared SQL shapes, and extraction quality guards).
 
 ## License
 
-MIT, see [LICENSE](LICENSE). The reader's icons come from Lucide (ISC) and the agent skills under `.claude/`, `.agents/` and `.hermes/` from emilkowalski/skills (MIT); [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) has their licenses and those of what lofu ships or runs.
+Licensed under the [MIT License](LICENSE).
+
+Reader icons are from [Lucide](https://lucide.dev) (ISC). See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for full third-party license notices.
