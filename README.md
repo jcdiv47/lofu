@@ -17,8 +17,7 @@
     <a href="#importing-from-raindropio">Migration</a> &middot;
     <a href="#api">API</a> &middot;
     <a href="#architecture-and-benchmarks">Architecture</a> &middot;
-    <a href="#development">Development</a> &middot;
-    <a href="#roadmap">Roadmap</a>
+    <a href="#development">Development</a>
   </p>
 </div>
 
@@ -45,8 +44,6 @@
 | [`packages/shared`](packages/shared) | Zod schemas (API contract &rarr; OpenAPI 3.1), URL normalization, and highlight anchoring |
 | [`skills/lofu`](skills/lofu/SKILL.md) | Agent skill documenting the `lofu` CLI |
 | [`docker/`](docker) | Production and development Compose stacks, Tailscale sidecar, Dockerfile, and backup units |
-
-> Still to come: the Safari extension. See the [Roadmap](#roadmap).
 
 ## Quick Start
 
@@ -284,14 +281,6 @@ bun run reader:test              # Native Shell reader headless checks
 ```
 
 See [`CLAUDE.md`](CLAUDE.md) for core architectural invariants (single-writer `seq` ordering, append-only SQLite migrations, bounded prepared SQL shapes, and extraction quality guards).
-
-## Roadmap
-
-- [ ] **More importers**: Netscape bookmark HTML (browsers) and Pocket exports.
-- [ ] **Authenticated extraction & previews**: Per-site cookies for the headless browser fallback (Zhihu and other login walls) and screenshot thumbnails.
-- [ ] **Permanent archives**: Single-file archiving via `monolith` and periodic broken-link checks.
-- [ ] **Clients & Safari**: Continue polishing the Native Shell app (`apps/reader`, running on macOS, iOS, Android, and web — manual verification of iOS long-press selection, highlighting, and reading progress; Linux desktop deferred) and ship the Safari extension alongside the Apple apps.
-- [ ] **AI & discovery**: Semantic search via a Meilisearch embedder (e.g., Ollama &rarr; `MEILI_EMBEDDER`), suggested tags, and text-to-speech.
 
 ## License
 
