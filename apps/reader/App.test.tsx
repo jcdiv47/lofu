@@ -1254,14 +1254,33 @@ test("desktop: the search box suggests conditions, their values, and recent sear
   expect(app.shows("id:search-suggestions")).toBe(false);
   expect(app.storage()["search.recent.v1"]).toContain('"query":"#rust"');
 
-  // Typing doesn't search; Return does. A word names collections and tags.
+  // A word searches as it's typed, and names collections and tags.
   await app.clear("id:search");
   await app.waitFor("text:All bookmarks");
   await app.type("id:search", "home");
   await app.waitFor("id:suggest-submit");
   expect(app.texts()).toContain('Search "home"');
   expect(app.shows("id:suggest-collection:c1")).toBe(true);
-  expect(searches).toEqual(["#rust"]);
+  await app.waitUntil(() => searches.includes("home"));
+  expect(app.shows("id:search-suggestions")).toBe(true);
+  // Return searches for it once more only if it changed, and remembers it.
+  await app.press("id:suggest-submit");
+  expect(app.storage()["search.recent.v1"]).toContain('"query":"home"');
+  expect(searches.filter((q) => q === "home")).toEqual(["home"]);
+  // A condition being typed waits for its value; a space applies it.
+  await app.clear("id:search");
+  await app.waitFor("text:All bookmarks");
+  const before = searches.length;
+  await app.type("id:search", "#ru");
+  await app.waitFor("id:suggest-tag:rust");
+  expect(searches.length).toBe(before);
+  await app.type("id:search", "st ");
+  await app.waitFor("text:1 bookmark found");
+  expect(searches.at(-1)).toBe("#rust");
+  await app.clear("id:search");
+  await app.waitFor("text:All bookmarks");
+  await app.type("id:search", "home");
+  await app.waitFor("id:suggest-collection:c1");
   await app.press("id:suggest-collection:c1");
   await app.waitFor("text:Homelab");
   expect(app.value("id:search")).toBe("");
@@ -1271,7 +1290,7 @@ test("desktop: the search box suggests conditions, their values, and recent sear
   await app.waitFor("id:suggest-recent:#rust");
   await app.press("id:suggest-recent:#rust");
   await app.waitFor("text:1 bookmark found");
-  expect(searches).toEqual(["#rust", "#rust"]);
+  expect(searches.at(-1)).toBe("#rust");
 });
 
 test("desktop: the filter button narrows what the search found", async () => {
