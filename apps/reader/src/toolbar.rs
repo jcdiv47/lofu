@@ -256,10 +256,23 @@ mod mac {
                 dispatch2::DispatchQueue::main().exec_async(|| unsafe { report_marks() });
             }
 
-            /// The search field's editing ended: it lost the keyboard.
+            /// The search field's editing ended: it lost the keyboard, unless
+            /// it still has it on the next turn. A click into the field ends
+            /// editing during the click itself, right after the field took
+            /// the keyboard, which closed the suggestions it had just opened.
             #[unsafe(method(controlTextDidEndEditing:))]
             fn did_end_editing(&self, _notification: &AnyObject) {
-                emit(serde_json::json!({ "type": "searchBlur", "id": search_id() }));
+                dispatch2::DispatchQueue::main().exec_async(|| {
+                    // SAFETY: an NSSearchToolbarItem's field, on the main thread.
+                    let editing = search_item().is_some_and(|made| unsafe {
+                        let field: Retained<AnyObject> = msg_send![&*made, searchField];
+                        editing(&field)
+                    });
+                    if editing {
+                        return;
+                    }
+                    emit(serde_json::json!({ "type": "searchBlur", "id": search_id() }));
+                });
             }
 
             /// The keys the app's suggestions take: the arrows and Escape
@@ -340,6 +353,20 @@ mod mac {
             }
         }
     );
+
+    /// Whether `field` has the keyboard: its window's first responder is the
+    /// field editor editing it.
+    unsafe fn editing(field: &AnyObject) -> bool {
+        unsafe {
+            let editor: Option<Retained<AnyObject>> = msg_send![field, currentEditor];
+            let window: Option<Retained<AnyObject>> = msg_send![field, window];
+            let (Some(editor), Some(window)) = (editor, window) else {
+                return false;
+            };
+            let first: Option<Retained<AnyObject>> = msg_send![&*window, firstResponder];
+            first.is_some_and(|f| std::ptr::eq(&*f, &*editor))
+        }
+    }
 
     /// Tells the app the search field has the keyboard, and where it is.
     unsafe fn emit_focus(field: &AnyObject) {
