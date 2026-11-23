@@ -49,7 +49,7 @@ import {
   sync,
   updateBookmark,
 } from "./lib/store";
-import { useSwipeBack } from "./lib/swipe";
+import { SWIPE_STACK, useSwipeBack } from "./lib/swipe";
 import { contentLeft, toolbarBlocked } from "./lib/toolbar";
 import { Browser } from "./screens/Browser";
 import { Home } from "./screens/Home";
@@ -243,10 +243,13 @@ function Desktop(props: { onReconnect: () => void }) {
       if (nav.routes().length > 1) nav.pop();
     },
   });
-  // Two fingers right on the trackpad go back, as in Finder, unless a dialog is open.
-  useSwipeBack(() => {
-    if (nav.routes().length > 1 && !toolbarBlocked()) nav.pop();
-  });
+  // Two fingers right on the trackpad slide the page back, as in Safari, unless a dialog is open.
+  useSwipeBack(
+    () => nav.routes().length > 1 && !toolbarBlocked(),
+    () => {
+      if (nav.routes().length > 1) nav.pop();
+    },
+  );
   return (
     <View class="flex-1 flex-row">
       <View
@@ -283,7 +286,7 @@ function Desktop(props: { onReconnect: () => void }) {
         />
       </View>
       <View class="flex-1" style={{ backgroundColor: look().paper }}>
-        <NavStack state={nav} class="flex-1">
+        <NavStack state={nav} testID={SWIPE_STACK} class="flex-1">
           {(route) => {
             if (route.name === "browser") {
               return (

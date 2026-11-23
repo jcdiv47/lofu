@@ -68,8 +68,14 @@ impl Swipe {
         cfg!(target_os = "macos")
     }
 
-    /// Whether a swipe back came: true when it did, false after a second
-    /// without one. The first call starts watching.
+    /// Whether a swipe may go back now: the app has a page to go back to
+    /// and no dialog in the way. The first call starts watching.
+    pub fn enable(on: bool) {
+        swipe::enable(on)
+    }
+
+    /// Whether a swipe went back: true when one did (the page is off to
+    /// the right, for the app to pop), false after a second without one.
     pub async fn next() -> bool {
         swipe::next().await
     }
