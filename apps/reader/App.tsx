@@ -49,6 +49,7 @@ import {
   sync,
   updateBookmark,
 } from "./lib/store";
+import { useSwipeBack } from "./lib/swipe";
 import { contentLeft, toolbarBlocked } from "./lib/toolbar";
 import { Browser } from "./screens/Browser";
 import { Home } from "./screens/Home";
@@ -241,6 +242,10 @@ function Desktop(props: { onReconnect: () => void }) {
     back: () => {
       if (nav.routes().length > 1) nav.pop();
     },
+  });
+  // Two fingers right on the trackpad go back, as in Finder, unless a dialog is open.
+  useSwipeBack(() => {
+    if (nav.routes().length > 1 && !toolbarBlocked()) nav.pop();
   });
   return (
     <View class="flex-1 flex-row">
