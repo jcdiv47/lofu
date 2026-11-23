@@ -8,7 +8,13 @@ import {
   untracked,
   type ViewRef,
 } from "nsh";
-import { hasQuery, parseQuery } from "../../../packages/shared/src/query";
+import {
+  formatTerm,
+  hasQuery,
+  parseCondition,
+  parseQuery,
+  pending,
+} from "../../../packages/shared/src/query";
 import type { Bookmark } from "../lib/api";
 import {
   applySuggestion,
@@ -26,15 +32,17 @@ import { SearchSuggestions } from "./SearchSuggestions";
 
 /**
  * The library's search box, as Raindrop's: what's typed (`query`) and what
- * the list shows (`applied`). On wide windows a search runs when it's
- * committed (Return, a suggestion, a recent search), and while the field has
- * the keyboard a panel under it suggests conditions, their values, and
- * recent searches (`lib/search.ts`); the filter button opens the conditions
- * that narrow the results shown. On phones a search runs as it's typed.
+ * the list shows (`applied`). A search runs as it's typed. On wide windows,
+ * while the field has the keyboard, a panel under it suggests conditions,
+ * their values, and recent searches (`lib/search.ts`); a condition still
+ * being typed (`#ru`) waits for its value to be picked or a space, and a
+ * search is remembered once it's committed (Return, a suggestion, a recent
+ * search). The filter button opens the conditions that narrow the results
+ * shown.
  */
 export function useSearchBox(o: {
   source: () => Source;
-  /** Search as it's typed (phones): no panel, nothing to commit. */
+  /** Phones: no panel, and every token applies as it's typed. */
   live: boolean;
   initial?: string;
   /** The bookmarks the server found for the applied search, once it has. */
@@ -52,6 +60,27 @@ export function useSearchBox(o: {
   const mode = signal<"suggest" | "narrow">("suggest");
   const active = signal(-1);
   const anchor = signal<ViewRef | Bounds | null>(null);
+
+  /** The search a query asks for, however it's spaced or unfinished. */
+  const meaning = (q: string) => {
+    const p = parseQuery(q);
+    return [p.text, ...p.terms.map(formatTerm)].join(" ");
+  };
+  /** Runs a search, unless it's the one already run: a space or a lone `#` doesn't ask again. */
+  const apply = (q: string) => {
+    const next = q.trim();
+    if (meaning(next) !== meaning(applied()) || (!next && applied())) applied.set(next);
+  };
+  /**
+   * What the wide window searches for as it's typed: the query, less a
+   * condition still being typed (`#ru` would find nothing until it's
+   * `#rust`), whose values the panel offers.
+   */
+  const asTyped = (q: string) => {
+    const t = typing(q);
+    if (!t || !(parseCondition(t.raw) || pending(t.raw))) return q;
+    return q.slice(0, t.start) + q.slice(t.end);
+  };
 
   /** What the counts are of: the source, narrowed by the conditions already typed. */
   const base = (): Bookmark[] => {
@@ -95,7 +124,7 @@ export function useSearchBox(o: {
 
   const commit = (q = query()) => {
     close();
-    applied.set(q.trim());
+    apply(q);
     if (hasQuery(q)) remember(q);
   };
 
@@ -130,7 +159,7 @@ export function useSearchBox(o: {
 
   const onChange = (v: string) => {
     query.set(v);
-    if (o.live || !v.trim()) applied.set(v.trim());
+    apply(o.live ? v : asTyped(v));
     if (!o.live) show("suggest");
   };
 
