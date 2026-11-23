@@ -246,7 +246,7 @@ try {
     () =>
       evaluate(
         popup.sessionId,
-        "!document.getElementById('status-line').textContent.includes('reading')",
+        "!document.getElementById('status-line').textContent.includes('Reading')",
       ),
     8_000,
   );

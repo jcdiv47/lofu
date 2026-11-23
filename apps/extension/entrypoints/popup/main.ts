@@ -73,6 +73,7 @@ function showProblem(text: string, setup: boolean) {
 let syncTimer: ReturnType<typeof setTimeout> | undefined;
 function flashSync(text: string, error = false) {
   sync.textContent = text;
+  sync.title = text;
   sync.classList.toggle("err", error);
   sync.style.opacity = "1";
   clearTimeout(syncTimer);
