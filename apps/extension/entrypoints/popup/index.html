@@ -8,36 +8,47 @@
   <body>
     <main class="card" id="card" data-state="saving">
       <header class="masthead">
-        <span class="wordmark">lofu</span>
-        <span class="callno" id="callno">№ ———</span>
+        <span class="brand">
+          <img class="logo" src="/icon/48.png" alt="" width="22" height="22" />
+          <span class="wordmark">lofu</span>
+        </span>
+        <span class="sync" id="sync" aria-live="polite"></span>
+        <span class="stamp" id="stamp" role="status" aria-live="polite">
+          <svg class="stamp-check" width="11" height="11" viewBox="0 0 12 12" aria-hidden="true">
+            <path d="M2 6.4 4.8 9.2 10 3" />
+          </svg>
+          <span id="stamp-word">Saving…</span>
+        </span>
       </header>
 
       <section class="subject">
-        <h1 class="title" id="title">&nbsp;</h1>
-        <p class="meta">
-          <span id="domain"></span>
-          <span class="dot" aria-hidden="true">·</span>
-          <span id="status-line" class="status-line">Shelving…</span>
+        <p class="site">
+          <span class="favicon" id="favicon" aria-hidden="true"></span>
+          <span class="domain" id="domain"></span>
         </p>
-        <div class="stamp" id="stamp" role="status" aria-live="polite">
-          <span class="stamp-word" id="stamp-word">Shelved</span>
-          <span class="stamp-date" id="stamp-date"></span>
-        </div>
+        <h1 class="title" id="title">&nbsp;</h1>
+        <p class="meta" id="status-line">Saving…</p>
       </section>
 
       <section class="problem" id="problem" hidden>
-        <p id="problem-text"></p>
-        <button type="button" class="link" id="open-options">Open settings</button>
+        <div class="problem-box">
+          <p class="problem-title" id="problem-text"></p>
+          <p class="problem-hint" id="problem-hint"></p>
+        </div>
+        <div class="problem-actions">
+          <button type="button" class="btn" id="retry">Try again</button>
+          <button type="button" class="btn ghost" id="open-options">Open settings</button>
+        </div>
       </section>
 
       <section class="fields" id="fields">
-        <div class="field">
-          <label class="label" for="tag-input">Tags</label>
+        <div class="row" id="tags-row">
+          <label class="row-label" for="tag-input">Tags</label>
           <div class="chips" id="chips">
             <input
               id="tag-input"
               class="tag-input"
-              placeholder="add a tag"
+              placeholder="Add tag…"
               autocomplete="off"
               spellcheck="false"
               role="combobox"
@@ -49,28 +60,44 @@
           <div class="suggest" id="suggest" role="listbox" hidden></div>
         </div>
 
-        <div class="field">
-          <label class="label" for="collection">Shelf</label>
+        <div class="row">
+          <label class="row-label" for="collection">Collection</label>
           <div class="select-wrap">
+            <svg class="folder" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+              <path
+                d="M2 4.5C2 3.67 2.67 3 3.5 3h2.7l1.5 1.6h4.8c.83 0 1.5.67 1.5 1.5v5.4c0 .83-.67 1.5-1.5 1.5h-9C2.67 13 2 12.33 2 11.5v-7Z"
+              />
+            </svg>
             <select id="collection">
               <option value="">Unsorted</option>
             </select>
+            <svg class="chevron" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+              <path d="M3 4.5 6 7.5 9 4.5" />
+            </svg>
           </div>
         </div>
 
-        <div class="field">
-          <label class="label" for="note">Note</label>
-          <textarea id="note" class="note" rows="3" placeholder="Why it's worth keeping…"></textarea>
+        <div class="row note-row">
+          <label class="row-label" for="note">Note</label>
+          <textarea id="note" class="note" rows="2" placeholder="Why it's worth keeping…"></textarea>
         </div>
       </section>
 
       <footer class="actions" id="actions">
-        <button type="button" class="act" id="fav" aria-pressed="false">
-          <span class="star" aria-hidden="true">★</span> Favorite
+        <button type="button" class="act fav" id="fav" aria-pressed="false">
+          <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="m8 1.8 1.85 3.75 4.15.6-3 2.92.7 4.13L8 11.25 4.3 13.2 5 9.07 2 6.15l4.15-.6L8 1.8Z" />
+          </svg>
+          Favorite
         </button>
-        <button type="button" class="act" id="trash" aria-pressed="false">Move to Trash</button>
+        <span class="spacer"></span>
+        <button type="button" class="act" id="trash" aria-pressed="false">
+          <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M2.5 4.2h11M6.3 4.2V2.8h3.4v1.4M4 4.2l.7 9h6.6l.7-9" />
+          </svg>
+          <span id="trash-label">Move to Trash</span>
+        </button>
         <button type="button" class="act danger" id="remove">Delete</button>
-        <span class="sync" id="sync" aria-live="polite"></span>
       </footer>
     </main>
     <script type="module" src="./main.ts"></script>

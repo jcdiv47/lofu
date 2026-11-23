@@ -5,7 +5,7 @@
  *   bun run e2e      (builds with LOFU_E2E=1, then runs this)
  *
  * Covers: saving from the popup sends the rendered page (a 403 bot wall the
- * server itself can't fetch), edits autosave, re-opening shows "on shelf"
+ * server itself can't fetch), edits autosave, re-opening shows "already saved"
  * without re-uploading, the Trash button moves the bookmark there and back,
  * auto-repair fixes a failed bookmark when its page is visited. Writes
  * screenshots to e2e/screens.
@@ -151,7 +151,11 @@ async function screenshot(sessionId: string, name: string, width: number, dark: 
     sessionId,
   );
   await sleep(600); // fonts, layout, and the stamp animation
-  const height = await evaluate(sessionId, "document.documentElement.scrollHeight");
+  // The body's own height: the popup sizes to it, not to the 400px viewport.
+  const height = await evaluate(
+    sessionId,
+    "Math.ceil(Math.max(document.body.getBoundingClientRect().height, document.body.scrollHeight))",
+  );
   await cdp(
     "Emulation.setDeviceMetricsOverride",
     { width, height, deviceScaleFactor: 2, mobile: false },
@@ -235,14 +239,14 @@ try {
     }),
   );
   check(
-    "popup shows the shelved stamp",
+    "popup shows the saved stamp",
     (await until(async () => (await cardState(popup.sessionId)) === "saved")) === true,
   );
   await until(
     () =>
       evaluate(
         popup.sessionId,
-        "!document.getElementById('status-line').textContent.includes('reading')",
+        "!document.getElementById('status-line').textContent.includes('Reading')",
       ),
     8_000,
   );
@@ -270,22 +274,22 @@ try {
   await evaluate(popup.sessionId, "document.activeElement?.blur(), true");
   console.log(`  screenshot: ${await screenshot(popup.sessionId, "popup-saved", 360, false)}`);
 
-  // 2. Re-opening on a saved page: "on shelf", no re-upload.
+  // 2. Re-opening on a saved page: "already saved", no re-upload.
   const seqBefore = bookmarkFor(wallUrl)?.seq;
   const again = await open(`${base}/popup.html?tab=${tabId}`);
   check(
-    "re-opening shows 'on shelf'",
+    "re-opening shows 'already saved'",
     (await until(async () => (await cardState(again.sessionId)) === "existing")) === true,
   );
   check("re-opening doesn't re-send the page", bookmarkFor(wallUrl)?.seq === seqBefore);
-  console.log(`  screenshot: ${await screenshot(again.sessionId, "popup-on-shelf", 360, true)}`);
+  console.log(`  screenshot: ${await screenshot(again.sessionId, "popup-existing", 360, true)}`);
 
   // The Trash toggle (the API's `archived`): moves the bookmark there and back.
   const trashButton = () =>
     evaluate(
       again.sessionId,
       `(() => { const b = document.getElementById('trash');
-        return b.textContent + '|' + b.getAttribute('aria-pressed'); })()`,
+        return b.textContent.trim() + '|' + b.getAttribute('aria-pressed'); })()`,
     );
   check("the Trash button offers to move there", (await trashButton()) === "Move to Trash|false");
   await evaluate(again.sessionId, "document.getElementById('trash').click(), true");

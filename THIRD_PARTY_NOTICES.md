@@ -28,7 +28,7 @@ Zlib or Unicode-3.0, apart from those named below. The main ones:
 | [WXT](https://github.com/wxt-dev/wxt) | browser extension build | MIT |
 | [nsh](https://github.com/longbridge/nsh) (`nsh-core`, runtimes) | the reader app; its runtime is part of every app build | Apache-2.0 |
 | clap, serde, ureq | the CLI | MIT OR Apache-2.0 |
-| IBM Plex Mono, Instrument Sans, Instrument Serif (`@fontsource/*`) | the extension's fonts, bundled into its builds | SIL OFL 1.1 |
+| Instrument Serif (`@fontsource/instrument-serif`) | the extension's serif, bundled into its builds | SIL OFL 1.1 |
 
 When you distribute a build of the extension, include the fonts' OFL notices
 (each `@fontsource` package has its `LICENSE`). App builds include nsh's

@@ -6,121 +6,190 @@ body {
 
 .card {
   position: relative;
-  padding: 14px 18px 12px;
 }
 
-/* ---- masthead: wordmark, call number, the card's red double rule ---- */
+svg {
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ---- masthead: the app, and the save status as a small ink stamp ---- */
 .masthead {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  padding-bottom: 7px;
-  border-bottom: 1px solid var(--stamp);
-  box-shadow:
-    0 2px 0 -1px var(--paper),
-    0 3px 0 -1px var(--stamp);
-  margin-bottom: 14px;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-right: auto;
+}
+
+.logo {
+  display: block;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
 }
 
 .wordmark {
-  font: italic 400 21px / 1 var(--serif);
+  font: italic 400 21px / 22px var(--serif);
   letter-spacing: -0.01em;
 }
 
-.callno {
+.sync {
   font: 400 10.5px / 1 var(--mono);
-  letter-spacing: 0.08em;
+  letter-spacing: 0.04em;
   color: var(--ink-faint);
-  font-variant-numeric: tabular-nums;
-}
-
-/* ---- subject: title, meta, stamp ---- */
-.subject {
-  position: relative;
-  min-height: 58px;
-  padding-right: 4px;
-}
-
-.title {
-  margin: 0;
-  font: 400 23px / 1.1 var(--serif);
-  letter-spacing: -0.005em;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-  transition: padding-right 0.2s ease;
-}
-
-.card[data-state="saved"] .title,
-.card[data-state="existing"] .title,
-.card[data-state="removed"] .title {
-  padding-right: 92px; /* leave room for the stamp */
-}
-
-.meta {
-  margin: 7px 0 0;
-  font: 400 10.5px / 1.4 var(--mono);
-  letter-spacing: 0.06em;
-  color: var(--ink-soft);
-  display: flex;
-  gap: 6px;
-  min-width: 0;
-}
-
-.meta #domain {
-  text-transform: lowercase;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 45%;
-}
-
-.dot {
-  color: var(--ink-faint);
-}
-
-.status-line {
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: opacity 0.4s ease;
 }
 
-.status-line.warn {
+.sync.err {
   color: var(--stamp);
 }
 
-.card .stamp {
-  position: absolute;
-  top: -4px;
-  right: -6px;
-  visibility: hidden;
+.stamp {
+  --tilt: 0deg;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1.5px solid var(--rule);
+  border-radius: 4px;
+  color: var(--ink-faint);
+  font: 500 11px / 12px var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transform: rotate(var(--tilt));
+}
+
+.stamp-check {
+  display: none;
+  stroke-width: 1.8;
 }
 
 .card[data-state="saved"] .stamp,
-.card[data-state="existing"] .stamp,
+.card[data-state="existing"] .stamp {
+  --tilt: -2deg;
+  color: var(--stamp);
+  border-color: currentColor;
+}
+
+.card[data-state="saved"] .stamp-check,
+.card[data-state="existing"] .stamp-check {
+  display: block;
+}
+
+.card[data-state="existing"] .stamp {
+  --tilt: 1.5deg;
+}
+
+.card[data-state="error"] .stamp {
+  color: var(--stamp);
+  border-color: currentColor;
+  border-style: dashed;
+}
+
 .card[data-state="removed"] .stamp {
-  visibility: visible;
+  border-style: dashed;
 }
 
 .card[data-state="saved"] .stamp {
   animation: thud 260ms cubic-bezier(0.2, 0.9, 0.3, 1.25) both;
 }
 
-.card[data-state="saved"] {
-  animation: impact 260ms ease-out both;
+@keyframes thud {
+  0% {
+    opacity: 0;
+    transform: rotate(var(--tilt)) scale(1.6);
+  }
+  55% {
+    opacity: 1;
+    transform: rotate(var(--tilt)) scale(0.94);
+  }
+  100% {
+    opacity: 1;
+    transform: rotate(var(--tilt)) scale(1);
+  }
 }
 
-.card[data-state="existing"] .stamp {
-  --tilt: 4deg;
-  opacity: 0.85;
+/* ---- subject: the page being saved ---- */
+.subject {
+  padding: 18px 16px;
+  min-width: 0;
 }
 
-.card[data-state="removed"] .stamp {
-  color: var(--ink-faint);
-  --tilt: -3deg;
+.site {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 8px;
+  min-height: 14px;
+}
+
+.favicon {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  background: var(--ink);
+  color: var(--paper);
+  font: 700 9px / 1 var(--sans);
+  text-transform: uppercase;
+  overflow: hidden;
+}
+
+.favicon:empty {
+  display: none;
+}
+
+.favicon.has-image {
+  background: none;
+}
+
+.favicon img {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+/* As the app's cards show it: small mono capitals. */
+.domain {
+  min-width: 0;
+  font: 400 10.5px / 14px var(--mono);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.title {
+  margin: 0;
+  font: 400 26px / 28px var(--serif);
+  letter-spacing: -0.01em;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 /* Saving: the title shimmers like wet ink. */
@@ -133,114 +202,188 @@ body {
   animation: wet 1.4s linear infinite;
 }
 
-@keyframes thud {
-  0% {
-    opacity: 0;
-    transform: rotate(var(--tilt)) scale(1.7);
-  }
-  55% {
-    opacity: 1;
-    transform: rotate(var(--tilt)) scale(0.94);
-  }
-  100% {
-    opacity: 1;
-    transform: rotate(var(--tilt)) scale(1);
-  }
-}
-
-@keyframes impact {
-  0%,
-  45% {
-    transform: none;
-  }
-  60% {
-    transform: translateY(1px);
-  }
-  100% {
-    transform: none;
-  }
-}
-
 @keyframes wet {
   to {
     background-position: -300% 0;
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .card[data-state],
-  .card[data-state] .stamp,
-  .card[data-state="saving"] .title {
-    animation: none;
-  }
+.meta {
+  margin: 8px 0 0;
+  font: 400 12.5px / 16px var(--sans);
+  color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* ---- problem panel ---- */
+.meta:empty {
+  display: none;
+}
+
+.meta.warn {
+  color: var(--stamp);
+}
+
+/* ---- problem: why nothing was saved, and what to do ---- */
 .problem {
-  margin: 14px 0 4px;
-  padding: 10px 12px;
-  border-left: 3px solid var(--stamp);
-  background: var(--paper-deep);
-}
-
-.problem p {
-  margin: 0 0 6px;
-}
-
-/* ---- fields ---- */
-.fields {
-  margin-top: 18px;
   display: grid;
-  gap: 13px;
+  gap: 12px;
+  padding: 16px 16px 18px;
+  border-top: 1px solid var(--rule);
+}
+
+.problem[hidden] {
+  display: none;
+}
+
+.problem-box {
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--stamp) 25%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--stamp) 8%, transparent);
+}
+
+.problem-box p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.problem-box p + p {
+  margin-top: 4px;
+}
+
+.problem-title {
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.problem-hint {
+  color: var(--ink-soft);
+}
+
+.problem-hint:empty {
+  display: none;
+}
+
+.problem-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn {
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 14px;
+  background: var(--ink);
+  color: var(--paper);
+  font: 600 13px / 16px var(--sans);
+  cursor: pointer;
+}
+
+.btn.ghost {
+  background: none;
+  color: var(--ink-soft);
+  font-weight: 500;
+  padding-inline: 12px;
+}
+
+.btn.ghost:hover {
+  color: var(--ink);
+  background: var(--surface);
+}
+
+.btn[hidden] {
+  display: none;
+}
+
+/* ---- fields: a property sheet; a row fills when you point at it ---- */
+.fields {
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px;
+  border-top: 1px solid var(--rule);
   transition: opacity 0.2s ease;
 }
 
-.field {
+.row {
   position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  transition: background 0.12s ease;
+}
+
+.row + .row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 8px;
+  right: 8px;
+  border-top: 1px solid var(--rule-soft);
+}
+
+.row:hover,
+.row:focus-within {
+  background: var(--surface);
+}
+
+.row:hover::before,
+.row:focus-within::before,
+.row:hover + .row::before,
+.row:focus-within + .row::before {
+  border-color: transparent;
+}
+
+.row-label {
+  width: 84px;
+  flex-shrink: 0;
+  align-self: flex-start;
+  padding-top: 7px;
+  font: 500 13px / 16px var(--sans);
+  color: var(--ink-soft);
+  cursor: default;
 }
 
 .chips {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 5px;
-  min-height: 30px;
-  padding: 3px 0 5px;
-  border-bottom: 1px dashed var(--rule);
+  padding: 3px 0;
   cursor: text;
-}
-
-.chips:focus-within {
-  border-bottom-style: solid;
-  border-bottom-color: var(--ink-soft);
 }
 
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 2px 4px 2px 7px;
-  font: 500 12px / 1.3 var(--sans);
-  background: var(--paper-deep);
-  border: 1px solid var(--rule);
-  border-radius: 3px;
+  gap: 2px;
+  max-width: 100%;
+  padding: 3px 3px 3px 8px;
+  border-radius: 5px;
+  background: var(--rule-soft);
+  font: 500 12.5px / 16px var(--sans);
+  overflow-wrap: anywhere;
   animation: chip-in 140ms ease-out both;
 }
 
-.chip::before {
-  content: "#";
-  color: var(--ink-faint);
-  margin-right: 1px;
+.row:hover .chip,
+.row:focus-within .chip {
+  background: var(--rule);
 }
 
 .chip button {
   border: 0;
   background: none;
-  padding: 0 3px;
-  line-height: 1;
+  padding: 0 4px;
+  border-radius: 3px;
+  font: 400 14px / 16px var(--sans);
   color: var(--ink-faint);
   cursor: pointer;
-  font-size: 13px;
 }
 
 .chip button:hover {
@@ -256,71 +399,88 @@ body {
 
 .tag-input {
   flex: 1;
-  min-width: 90px;
+  min-width: 80px;
   border: 0;
   outline: 0;
   background: none;
-  padding: 3px 0;
+  padding: 3px 2px;
+  font: 400 13px / 16px var(--sans);
 }
 
 .tag-input::placeholder,
 .note::placeholder {
   color: var(--ink-faint);
-  font-style: italic;
 }
 
 .suggest {
   position: absolute;
   z-index: 2;
-  left: 0;
-  right: 0;
-  top: calc(100% + 2px);
-  margin: 0;
-  padding: 4px 0;
-  list-style: none;
+  left: 92px;
+  right: 8px;
+  top: calc(100% + 4px);
+  padding: 4px;
   background: var(--paper);
-  background-image: var(--grain);
   border: 1px solid var(--rule);
-  box-shadow: 0 8px 20px -10px rgb(0 0 0 / 0.35);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px -12px rgb(0 0 0 / 0.4);
+}
+
+.suggest[hidden] {
+  display: none;
 }
 
 .suggest [role="option"] {
   display: flex;
   justify-content: space-between;
-  padding: 5px 10px;
+  gap: 12px;
+  padding: 6px 8px;
+  border-radius: 5px;
   cursor: pointer;
 }
 
+.suggest [role="option"]:hover,
 .suggest [role="option"][aria-selected="true"] {
-  background: var(--paper-deep);
+  background: var(--surface);
 }
 
 .suggest .count {
-  font: 400 10.5px / 1.6 var(--mono);
+  font: 400 11px / 18px var(--mono);
   color: var(--ink-faint);
 }
 
 .select-wrap {
   position: relative;
-  border-bottom: 1px dashed var(--rule);
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
 }
 
-.select-wrap::after {
-  content: "▾";
+.select-wrap svg {
   position: absolute;
-  right: 2px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--ink-faint);
   pointer-events: none;
+  color: var(--ink-soft);
+  stroke-width: 1.3;
+}
+
+.select-wrap .folder {
+  left: 0;
+}
+
+.select-wrap .chevron {
+  right: 2px;
+  stroke-width: 1.4;
 }
 
 select {
   width: 100%;
   appearance: none;
   border: 0;
+  outline: 0;
   background: none;
-  padding: 5px 18px 6px 0;
+  padding: 6px 20px 6px 21px;
+  font: 400 13px / 16px var(--sans);
+  text-overflow: ellipsis;
   cursor: pointer;
 }
 
@@ -329,97 +489,124 @@ select option {
   color: var(--ink);
 }
 
-/* Ruled like an index card; lines track the text's line-height. */
+.note-row {
+  padding-block: 8px;
+}
+
 .note {
-  --lh: 20px;
+  flex: 1;
+  min-width: 0;
   display: block;
-  width: 100%;
   resize: none;
   border: 0;
   outline: 0;
-  padding: 0;
-  font: 400 13px / var(--lh) var(--sans);
-  background: repeating-linear-gradient(
-    to bottom,
-    transparent 0,
-    transparent calc(var(--lh) - 1px),
-    var(--rule-blue) calc(var(--lh) - 1px),
-    var(--rule-blue) var(--lh)
-  );
-  background-attachment: local;
-  min-height: calc(var(--lh) * 3);
+  background: none;
+  padding: 5px 0;
+  font: 400 13px / 20px var(--sans);
+  field-sizing: content;
+  min-height: 50px;
+  max-height: 140px;
 }
 
 /* ---- actions ---- */
 .actions {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin: 16px -6px 0;
-  padding-top: 9px;
+  gap: 2px;
+  padding: 10px 12px;
   border-top: 1px solid var(--rule);
+  background: var(--footer);
+}
+
+.spacer {
+  flex: 1;
 }
 
 .act {
-  border: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
   background: none;
-  padding: 5px 7px;
-  border-radius: 3px;
-  font: 500 12px / 1 var(--sans);
+  padding: 6px 9px;
+  border-radius: 6px;
+  font: 500 13px / 16px var(--sans);
   color: var(--ink-soft);
+  white-space: nowrap;
   cursor: pointer;
   transition:
     color 0.12s ease,
-    background 0.12s ease;
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.act svg {
+  stroke-width: 1.3;
 }
 
 .act:hover {
-  background: var(--paper-deep);
+  background: var(--surface);
   color: var(--ink);
-}
-
-.act[aria-pressed="true"] {
-  color: var(--ink);
-}
-
-.star {
-  display: inline-block;
-  transition: transform 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.4);
-}
-
-#fav[aria-pressed="true"] .star {
-  color: var(--stamp);
-}
-
-#fav[aria-pressed="true"] .star {
-  transform: rotate(-12deg) scale(1.15);
 }
 
 .act.danger:hover {
   color: var(--stamp);
 }
 
-.sync {
-  margin-left: auto;
-  font: 400 10px / 1 var(--mono);
-  letter-spacing: 0.08em;
-  color: var(--ink-faint);
-  transition: opacity 0.4s ease;
+.act[aria-pressed="true"] {
+  color: var(--ink);
 }
 
-.sync.err {
+.fav {
+  border-color: var(--rule);
+  padding-left: 9px;
+  padding-right: 11px;
+  color: var(--ink);
+}
+
+.fav svg {
+  stroke-width: 1.2;
+  transition: transform 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.4);
+}
+
+.fav[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--favorite) 40%, transparent);
+  background: color-mix(in srgb, var(--favorite) 9%, transparent);
+}
+
+.fav[aria-pressed="true"] svg {
+  color: var(--favorite);
+  fill: currentColor;
+  transform: rotate(-12deg) scale(1.1);
+}
+
+#trash[aria-pressed="true"] {
   color: var(--stamp);
 }
 
 /* ---- state overrides (after the base rules they override) ---- */
 .card[data-state="saving"] .fields,
 .card[data-state="saving"] .actions,
-.card[data-state="removed"] .fields {
-  opacity: 0.35;
+.card[data-state="removed"] .fields,
+.card[data-state="removed"] .act:not(#remove) {
+  opacity: 0.4;
   pointer-events: none;
+}
+
+.card[data-state="removed"] #remove {
+  color: var(--ink);
+  border-color: var(--rule);
 }
 
 .card[data-state="error"] .fields,
 .card[data-state="error"] .actions {
   display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card[data-state] .stamp,
+  .card[data-state="saving"] .title,
+  .chip {
+    animation: none;
+  }
 }
