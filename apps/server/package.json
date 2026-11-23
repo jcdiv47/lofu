@@ -12,7 +12,7 @@
   "dependencies": {
     "@hono/zod-openapi": "^1.6.3",
     "@lofu/shared": "workspace:*",
-    "defuddle": "^0.19.6",
+    "defuddle": "^0.19.11",
     "hono": "^4.13.16",
     "linkedom": "^0.18.15",
     "mathjax-full": "3.2.2",
