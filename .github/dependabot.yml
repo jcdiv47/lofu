@@ -19,7 +19,7 @@ updates:
     schedule:
       interval: weekly
   # npm packages in the Bun workspace (bun.lock at the root covers server,
-  # extension, reader and packages/*). Minor and patch updates come as one PR;
+  # extension and packages/*). Minor and patch updates come as one PR;
   # majors come one per package. Defuddle is 0.x, so its minor releases can
   # change extraction output: check extract/markdown.ts before merging.
   - package-ecosystem: bun
