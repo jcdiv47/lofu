@@ -1261,7 +1261,7 @@ test("desktop: the search box suggests conditions, their values, and recent sear
   await app.waitFor("id:suggest-submit");
   expect(app.texts()).toContain('Search "home"');
   expect(app.shows("id:suggest-collection:c1")).toBe(true);
-  await app.waitUntil(() => searches.includes("home"));
+  await app.waitFor("text:0 bookmarks found");
   expect(app.shows("id:search-suggestions")).toBe(true);
   // Return searches for it once more only if it changed, and remembers it.
   await app.press("id:suggest-submit");
@@ -1281,7 +1281,8 @@ test("desktop: the search box suggests conditions, their values, and recent sear
   await app.clear("id:search");
   await app.waitFor("text:All bookmarks");
   await app.type("id:search", "home");
-  await app.waitFor("id:suggest-collection:c1");
+  // The results redraw the panel: wait for them before picking a row.
+  await app.waitFor("text:0 bookmarks found");
   await app.press("id:suggest-collection:c1");
   await app.waitFor("text:Homelab");
   expect(app.value("id:search")).toBe("");
