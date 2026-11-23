@@ -21,6 +21,7 @@ const collectionSel = $<HTMLSelectElement>("collection");
 const note = $<HTMLTextAreaElement>("note");
 const favBtn = $<HTMLButtonElement>("fav");
 const trashBtn = $<HTMLButtonElement>("trash");
+const trashLabel = $("trash-label");
 const removeBtn = $<HTMLButtonElement>("remove");
 const sync = $("sync");
 
@@ -29,31 +30,44 @@ let bookmark: Bookmark | null = null;
 let tags: string[] = [];
 let allTags: TagCount[] = [];
 
-const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-const stampDate = (iso: string) => {
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "Nov 23", with the year when it isn't this one ("Mar 12, 2025"). */
+const shortDate = (iso: string) => {
   const d = new Date(iso);
-  return `${String(d.getDate()).padStart(2, "0")} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+  const year = d.getFullYear() === new Date().getFullYear() ? "" : `, ${d.getFullYear()}`;
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}${year}`;
 };
 
 function setState(state: State) {
   card.dataset.state = state;
-  const word = {
-    saving: "",
-    saved: "Shelved",
-    existing: "On shelf",
-    removed: "Withdrawn",
-    error: "",
+  let text = {
+    saving: "Saving…",
+    saved: "Saved",
+    existing: "Saved",
+    removed: "Deleted",
+    error: "Not saved",
   }[state];
-  $("stamp-word").textContent = word;
+  if (bookmark && (state === "saved" || state === "existing")) {
+    // Saved earlier today says so; an older date already tells you.
+    const today = new Date(bookmark.createdAt).toDateString() === new Date().toDateString();
+    text =
+      state === "existing" && today
+        ? "Already saved"
+        : `${text} · ${shortDate(bookmark.createdAt)}`;
+  }
+  $("stamp-word").textContent = text;
 }
 
 function showProblem(text: string, setup: boolean) {
   setState("error");
+  // The first sentence is the problem; the rest is what to check.
+  const [first = text, ...rest] = text.split(/(?<=[.?!])\s+/);
   $("problem").hidden = false;
-  $("problem-text").textContent = text;
-  $("open-options").hidden = !setup;
-  statusLine.textContent = "not saved";
-  statusLine.classList.add("warn");
+  $("problem-text").textContent = first;
+  $("problem-hint").textContent = rest.join(" ");
+  $("retry").hidden = setup;
+  $("open-options").classList.toggle("ghost", !setup);
+  statusLine.textContent = "";
 }
 
 let syncTimer: ReturnType<typeof setTimeout> | undefined;
@@ -65,28 +79,51 @@ function flashSync(text: string, error = false) {
   if (!error) syncTimer = setTimeout(() => (sync.style.opacity = "0"), 1400);
 }
 
-// ---- content status line --------------------------------------------------
+// ---- the page: site, content status line ---------------------------------------
+
+function renderSite(url: string | undefined, iconUrl: string | undefined) {
+  let host = "";
+  try {
+    host = new URL(url ?? "").hostname.replace(/^www\./, "");
+  } catch {}
+  $("domain").textContent = host;
+  const icon = $("favicon");
+  const letter = () => {
+    icon.classList.remove("has-image");
+    icon.textContent = host.charAt(0);
+  };
+  letter();
+  if (!iconUrl || !/^(https?|data):/.test(iconUrl)) return;
+  const img = new Image(14, 14);
+  img.alt = "";
+  img.onload = () => {
+    icon.classList.add("has-image");
+    icon.replaceChildren(img);
+  };
+  img.onerror = letter;
+  img.src = iconUrl;
+}
+
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 function describeContent(b: Bookmark): { text: string; warn: boolean } {
   switch (b.contentStatus) {
     case "pending":
-      return { text: "reading page…", warn: false };
+      return { text: "Reading the page…", warn: false };
     case "ok": {
-      const words = b.wordCount ? `${b.wordCount.toLocaleString()} words` : "full text";
-      return { text: `${b.type} · ${words}`, warn: false };
+      const words = b.wordCount ? `${b.wordCount.toLocaleString()} words` : "full text saved";
+      return { text: `${capitalize(b.type)} · ${words}`, warn: false };
     }
     case "skipped":
-      return { text: `${b.type} · link only`, warn: false };
+      return { text: `${capitalize(b.type)} · link only`, warn: false };
     case "failed":
-      return { text: b.contentError ?? "couldn't read page", warn: true };
+      return { text: b.contentError ?? "Couldn't read the page", warn: true };
   }
 }
 
 function renderBookmark(b: Bookmark) {
   bookmark = b;
   if (b.title) titleEl.textContent = b.title;
-  $("callno").textContent = `№ ${b.id.slice(-6).toUpperCase()}`;
-  $("stamp-date").textContent = stampDate(b.createdAt);
   const { text, warn } = describeContent(b);
   statusLine.textContent = text;
   statusLine.title = text;
@@ -98,7 +135,7 @@ function renderBookmark(b: Bookmark) {
 /** `archived` is the Trash (the API field keeps its old name). */
 function showTrash(inTrash: boolean) {
   trashBtn.setAttribute("aria-pressed", String(inTrash));
-  trashBtn.textContent = inTrash ? "In Trash" : "Move to Trash";
+  trashLabel.textContent = inTrash ? "In Trash" : "Move to Trash";
   trashBtn.title = inTrash ? "Restore from the Trash" : "Move to the Trash";
 }
 
@@ -216,9 +253,9 @@ chips.addEventListener("click", () => tagInput.focus());
 function patch(p: Parameters<typeof api.update>[1]) {
   if (!bookmark) return;
   const id = bookmark.id;
-  flashSync("saving…");
+  flashSync("syncing…");
   void send({ type: "patch", id, patch: p }).then((r) => {
-    if (r.ok) flashSync("saved");
+    if (r.ok) flashSync("synced");
     else flashSync(r.error, true);
   });
 }
@@ -273,12 +310,18 @@ removeBtn.addEventListener("click", async () => {
   if (!r.ok) return flashSync(r.error, true);
   setState("removed");
   removeBtn.textContent = "Undo";
-  statusLine.textContent = "deleted from your shelves";
+  statusLine.textContent = "Deleted from lofu";
 });
 
 $("open-options").addEventListener("click", () => {
   void browser.runtime.openOptionsPage();
   window.close();
+});
+$("retry").addEventListener("click", () => {
+  $("problem").hidden = true;
+  setState("saving");
+  statusLine.textContent = "Saving…";
+  void boot();
 });
 
 // ---- boot ---------------------------------------------------------------------
@@ -292,9 +335,7 @@ async function boot() {
     : (await browser.tabs.query({ active: true, currentWindow: true }))[0];
   if (!tab?.id) return showProblem("No active tab.", false);
   titleEl.textContent = tab.title || tab.url || "Untitled";
-  try {
-    $("domain").textContent = new URL(tab.url ?? "").hostname.replace(/^www\./, "");
-  } catch {}
+  renderSite(tab.url, tab.favIconUrl);
 
   // Instant: cached tag/collection lists, refreshed after the save.
   allTags = (await cacheGet<TagCount[]>("tags")) ?? [];
@@ -309,7 +350,7 @@ async function boot() {
   renderBookmark(res.bookmark);
   collectionSel.value = res.bookmark.collectionId ?? "";
   setState(res.created ? "saved" : "existing");
-  if (!res.created && res.captured) statusLine.textContent = "re-captured from your browser";
+  if (!res.created && res.captured) statusLine.textContent = "Re-captured from your browser";
 
   void followExtraction(res.bookmark.id);
   void Promise.all([api.tags(), api.collections()])

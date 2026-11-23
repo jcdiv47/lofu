@@ -16,8 +16,6 @@
     "e2e": "LOFU_E2E=1 wxt build && bun e2e/run.ts"
   },
   "dependencies": {
-    "@fontsource/ibm-plex-mono": "^5",
-    "@fontsource/instrument-sans": "^5",
     "@fontsource/instrument-serif": "^5",
     "@lofu/shared": "workspace:*"
   },
