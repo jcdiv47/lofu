@@ -1273,6 +1273,7 @@ test("desktop: the search box suggests conditions, their values, and recent sear
   const before = searches.length;
   await app.type("id:search", "#ru");
   await app.waitFor("id:suggest-tag:rust");
+  await app.wait(400); // past the search's 180 ms debounce
   expect(searches.length).toBe(before);
   await app.type("id:search", "st ");
   await app.waitFor("text:1 bookmark found");
