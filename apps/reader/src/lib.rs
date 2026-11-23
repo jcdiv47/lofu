@@ -40,6 +40,7 @@ fn native(registry: &mut Registry) {
     registry.module::<Share>();
     registry.module::<PopupMenu>();
     registry.module::<Toolbar>();
+    registry.module::<Swipe>();
     registry.module::<Sidebar>();
     registry.module::<Controls>();
     registry.module::<TextPrompt>();
@@ -53,7 +54,32 @@ fn native(registry: &mut Registry) {
 mod editmenu;
 mod files;
 mod sidebar;
+mod swipe;
 mod toolbar;
+
+/// Swiping back with two fingers on the Mac's trackpad (`src/swipe.rs`).
+#[module]
+pub struct Swipe;
+
+#[module]
+impl Swipe {
+    /// Whether there are trackpad swipes to hear here (macOS).
+    pub fn available() -> bool {
+        cfg!(target_os = "macos")
+    }
+
+    /// Whether a swipe may go back now: the app has a page to go back to
+    /// and no dialog in the way. The first call starts watching.
+    pub fn enable(on: bool) {
+        swipe::enable(on)
+    }
+
+    /// Whether a swipe went back: true when one did (the page is off to
+    /// the right, for the app to pop), false after a second without one.
+    pub async fn next() -> bool {
+        swipe::next().await
+    }
+}
 
 /// The window's sidebar on macOS (`src/sidebar.rs`): the system's own,
 /// which AppKit draws in Liquid Glass on macOS 26, under nsh's root view.
