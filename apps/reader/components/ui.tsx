@@ -214,9 +214,10 @@ export function ActionButton(props: {
       ref={props.ref}
       testID={props.testID}
       accessibilityLabel={props.label}
-      disabled={props.disabled || props.busy}
+      busy={props.busy}
+      disabled={props.disabled}
       onPress={props.onPress}
-      class={`${box()} ${focusRing} ${props.busy ? "opacity-60" : "disabled:opacity-50"}`}
+      class={`${box()} ${focusRing} disabled:opacity-50 ${props.busy ? "opacity-60" : ""}`}
     >
       <Text
         class={
