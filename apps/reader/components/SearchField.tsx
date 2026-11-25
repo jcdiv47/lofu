@@ -54,7 +54,7 @@ export function SearchField(props: {
       style={{ ...glass(), borderCurve: "continuous", height: props.height ?? 40 }}
     >
       <GlassTint />
-      <Icon name="search" size={big ? 17 : 14} color={look().inkSoft} />
+      <Icon name="search" size={big ? 17 : 14} class="tint-ink-soft" />
       <Input
         testID={props.testID ?? "search"}
         ref={(r) => props.inputRef?.(r)}
@@ -68,12 +68,8 @@ export function SearchField(props: {
         onSubmit={({ text }) => props.onSubmit?.(text)}
         onFocus={() => props.onFocus?.()}
         onBlur={() => props.onBlur?.()}
-        class="flex-1"
-        style={{
-          color: look().ink,
-          fontSize: big ? 17 : 13.5,
-          placeholderColor: look().inkFaint,
-        }}
+        class="flex-1 text-ink placeholder:text-ink-faint"
+        style={{ fontSize: big ? 17 : 13.5 }}
       />
       {props.trailing}
       <If when={props.value()}>
@@ -81,10 +77,9 @@ export function SearchField(props: {
           role="button"
           accessibilityLabel="Clear search"
           onPress={() => props.onChange("")}
-          class={`items-center justify-center rounded-full active:opacity-60 ${big ? "h-6 w-6" : "h-5 w-5"}`}
-          style={{ backgroundColor: look().inkFaint }}
+          class={`items-center justify-center rounded-full active:opacity-60 ${big ? "h-6 w-6" : "h-5 w-5"} bg-ink-faint`}
         >
-          <Icon name="close" size={11} color={look().field} />
+          <Icon name="close" size={11} class="tint-field" />
         </View>
       </If>
     </View>

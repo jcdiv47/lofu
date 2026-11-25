@@ -1,8 +1,10 @@
 import {
+  batch,
   cleanup,
   computed,
   effect,
   fontScale,
+  type InputRef,
   keyboardFrame,
   List,
   platform,
@@ -31,10 +33,10 @@ import {
   applyListChoice,
   currentSort,
   currentView,
+  EntryMenu,
   FilterButton,
   type ListMenuOptions,
   listMenuEntries,
-  PanelMenu,
   phoneListMenu,
   SortButton,
   sortLabel,
@@ -48,7 +50,14 @@ import { pullRefresh } from "../components/PullRefresh";
 import { useSearchBox } from "../components/SearchBox";
 import { SearchField } from "../components/SearchField";
 import { SwipeRow, swipeable } from "../components/SwipeRow";
-import { BottomEdge, Icon, IconButton, RoundGlassButton, TopEdge } from "../components/ui";
+import {
+  BottomEdge,
+  focusRing,
+  Icon,
+  IconButton,
+  RoundGlassButton,
+  TopEdge,
+} from "../components/ui";
 import { setSearchFocus, systemMenus } from "../lib/actions";
 import { api, type Bookmark, SEARCH_PAGE, type SearchHit } from "../lib/api";
 import {
@@ -186,8 +195,10 @@ function Empty(props: {
   };
   return (
     <View class="items-center gap-1.5 px-8 pt-24">
-      <Text style={{ color: look().inkSoft, fontSize: 16, fontWeight: "600" }}>{text().title}</Text>
-      <Text class="text-center" style={{ color: look().inkFaint, fontSize: 13.5, lineHeight: 19 }}>
+      <Text class="text-ink-soft" style={{ fontSize: 16, fontWeight: "600" }}>
+        {text().title}
+      </Text>
+      <Text class="text-center text-ink-faint" style={{ fontSize: 13.5, lineHeight: 19 }}>
         {text().body}
       </Text>
     </View>
@@ -196,7 +207,10 @@ function Empty(props: {
 
 /**
  * The bookmarks of a source, filtered by a search. A grid of cards on wide
- * windows, rows on phones.
+ * windows, rows on phones. `source` may change while it's shown (the
+ * desktop's sidebar): the search and the filter start again, and the list
+ * is made again at its top, but the page, its toolbar and its search field
+ * stay.
  */
 export function Library(props: {
   source: Source;
@@ -225,6 +239,8 @@ export function Library(props: {
   /** The Mac's window toolbar has the search, sync and + (`lib/toolbar.ts`). */
   const native = props.wide && nativeToolbar;
   let focusField = () => {};
+  /** The app's search field (wide windows without the Mac's toolbar). */
+  let fieldRef: InputRef | undefined;
   const box = useSearchBox({
     source: () => props.source,
     live: !props.wide,
@@ -336,9 +352,11 @@ export function Library(props: {
     const q = box.applied().trim();
     const mine = ++generation;
     if (!hasQuery(q)) {
-      hits.set(null);
-      pending.set(false);
-      onDevice.set(false);
+      batch(() => {
+        hits.set(null);
+        pending.set(false);
+        onDevice.set(false);
+      });
       return;
     }
     // Read here, so a change of the filter searches again.
@@ -349,22 +367,25 @@ export function Library(props: {
         const r = await withTimeout(
           api.search(sent, { ...searchFilter(props.source), tz: tzOffset() }),
         );
-        if (mine === generation) {
-          hits.set(r.hits);
-          total.set(r.estimatedTotal ?? r.hits.length);
-          onDevice.set(false);
-        }
+        if (mine === generation)
+          batch(() => {
+            hits.set(r.hits);
+            total.set(r.estimatedTotal ?? r.hits.length);
+            onDevice.set(false);
+            pending.set(false);
+          });
       } catch {
         // Offline, or no answer: what the device has that matches, rather
         // than "No matches" for a search that never ran.
         if (mine === generation) {
           const local = localHits(q);
-          hits.set(local);
-          total.set(local.length);
-          onDevice.set(true);
+          batch(() => {
+            hits.set(local);
+            total.set(local.length);
+            onDevice.set(true);
+            pending.set(false);
+          });
         }
-      } finally {
-        if (mine === generation) pending.set(false);
       }
     }, 180);
     cleanup(() => clearTimeout(timer));
@@ -416,8 +437,10 @@ export function Library(props: {
       );
       if (mine === generation) {
         const seen = new Set(h.map((x) => x.bookmark.id));
-        hits.set([...h, ...r.hits.filter((x) => !seen.has(x.bookmark.id))]);
-        if (!r.hits.length) total.set(h.length);
+        batch(() => {
+          hits.set([...h, ...r.hits.filter((x) => !seen.has(x.bookmark.id))]);
+          if (!r.hits.length) total.set(h.length);
+        });
       }
     } catch {
       // Offline, say: the hits so far stay.
@@ -427,7 +450,9 @@ export function Library(props: {
   };
 
   type Item = { b: Bookmark; snippet: string | null };
-  const items = (): Item[] => {
+  // Computed: the views, the moodboard's columns, the filter's count and the
+  // manual drag all read it, and it's worked out once per change.
+  const items = computed((): Item[] => {
     const h = hits();
     // The hits as the store has them now: a hit deleted, put back or moved
     // out of this source since the search leaves it.
@@ -447,21 +472,44 @@ export function Library(props: {
       b,
       snippet: null,
     }));
-  };
-  const showCollection = props.source.kind !== "collection";
+  });
+  const showCollection = () => props.source.kind !== "collection";
+
+  /**
+   * The source as a key: it changes when another source is shown, not when
+   * its bookmarks do. The lists are made again for it, at their top, and
+   * what was searched or filtered in the last one goes.
+   */
+  const sourceKey = computed(() => JSON.stringify(props.source));
+  let shownKey = untracked(sourceKey);
+  effect(() => {
+    const key = sourceKey();
+    if (key === shownKey) return;
+    shownKey = key;
+    untracked(() =>
+      batch(() => {
+        box.clear();
+        filter.set(NO_FILTER);
+      }),
+    );
+    // The field lets go of the keyboard, as the last page's went with it.
+    fieldRef?.blur();
+  });
 
   // Columns follow the width the grid gets. The width changes on every frame
   // of a live resize; the views read only what's computed from it (whether
   // it's known, the column counts), so the grid is built again only when a
   // column comes or goes, not on every frame.
   const width = signal(0);
-  /** The phone's page height, which the list's drawn menu keeps inside. */
-  const height = signal(0);
   const measured = computed(() => width() > 0);
   const columnsOf = (min: number) =>
     Math.max(1, Math.floor((width() - PAD * 2 + GAP) / (min + GAP)));
   const cardColumns = computed(() => columnsOf(cardWidth(coverSize("cards"))));
   const moodColumns = computed(() => columnsOf(cardWidth(coverSize("moodboard")) - 20));
+  /** The moodboard's columns: the items dealt to them in turn. */
+  const dealt = <T,>(all: T[], n: number) =>
+    Array.from({ length: n }, (_, c) => all.filter((_, k) => k % n === c));
+  const moodCols = computed(() => dealt(items(), moodColumns()));
   // Computed: the phone's list is built again when the view changes, and
   // only then; not on every change of the prefs it's kept in (the same view
   // picked again, a sort, *Show in …*), which left the new list under the bar.
@@ -505,9 +553,9 @@ export function Library(props: {
           style={{ flexGrow: 1, flexShrink: 1, minWidth: 60 }}
         >
           <Text
-            class="truncate"
             testID="library-title"
-            style={{ color: look().ink, fontSize: 20, fontWeight: "700", flexShrink: 1 }}
+            class="truncate text-ink"
+            style={{ fontSize: 20, fontWeight: "700", flexShrink: 1 }}
           >
             {searching()
               ? hits()
@@ -516,10 +564,9 @@ export function Library(props: {
               : sourceTitle(props.source)}
           </Text>
           <Text
-            class="truncate"
+            class="truncate text-ink-faint"
             // Gives way first, then the title: the row ends before the toolbar.
             style={{
-              color: look().inkFaint,
               fontSize: 13,
               fontVariant: ["tabular-nums"],
               flexShrink: 100,
@@ -546,6 +593,7 @@ export function Library(props: {
               onSubmit={() => box.key("enter")}
               placeholder="Search"
               inputRef={(r) => {
+                fieldRef = r;
                 focusField = () => r.focus();
                 setSearchFocus(() => r.focus());
               }}
@@ -672,18 +720,18 @@ export function Library(props: {
               onPress={() => filter.set(without(filter(), p().key))}
               // 44 points to the finger, 32 to the eye.
               hitSlop={{ top: 6, bottom: 6 }}
-              class="h-8 flex-row items-center gap-1.5 rounded-full pr-2.5 pl-3 active:opacity-60"
-              style={{ backgroundColor: look().selected }}
+              class={`h-8 flex-row items-center gap-1.5 rounded-full bg-selected pr-2.5 pl-3 active:opacity-60 ${focusRing}`}
             >
-              <Text style={{ color: look().ink, fontSize: 14, fontWeight: "500" }}>
+              <Text class="text-ink" style={{ fontSize: 14, fontWeight: "500" }}>
                 {p().label}
               </Text>
-              <Icon name="close" size={12} color={look().inkSoft} />
+              <Icon name="close" size={12} />
             </View>
           )}
         </Each>
         <Text
-          style={{ color: look().inkFaint, fontSize: 13, fontVariant: ["tabular-nums"] }}
+          class="text-ink-faint"
+          style={{ fontSize: 13, fontVariant: ["tabular-nums"] }}
           testID="filter-count"
         >
           {searching()
@@ -725,9 +773,9 @@ export function Library(props: {
         testID="search-status"
       >
         <If when={onDevice() && !pending()}>
-          <Icon name="alert" size={13} color={look().inkFaint} />
+          <Icon name="alert" size={13} class="tint-ink-faint" />
         </If>
-        <Text class="flex-1" style={{ color: look().inkFaint, fontSize: 13, lineHeight: 18 }}>
+        <Text class="flex-1 text-ink-faint" style={{ fontSize: 13, lineHeight: 18 }}>
           {pending()
             ? "Searching…"
             : onDevice()
@@ -838,7 +886,7 @@ export function Library(props: {
                   show={show}
                   coverLeft={prefs().coverPosition === "left"}
                   headline={headlines}
-                  showCollection={showCollection}
+                  showCollection={showCollection()}
                   onOpen={() => open(i().b)}
                 />
               ) : headlines ? (
@@ -847,7 +895,7 @@ export function Library(props: {
                   snippet={i().snippet}
                   show={show}
                   touch
-                  showCollection={showCollection}
+                  showCollection={showCollection()}
                   onOpen={() => open(i().b)}
                 />
               ) : (
@@ -856,7 +904,7 @@ export function Library(props: {
                   snippet={i().snippet}
                   show={show}
                   coverLeft={prefs().coverPosition === "left"}
-                  showCollection={showCollection}
+                  showCollection={showCollection()}
                   onOpen={() => open(i().b)}
                 />
               )
@@ -874,18 +922,15 @@ export function Library(props: {
          * tiles, or a whole column, out (nsh 0.5.0).
          */
         const plain = platform.os === "android";
-        const batch = signal(MOODBOARD_BATCH);
-        const cols = () => {
-          const all = plain ? items().slice(0, batch()) : items();
-          return Array.from({ length: n }, (_, c) => all.filter((_, k) => k % n === c));
-        };
+        const shown = signal(MOODBOARD_BATCH);
+        const cols = computed(() => dealt(plain ? items().slice(0, shown()) : items(), n));
         const tile = (i: () => Item) => (
           <MoodboardTile
             b={i().b}
             show={show}
             touch
             snippet={i().snippet}
-            showCollection={showCollection}
+            showCollection={showCollection()}
             onOpen={() => open(i().b)}
           />
         );
@@ -899,7 +944,7 @@ export function Library(props: {
             keyboardShouldPersistTaps="handled"
             onScroll={(e) => {
               if (!plain || e.offset.y + e.size.height * 3 < e.contentSize.height) return;
-              if (batch() < items().length) batch.set(batch() + MOODBOARD_BATCH);
+              if (shown() < items().length) shown.set(shown() + MOODBOARD_BATCH);
               else void loadMore();
             }}
           >
@@ -973,7 +1018,7 @@ export function Library(props: {
                 coverHeight={phoneCover()}
                 bodyScale={textScale()}
                 snippet={i().snippet}
-                showCollection={showCollection}
+                showCollection={showCollection()}
                 onOpen={() => open(i().b)}
               />
             )}
@@ -983,34 +1028,24 @@ export function Library(props: {
   };
 
   return (
-    <View class="flex-1" style={{ backgroundColor: look().paper }}>
+    <View class="flex-1 bg-paper">
       <If
         when={props.wide}
         else={
           <>
-            <View
-              class="flex-1"
-              onLayout={(e) => {
-                width.set(e.bounds.size.width);
-                height.set(e.bounds.size.height);
-              }}
-            >
+            <View class="flex-1" onLayout={(e) => width.set(e.bounds.size.width)}>
               {phoneList}
             </View>
             <BottomEdge height={SEARCH_H + searchBottom() + 24} />
             {phoneSearch()}
-            <If when={props.menu?.() && !systemMenus}>
-              <PanelMenu
+            {/* Android: the bar's ••• opens it, as a sheet (iOS has the system's). */}
+            <If when={props.menu && !systemMenus}>
+              <EntryMenu
                 testID="list-menu-panel"
-                items={() => listMenuEntries(menuOptions())}
-                top={8}
-                right={12 + sideRight()}
-                maxHeight={Math.max(240, (height() || 600) - 16)}
-                onPick={(id) => {
-                  props.menu?.set(false);
-                  applyListChoice(menuOptions(), id);
-                }}
-                onClose={() => props.menu?.set(false)}
+                entries={() => listMenuEntries(menuOptions())}
+                open={!!props.menu?.()}
+                onOpenChange={(open) => props.menu?.set(open)}
+                onPick={(id) => applyListChoice(menuOptions(), id)}
               />
             </If>
             <If when={platform.os === "ios"}>
@@ -1032,6 +1067,9 @@ export function Library(props: {
         >
           {() => {
             if (!measured()) return null;
+            // Another source: its lists from the top (a bookmark edited
+            // doesn't come here: the lists follow `items` in place).
+            sourceKey();
             const empty = (
               <Empty searching={searching()} pending={pending()} source={props.source} />
             );
@@ -1064,7 +1102,7 @@ export function Library(props: {
                           drag={drag}
                           show={show}
                           snippet={i().snippet}
-                          showCollection={showCollection}
+                          showCollection={showCollection()}
                           onOpen={() => props.onOpen(i().b)}
                         />
                       ) : (
@@ -1074,7 +1112,7 @@ export function Library(props: {
                           show={show}
                           coverLeft={prefs().coverPosition === "left"}
                           snippet={i().snippet}
-                          showCollection={showCollection}
+                          showCollection={showCollection()}
                           onOpen={() => props.onOpen(i().b)}
                         />
                       );
@@ -1086,55 +1124,58 @@ export function Library(props: {
                 // Masonry: the items dealt to columns in turn, each column a
                 // list of its own laid out in the one scroll view, so tiles
                 // keep their covers' shapes and only those near the
-                // viewport are made.
+                // viewport are made. The grid is made again only when a
+                // column comes or goes; an edited bookmark reaches its
+                // column's list (`moodCols`), as in the other views.
                 const n = moodColumns();
-                const all = items();
-                if (!all.length)
-                  return (
-                    <View class="flex-1" style={{ paddingTop: top }}>
-                      {empty}
-                    </View>
-                  );
-                const cols = Array.from({ length: n }, (_, c) => all.filter((_, k) => k % n === c));
                 return (
-                  <Scroll testID="library-list" class="flex-1">
-                    <View
-                      class="flex-row"
-                      style={{
-                        paddingHorizontal: PAD,
-                        paddingTop: top,
-                        paddingBottom: PAD,
-                        gap: GAP,
-                      }}
-                    >
-                      {cols.map((col) => (
-                        <View class="min-w-0 flex-1">
-                          <List
-                            each={col}
-                            viewport="parent"
-                            keyExtractor={(i) => i.b.id}
-                            estimatedItemSize={260}
-                            contentStyle={{ rowGap: GAP }}
-                            onLoadMore={() => void loadMore()}
-                          >
-                            {(i) => {
-                              const drag = manual.cell(() => i().b);
-                              return (
-                                <MoodboardTile
-                                  b={i().b}
-                                  drag={drag}
-                                  show={show}
-                                  snippet={i().snippet}
-                                  showCollection={showCollection}
-                                  onOpen={() => props.onOpen(i().b)}
-                                />
-                              );
-                            }}
-                          </List>
-                        </View>
-                      ))}
-                    </View>
-                  </Scroll>
+                  <If
+                    when={items().length}
+                    else={
+                      <View class="flex-1" style={{ paddingTop: top }}>
+                        {empty}
+                      </View>
+                    }
+                  >
+                    <Scroll testID="library-list" class="flex-1">
+                      <View
+                        class="flex-row"
+                        style={{
+                          paddingHorizontal: PAD,
+                          paddingTop: top,
+                          paddingBottom: PAD,
+                          gap: GAP,
+                        }}
+                      >
+                        {Array.from({ length: n }, (_, c) => (
+                          <View class="min-w-0 flex-1">
+                            <List
+                              each={moodCols()[c] ?? []}
+                              viewport="parent"
+                              keyExtractor={(i) => i.b.id}
+                              estimatedItemSize={260}
+                              contentStyle={{ rowGap: GAP }}
+                              onLoadMore={() => void loadMore()}
+                            >
+                              {(i) => {
+                                const drag = manual.cell(() => i().b);
+                                return (
+                                  <MoodboardTile
+                                    b={i().b}
+                                    drag={drag}
+                                    show={show}
+                                    snippet={i().snippet}
+                                    showCollection={showCollection()}
+                                    onOpen={() => props.onOpen(i().b)}
+                                  />
+                                );
+                              }}
+                            </List>
+                          </View>
+                        ))}
+                      </View>
+                    </Scroll>
+                  </If>
                 );
               }
               default:
@@ -1167,7 +1208,7 @@ export function Library(props: {
                           show={show}
                           coverHeight={cardCover(coverSize("cards"))}
                           snippet={i().snippet}
-                          showCollection={showCollection}
+                          showCollection={showCollection()}
                           onOpen={() => props.onOpen(i().b)}
                         />
                       );

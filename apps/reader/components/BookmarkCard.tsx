@@ -1,4 +1,4 @@
-import { Image, pixelRatio, signal, Text, View } from "nsh";
+import { Image, pixelRatio, reduceMotion, signal, Text, View } from "nsh";
 import { nativeMenus, showBookmarkMenu } from "../lib/actions";
 import type { Bookmark } from "../lib/api";
 import { isKept } from "../lib/articles";
@@ -9,7 +9,7 @@ import { displayTitle, type ShowField } from "../lib/prefs";
 import { collectionName, highlightCount, offline } from "../lib/store";
 import { BookmarkContextMenu } from "./BookmarkMenu";
 import type { DragProps } from "./ManualDrag";
-import { Favicon, Icon } from "./ui";
+import { Favicon, focusRing, Icon } from "./ui";
 
 export const CARD_COVER = 132;
 const CARD_BODY = 112;
@@ -22,23 +22,21 @@ function PaperCover(props: { b: Bookmark; height: number; radius?: number }) {
   const excerpt = () => props.b.excerpt?.replace(/\s+/g, " ").trim() ?? "";
   return (
     <View
-      class="overflow-hidden px-4 pt-3"
+      class="overflow-hidden px-4 pt-3 bg-paper-deep"
       style={{
         height: props.height,
-        backgroundColor: look().paperDeep,
         borderTopLeftRadius: props.radius,
         borderTopRightRadius: props.radius,
       }}
     >
       <View
-        class="flex-row items-center gap-1.5 pb-2"
-        style={{ borderBottomWidth: 1, borderColor: `${look().stamp}66` }}
+        // The catalog card's rule, in the stamp's red, faded.
+        class="flex-row items-center gap-1.5 border-b border-stamp/40 pb-2"
       >
         <Favicon url={props.b.faviconUrl} domain={props.b.domain} size={12} />
         <Text
-          class="flex-1 truncate"
+          class="flex-1 truncate text-ink-faint"
           style={{
-            color: look().inkFaint,
             fontSize: 10.5,
             fontFamily: fonts.mono,
             letterSpacing: 0.4,
@@ -52,16 +50,16 @@ function PaperCover(props: { b: Bookmark; height: number; radius?: number }) {
         else={
           // No text to show: the card's blank ruled lines.
           <View class="gap-[18px] pt-[22px]">
-            <View style={{ height: 1, backgroundColor: look().rule }} />
-            <View style={{ height: 1, backgroundColor: look().rule }} />
-            <View style={{ height: 1, backgroundColor: look().rule }} />
-            <View style={{ height: 1, backgroundColor: look().rule }} />
+            <View class="bg-rule" style={{ height: 1 }} />
+            <View class="bg-rule" style={{ height: 1 }} />
+            <View class="bg-rule" style={{ height: 1 }} />
+            <View class="bg-rule" style={{ height: 1 }} />
           </View>
         }
       >
         <Text
+          class="text-ink-soft"
           style={{
-            color: look().inkSoft,
             fontFamily: fonts.serif,
             fontSize: 13,
             lineHeight: 19,
@@ -83,6 +81,7 @@ function Cover(props: { b: Bookmark; height: number; radius?: number }) {
   return (
     <If when={url() && failedUrl() !== url()} else={<PaperCover {...props} />}>
       <Image
+        class="bg-paper-deep"
         src={url() ?? ""}
         onError={() => failedUrl.set(url())}
         fadeDuration={150}
@@ -90,7 +89,6 @@ function Cover(props: { b: Bookmark; height: number; radius?: number }) {
           height: props.height,
           width: "100%",
           objectFit: "cover",
-          backgroundColor: look().paperDeep,
           borderTopLeftRadius: props.radius,
           borderTopRightRadius: props.radius,
         }}
@@ -115,22 +113,24 @@ function Marks(props: {
     <>
       <If when={onlineOnly()}>
         <Text
+          class="text-ink-faint"
           testID={`online-only-${props.b.id}`}
-          style={{ color: look().inkFaint, fontSize: 11.5 }}
+          style={{ fontSize: 11.5 }}
           maxFontSizeMultiplier={props.maxScale}
         >
           Online only
         </Text>
       </If>
       <If when={props.b.favorite}>
-        <Icon name="starFill" size={12} color={look().favorite} />
+        <Icon name="starFill" size={12} class="tint-favorite" />
       </If>
       <If when={props.highlights !== false && hl() > 0}>
         <View class="flex-row items-center gap-0.5">
-          <Icon name="highlighter" size={12} color={look().inkFaint} />
+          <Icon name="highlighter" size={12} class="tint-ink-faint" />
           <Text
+            class="text-ink-faint"
             maxFontSizeMultiplier={props.maxScale}
-            style={{ color: look().inkFaint, fontSize: 11.5 }}
+            style={{ fontSize: 11.5 }}
           >
             {hl()}
           </Text>
@@ -138,10 +138,11 @@ function Marks(props: {
       </If>
       <If when={props.b.readProgress >= 0.98}>
         <View class="flex-row items-center gap-0.5">
-          <Icon name="check" size={12} color={look().inkFaint} />
+          <Icon name="check" size={12} class="tint-ink-faint" />
           <Text
+            class="text-ink-faint"
             maxFontSizeMultiplier={props.maxScale}
-            style={{ color: look().inkFaint, fontSize: 11.5 }}
+            style={{ fontSize: 11.5 }}
           >
             Read
           </Text>
@@ -149,18 +150,20 @@ function Marks(props: {
       </If>
       <If when={props.b.readProgress > 0.02 && props.b.readProgress < 0.98}>
         <Text
+          class="text-ink-faint"
           maxFontSizeMultiplier={props.maxScale}
-          style={{ color: look().inkFaint, fontSize: 11.5, fontVariant: ["tabular-nums"] }}
+          style={{ fontSize: 11.5, fontVariant: ["tabular-nums"] }}
         >
           {`${Math.round(props.b.readProgress * 100)}%`}
         </Text>
       </If>
       <If when={status() === "failed" || status() === "pending"}>
         <View class="flex-row items-center gap-1">
-          <Icon name={status() === "failed" ? "alert" : "clock"} size={12} color={look().stamp} />
+          <Icon name={status() === "failed" ? "alert" : "clock"} size={12} class="tint-stamp" />
           <Text
+            class="text-stamp"
             maxFontSizeMultiplier={props.maxScale}
-            style={{ color: look().stamp, fontSize: 11.5 }}
+            style={{ fontSize: 11.5 }}
           >
             {status() === "failed" ? "Unreadable" : "Fetching"}
           </Text>
@@ -182,7 +185,7 @@ function MetaLine(props: { b: Bookmark; showCollection: boolean; highlights?: bo
       .join("  ·  ");
   return (
     <View class="flex-row items-center gap-2">
-      <Text class="min-w-0 flex-1 truncate" style={{ color: look().inkFaint, fontSize: 12 }}>
+      <Text class="min-w-0 flex-1 truncate text-ink-faint" style={{ fontSize: 12 }}>
         {text()}
       </Text>
       <Marks b={props.b} highlights={props.highlights} />
@@ -193,20 +196,11 @@ function MetaLine(props: { b: Bookmark; showCollection: boolean; highlights?: bo
 function Snippet(props: { text: string; lines: number }) {
   return (
     <Text
-      style={{ color: look().inkSoft, fontSize: 13, lineHeight: 18, numberOfLines: props.lines }}
+      class="text-ink-soft"
+      style={{ fontSize: 13, lineHeight: 18, numberOfLines: props.lines }}
     >
       <Each of={markRuns(props.text)}>
-        {(r) => (
-          <Text
-            style={
-              r().hit
-                ? { backgroundColor: look().highlight, color: look().ink }
-                : { color: look().inkSoft }
-            }
-          >
-            {r().text}
-          </Text>
-        )}
+        {(r) => <Text class={r().hit ? "bg-highlight text-ink" : "text-ink-soft"}>{r().text}</Text>}
       </Each>
     </Text>
   );
@@ -246,8 +240,10 @@ function HighlightCount(props: { b: Bookmark; on: (f: ShowField) => boolean }) {
   return (
     <If when={props.on("highlights") && n() > 0}>
       <View class="flex-row items-center gap-0.5">
-        <Icon name="highlighter" size={12} color={look().inkFaint} />
-        <Text style={{ color: look().inkFaint, fontSize: 11.5 }}>{n()}</Text>
+        <Icon name="highlighter" size={12} class="tint-ink-faint" />
+        <Text class="text-ink-faint" style={{ fontSize: 11.5 }}>
+          {n()}
+        </Text>
       </View>
     </If>
   );
@@ -257,10 +253,10 @@ function HighlightCount(props: { b: Bookmark; on: (f: ShowField) => boolean }) {
 function Note(props: { text: string; lines: number }) {
   return (
     <View class="flex-row gap-2">
-      <View style={{ width: 2, borderRadius: 1, backgroundColor: `${look().stamp}88` }} />
+      <View class="rounded-[1px] bg-stamp/53" style={{ width: 2 }} />
       <Text
-        class="min-w-0 flex-1"
-        style={{ color: look().inkSoft, fontSize: 13, lineHeight: 18, numberOfLines: props.lines }}
+        class="min-w-0 flex-1 text-ink-soft"
+        style={{ fontSize: 13, lineHeight: 18, numberOfLines: props.lines }}
       >
         {props.text}
       </Text>
@@ -283,8 +279,8 @@ function Details(props: ItemProps & { lines: number }) {
         else={
           <If when={on("description") && excerptOf(b())}>
             <Text
+              class="text-ink-soft"
               style={{
-                color: look().inkSoft,
                 fontSize: 13,
                 lineHeight: 18,
                 numberOfLines: props.lines,
@@ -301,7 +297,7 @@ function Details(props: ItemProps & { lines: number }) {
         <Note text={b().note ?? ""} lines={props.lines} />
       </If>
       <If when={on("tags") && b().tags.length}>
-        <Text class="truncate" style={{ color: look().stamp, fontSize: 12, lineHeight: 17 }}>
+        <Text class="truncate text-stamp" style={{ fontSize: 12, lineHeight: 17 }}>
           {tagLine(b())}
         </Text>
       </If>
@@ -355,21 +351,18 @@ export function BookmarkCard(
       onContextMenu={
         nativeMenus ? (e) => void showBookmarkMenu(b(), { at: e.pagePosition }) : undefined
       }
-      class="overflow-hidden rounded-[16px] active:opacity-80"
+      class="overflow-hidden rounded-[16px] active:opacity-80 bg-card border-rule-soft hover:bg-card-hover hover:border-rule"
       style={{
-        backgroundColor: look().card,
         borderWidth: 1,
-        borderColor: look().ruleSoft,
         borderCurve: "continuous",
         boxShadow: look().shadow,
         transitionProperty: "box-shadow, background-color, border-color",
-        transitionDuration: 160,
+        // The hover's lift, at once with reduced motion.
+        transitionDuration: reduceMotion() ? 0 : 160,
         transitionTimingFunction: "ease-out",
         ...props.drag?.style(),
       }}
       hoverStyle={{
-        backgroundColor: look().cardHover,
-        borderColor: look().rule,
         boxShadow: look().shadowLift,
       }}
     >
@@ -380,8 +373,8 @@ export function BookmarkCard(
         <View class="gap-1.5 overflow-hidden px-3.5 pt-3 pb-3" style={{ height: body() }}>
           <If when={on("title")}>
             <Text
+              class="text-ink"
               style={{
-                color: look().ink,
                 fontSize: 14.5,
                 lineHeight: 19,
                 fontWeight: "600",
@@ -423,6 +416,7 @@ export function BookmarkRow(props: {
   const thumb = () => (
     <If when={on("cover") && b().coverUrl && thumbFailed() !== b().coverUrl}>
       <Image
+        class="bg-paper-deep"
         src={b().coverUrl ?? ""}
         onError={() => thumbFailed.set(b().coverUrl)}
         style={{
@@ -431,7 +425,6 @@ export function BookmarkRow(props: {
           borderRadius: 12,
           borderCurve: "continuous",
           objectFit: "cover",
-          backgroundColor: look().paperDeep,
           marginTop: 2,
         }}
       />
@@ -451,22 +444,17 @@ export function BookmarkRow(props: {
       onContextMenu={
         nativeMenus ? (e) => void showBookmarkMenu(b(), { at: e.pagePosition }) : undefined
       }
-      class="flex-row gap-3 px-4 py-3.5"
+      class="flex-row gap-3 px-4 py-3.5 hover:bg-card-hover active:bg-selected"
       style={props.drag?.style()}
-      activeStyle={{ backgroundColor: look().selected }}
-      hoverStyle={{ backgroundColor: look().cardHover }}
     >
       {/* iOS's inset hairline, from the text's leading edge. */}
-      <View
-        class="absolute right-0 bottom-0 left-4"
-        style={{ height: 1 / pixelRatio(), backgroundColor: look().rule }}
-      />
+      <View class="absolute right-0 bottom-0 left-4 bg-rule" style={{ height: 1 / pixelRatio() }} />
       <If when={props.coverLeft}>{thumb()}</If>
       <View class="min-w-0 flex-1 gap-1">
         <If when={on("title")}>
           <Text
+            class="text-ink"
             style={{
-              color: look().ink,
               fontSize: 16,
               lineHeight: 21,
               fontWeight: "600",
@@ -481,7 +469,8 @@ export function BookmarkRow(props: {
           else={
             <If when={excerpt()}>
               <Text
-                style={{ color: look().inkSoft, fontSize: 13.5, lineHeight: 18, numberOfLines: 2 }}
+                class="text-ink-soft"
+                style={{ fontSize: 13.5, lineHeight: 18, numberOfLines: 2 }}
               >
                 {excerpt()}
               </Text>
@@ -494,7 +483,7 @@ export function BookmarkRow(props: {
           <Note text={b().note ?? ""} lines={2} />
         </If>
         <If when={on("tags") && b().tags.length}>
-          <Text class="truncate" style={{ color: look().stamp, fontSize: 12.5, lineHeight: 17 }}>
+          <Text class="truncate text-stamp" style={{ fontSize: 12.5, lineHeight: 17 }}>
             {tagLine(b())}
           </Text>
         </If>
@@ -528,13 +517,12 @@ export function BookmarkListRow(props: ItemProps & { coverLeft?: boolean }) {
   const thumb = () => (
     <If when={on("cover")}>
       <View
-        class="overflow-hidden"
+        class="overflow-hidden bg-paper-deep"
         style={{
           width: 96,
           height: 72,
           borderRadius: 10,
           borderCurve: "continuous",
-          backgroundColor: look().paperDeep,
         }}
       >
         <If when={b().coverUrl && thumbFailed() !== b().coverUrl}>
@@ -558,17 +546,15 @@ export function BookmarkListRow(props: ItemProps & { coverLeft?: boolean }) {
       onContextMenu={
         nativeMenus ? (e) => void showBookmarkMenu(b(), { at: e.pagePosition }) : undefined
       }
-      class="flex-row gap-4 rounded-xl px-4 py-3.5"
+      class="flex-row gap-4 rounded-xl px-4 py-3.5 hover:bg-card-hover active:bg-selected"
       style={props.drag?.style()}
-      activeStyle={{ backgroundColor: look().selected }}
-      hoverStyle={{ backgroundColor: look().cardHover }}
     >
       <If when={props.coverLeft}>{thumb()}</If>
       <View class="min-w-0 flex-1 gap-1.5">
         <If when={on("title")}>
           <Text
+            class="text-ink"
             style={{
-              color: look().ink,
               fontSize: 15.5,
               lineHeight: 21,
               fontWeight: "600",
@@ -608,10 +594,8 @@ export function BookmarkHeadline(props: ItemProps) {
       }
       // 48 points on phones: a finger's target is 44 at the least.
       // grows with the text (Dynamic Type) rather than crowd it.
-      class={`${props.touch ? "min-h-12 py-2" : "h-10"} flex-row items-center gap-2.5 rounded-lg px-3`}
+      class={`${props.touch ? "min-h-12 py-2" : "h-10"} flex-row items-center gap-2.5 rounded-lg px-3 hover:bg-card-hover active:bg-selected ${focusRing}`}
       style={props.drag?.style()}
-      activeStyle={{ backgroundColor: look().selected }}
-      hoverStyle={{ backgroundColor: look().cardHover }}
     >
       <If
         when={on("cover") && b().coverUrl && failed() !== b().coverUrl}
@@ -625,9 +609,8 @@ export function BookmarkHeadline(props: ItemProps) {
       </If>
       <If when={on("title")}>
         <Text
-          class="min-w-0 truncate"
+          class="min-w-0 truncate text-ink"
           style={{
-            color: look().ink,
             fontSize: props.touch ? 15 : 14,
             fontWeight: "500",
             flexShrink: 1,
@@ -639,10 +622,7 @@ export function BookmarkHeadline(props: ItemProps) {
         </Text>
       </If>
       <If when={props.snippet || (on("description") && excerptOf(b()))}>
-        <Text
-          class="min-w-0 truncate"
-          style={{ color: look().inkFaint, fontSize: 13, flexShrink: 2 }}
-        >
+        <Text class="min-w-0 truncate text-ink-faint" style={{ fontSize: 13, flexShrink: 2 }}>
           {props.snippet
             ? markRuns(props.snippet)
                 .map((r) => r.text)
@@ -651,15 +631,12 @@ export function BookmarkHeadline(props: ItemProps) {
         </Text>
       </If>
       <If when={on("note") && b().note}>
-        <Text
-          class="min-w-0 truncate"
-          style={{ color: look().inkSoft, fontSize: 13, flexShrink: 2 }}
-        >
+        <Text class="min-w-0 truncate text-ink-soft" style={{ fontSize: 13, flexShrink: 2 }}>
           {b().note}
         </Text>
       </If>
       <If when={on("tags") && b().tags.length}>
-        <Text class="truncate" style={{ color: look().stamp, fontSize: 12, flexShrink: 3 }}>
+        <Text class="truncate text-stamp" style={{ fontSize: 12, flexShrink: 3 }}>
           {tagLine(b())}
         </Text>
       </If>
@@ -682,7 +659,7 @@ export function BookmarkHeadline(props: ItemProps) {
         <View class="shrink-0 flex-row items-center gap-2">
           <If when={on("info")} else={<HighlightCount b={b()} on={on} />}>
             {/* Secondary: it grows less than the title, which keeps the row. */}
-            <Text maxFontSizeMultiplier={1.5} style={{ color: look().inkFaint, fontSize: 12 }}>
+            <Text class="text-ink-faint" maxFontSizeMultiplier={1.5} style={{ fontSize: 12 }}>
               {shortDate(b().createdAt)}
             </Text>
             <Marks b={b()} highlights={on("highlights")} maxScale={1.5} />
@@ -695,6 +672,21 @@ export function BookmarkHeadline(props: ItemProps) {
 }
 
 /**
+ * The covers' shapes (width over height), by URL: kept out of the tiles, whose
+ * cells are recycled, so a tile scrolled back into view, or a column made
+ * again, is laid out at its cover's shape at once instead of jumping from
+ * 4:3 once the picture loads. Bounded: the shapes seen longest ago go first.
+ */
+const SHAPES = 2000;
+const shapes = new Map<string, number>();
+function rememberShape(url: string, ratio: number) {
+  if (shapes.get(url) === ratio) return;
+  shapes.delete(url);
+  shapes.set(url, ratio);
+  if (shapes.size > SHAPES) shapes.delete(shapes.keys().next().value as string);
+}
+
+/**
  * A tile of *Moodboard*: the cover at its own shape (a page's catalog card
  * without one), and what *Show in Moodboard* asks for under it. Tiles of a
  * column stack with no gaps between their heights, as Raindrop's masonry.
@@ -702,13 +694,18 @@ export function BookmarkHeadline(props: ItemProps) {
 export function MoodboardTile(props: ItemProps) {
   const b = () => props.b;
   const on = (f: ShowField) => !props.show || props.show(f);
-  // Recycled cells: the shape is the cover's, and which cover it was.
-  const shape = signal<{ url: string; ratio: number } | null>(null);
+  // Recycled cells: remember which cover failed, not just that one did.
   const failedUrl = signal<string | null>(null);
+  // Only this tile updates when its cover loads; recycled tiles read `shapes` at once.
+  const loadedShape = signal<{ url: string; ratio: number } | null>(null);
   const url = () => b().coverUrl;
   const ratio = () => {
-    const s = shape();
-    return s && s.url === url() ? s.ratio : 4 / 3;
+    const u = url();
+    if (!u) return 4 / 3;
+    const cached = shapes.get(u);
+    if (cached !== undefined) return cached;
+    const s = loadedShape();
+    return s && s.url === u ? s.ratio : 4 / 3;
   };
   const text = () =>
     on("title") ||
@@ -730,16 +727,14 @@ export function MoodboardTile(props: ItemProps) {
       onContextMenu={
         nativeMenus ? (e) => void showBookmarkMenu(b(), { at: e.pagePosition }) : undefined
       }
-      class="overflow-hidden rounded-[14px] active:opacity-80"
+      class={`overflow-hidden rounded-[14px] active:opacity-80 bg-card border-rule-soft hover:bg-card-hover ${focusRing}`}
       style={{
-        backgroundColor: look().card,
         borderWidth: 1,
-        borderColor: look().ruleSoft,
         borderCurve: "continuous",
         boxShadow: look().shadow,
         ...props.drag?.style(),
       }}
-      hoverStyle={{ backgroundColor: look().cardHover, boxShadow: look().shadowLift }}
+      hoverStyle={{ boxShadow: look().shadowLift }}
     >
       <If when={on("cover")}>
         <If
@@ -747,22 +742,22 @@ export function MoodboardTile(props: ItemProps) {
           else={<PaperCover b={b()} height={150} radius={13} />}
         >
           <Image
+            class="bg-paper-deep"
             src={url() ?? ""}
             onError={() => failedUrl.set(url())}
             onLoad={(e) => {
               const u = url();
-              if (u && e.size.width > 0 && e.size.height > 0)
-                shape.set({
-                  url: u,
-                  ratio: Math.min(3, Math.max(0.5, e.size.width / e.size.height)),
-                });
+              if (u && e.size.width > 0 && e.size.height > 0) {
+                const r = Math.min(3, Math.max(0.5, e.size.width / e.size.height));
+                rememberShape(u, r);
+                loadedShape.set({ url: u, ratio: r });
+              }
             }}
             fadeDuration={150}
             style={{
               width: "100%",
               aspectRatio: ratio(),
               objectFit: "cover",
-              backgroundColor: look().paperDeep,
               borderTopLeftRadius: 13,
               borderTopRightRadius: 13,
             }}
@@ -773,8 +768,8 @@ export function MoodboardTile(props: ItemProps) {
         <View class="gap-1.5 px-3 pt-2.5 pb-3">
           <If when={on("title")}>
             <Text
+              class="text-ink"
               style={{
-                color: look().ink,
                 fontSize: 13.5,
                 lineHeight: 18,
                 fontWeight: "600",

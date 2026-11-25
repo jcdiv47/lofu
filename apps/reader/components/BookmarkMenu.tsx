@@ -3,8 +3,7 @@ import { ContextMenu, Menu, MenuItem, MenuSeparator } from "nsh/base";
 import type { JSX } from "nsh/jsx-runtime";
 import { type BookmarkMenuOptions, bookmarkActions, hasBrowser, startsGroup } from "../lib/actions";
 import type { Bookmark } from "../lib/api";
-import { look } from "../lib/look";
-import { Icon, type IconName } from "./ui";
+import { Icon, type IconName, popupSurface } from "./ui";
 
 /*
  * The bookmark's menu drawn by the app, for the web build: there's no native
@@ -33,43 +32,33 @@ const iconFor: Record<string, (b: Bookmark) => IconName> = {
 
 const popup = () => ({
   margin: 8,
-  popupClass: "min-w-[208px] rounded-xl p-1.5 transition duration-100 ease-out",
-  popupStyle: {
-    backgroundColor: look().cardHover,
-    borderWidth: 1,
-    borderColor: look().rule,
-    boxShadow: "0px 2px 6px rgb(0 0 0 / 0.12), 0px 12px 32px rgb(0 0 0 / 0.22)",
-  },
-  popupStartingClass: "opacity-0 scale-95",
-  popupEndingClass: "opacity-0",
+  ...popupSurface(),
+  popupClass: `min-w-[208px] ${popupSurface().popupClass}`,
 });
 
 /** Made on each opening, so it reads the bookmark a recycled cell shows now. */
 function items(b: Bookmark, o?: BookmarkMenuOptions) {
   const actions = bookmarkActions(b, o);
   return actions.flatMap((a, i) => [
-    ...(startsGroup(actions, i)
-      ? [<MenuSeparator class="mx-2 my-1 h-px" style={{ backgroundColor: look().rule }} />]
-      : []),
+    ...(startsGroup(actions, i) ? [<MenuSeparator class="mx-2 my-1 h-px bg-rule" />] : []),
     <MenuItem
       onSelect={a.run}
-      class="flex-row items-center gap-2.5 rounded-md px-2.5 py-1.5"
-      hoverStyle={{ backgroundColor: look().selected }}
-      focusStyle={{ backgroundColor: look().selected }}
+      class="flex-row items-center gap-2.5 rounded-md px-2.5 py-1.5 hover:bg-selected focus:bg-selected"
     >
       <Icon
         name={iconFor[a.id]?.(b) ?? "chevron"}
         size={15}
-        color={
+        class={
           a.destructive
-            ? look().stamp
+            ? "tint-stamp"
             : a.id === "favorite" && b.favorite
-              ? look().favorite
-              : look().inkSoft
+              ? "tint-favorite"
+              : "tint-ink-soft"
         }
       />
       <Text
-        style={{ color: a.destructive ? look().stamp : look().ink, fontSize: 13.5, lineHeight: 18 }}
+        class={a.destructive ? "text-stamp" : "text-ink"}
+        style={{ fontSize: 13.5, lineHeight: 18 }}
       >
         {a.id === "move" ? `${a.label}…` : a.label}
       </Text>

@@ -1,10 +1,9 @@
 //! What the app needs from the platform that nsh doesn't offer: the system's
-//! share sheet (`UIActivityViewController` on iOS, `NSSharingServicePicker`
-//! on macOS), the system's menu from a point on iOS (`PopupMenu`), the login
+//! menu from a point on iOS (`PopupMenu`), the login
 //! the iOS share extension (`share/`) saves with, and the system's own glass
 //! buttons (and, on iOS, search field) as native components (`controls`,
 //! used through `components/native.tsx`). TSX imports the modules from
-//! `lofu/native` (`lib/share.ts`); their TypeScript declarations are
+//! `lofu/native`; their TypeScript declarations are
 //! generated into `.nsh/types/lofu/native.d.ts`.
 
 use nsh_core::prelude::*;
@@ -37,7 +36,6 @@ fn macos_components(components: &nsh_platform_macos::Components) {
 /// The crate's UI set (`nsh.json` `"rust"`).
 #[native_module("lofu/native")]
 fn native(registry: &mut Registry) {
-    registry.module::<Share>();
     registry.module::<PopupMenu>();
     registry.module::<Toolbar>();
     registry.module::<Swipe>();
@@ -352,8 +350,8 @@ mod quiet {
 }
 
 /// Asks for a line of text (a new name) with the system's alert, which iOS
-/// 26 draws in Liquid Glass (`src/prompt.rs`). nsh's `AlertDialog` takes no
-/// text; elsewhere `components/Prompt.tsx` shows a card of the app's own.
+/// 26 draws in Liquid Glass (`src/prompt.rs`). nsh-core 0.6.1's `Dialog` has
+/// no text field yet; elsewhere `components/Prompt.tsx` shows a glass card.
 #[module]
 pub struct TextPrompt;
 
@@ -367,8 +365,8 @@ impl TextPrompt {
     /// Shows the alert: `title`, a `message` under it (the last try's error,
     /// or ""), a field starting with `value` and showing `placeholder`, and
     /// Cancel and `confirm`, in `tint` (`#rrggbb`; "" for the system's).
-    /// Resolves with JSON: `{ "text": "…" }` when
-    /// confirmed, `null` when cancelled.
+    /// Resolves with JSON: `{ "text": "…" }` when confirmed, `null` when
+    /// cancelled.
     pub async fn ask(
         title: String,
         message: String,
@@ -424,34 +422,6 @@ impl PopupMenu {
     /// was dismissed.
     pub async fn show(title: Option<String>, items: String, x: f64, y: f64) -> String {
         menu::show(title, items, x, y).await
-    }
-}
-
-/// The system's share sheet.
-#[module]
-pub struct Share;
-
-#[module]
-impl Share {
-    /// Whether this platform has a share sheet (iOS and macOS).
-    pub fn available() -> bool {
-        cfg!(any(target_os = "ios", target_os = "macos"))
-    }
-
-    /// Opens the share sheet for a link. `x` and `y` (points from the
-    /// window's top left; negative for its middle) are where it points from:
-    /// the picker's anchor on macOS, the popover's on an iPad. Returns false
-    /// where there is no share sheet; the sheet itself opens a moment later,
-    /// on the main thread.
-    pub fn url(url: String, x: f64, y: f64) -> bool {
-        sheet::share(url, x, y)
-    }
-}
-
-#[cfg(not(any(target_os = "ios", target_os = "macos")))]
-mod sheet {
-    pub fn share(_url: String, _x: f64, _y: f64) -> bool {
-        false
     }
 }
 
@@ -838,129 +808,6 @@ mod menu {
             let b: NSRect = msg_send![&*button, bounds];
             let at = NSPoint::new(b.size.width / 2.0, b.size.height / 2.0);
             let _: () = msg_send![&*interaction, _presentMenuAtLocation: at];
-        }
-    }
-}
-
-#[cfg(any(target_os = "ios", target_os = "macos"))]
-mod sheet {
-    use objc2::rc::{Allocated, Retained};
-    use objc2::runtime::AnyObject;
-    use objc2::{class, msg_send};
-    use objc2_foundation::{NSArray, NSString, NSURL};
-
-    /// Modules run on nsh's engine thread; UIKit and AppKit only on the main one.
-    pub fn share(url: String, x: f64, y: f64) -> bool {
-        dispatch2::DispatchQueue::main().exec_async(move || {
-            // SAFETY: on the main thread, with the platform's own classes.
-            unsafe { present(&url, x, y) };
-        });
-        true
-    }
-
-    /// The link, or its text when it doesn't parse as a URL.
-    fn items(url: &str) -> Retained<NSArray<AnyObject>> {
-        let text = NSString::from_str(url);
-        match NSURL::URLWithString(&text) {
-            Some(u) => {
-                NSArray::from_retained_slice(&[Retained::into_super(Retained::into_super(u))])
-            }
-            None => {
-                NSArray::from_retained_slice(&[Retained::into_super(Retained::into_super(text))])
-            }
-        }
-    }
-
-    #[cfg(target_os = "ios")]
-    unsafe fn present(url: &str, x: f64, y: f64) {
-        use objc2_foundation::{NSPoint, NSRect, NSSize};
-        unsafe {
-            let Some(window) = super::window::key() else {
-                return;
-            };
-            let Some(top) = super::window::top(&window) else {
-                return;
-            };
-            let items = items(url);
-            let sheet: Allocated<AnyObject> = msg_send![class!(UIActivityViewController), alloc];
-            let sheet: Retained<AnyObject> = msg_send![
-                sheet,
-                initWithActivityItems: &*items,
-                applicationActivities: Option::<&AnyObject>::None
-            ];
-            // An iPad shows it as a popover, which needs an anchor.
-            let popover: Option<Retained<AnyObject>> =
-                msg_send![&*sheet, popoverPresentationController];
-            if let Some(popover) = popover {
-                let view: Retained<AnyObject> = msg_send![&*top, view];
-                let bounds: NSRect = msg_send![&*view, bounds];
-                let (px, py) = if x >= 0.0 && y >= 0.0 {
-                    (x, y)
-                } else {
-                    (bounds.size.width / 2.0, bounds.size.height / 2.0)
-                };
-                let _: () = msg_send![&*popover, setSourceView: &*view];
-                let _: () = msg_send![
-                    &*popover,
-                    setSourceRect: NSRect::new(NSPoint::new(px, py), NSSize::new(1.0, 1.0))
-                ];
-            }
-            let _: () = msg_send![
-                &*top,
-                presentViewController: &*sheet,
-                animated: true,
-                completion: Option::<&block2::Block<dyn Fn()>>::None
-            ];
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    thread_local! {
-        /// The picker on screen: AppKit doesn't keep it alive while it shows.
-        static PICKER: std::cell::RefCell<Option<Retained<AnyObject>>> =
-            const { std::cell::RefCell::new(None) };
-    }
-
-    #[cfg(target_os = "macos")]
-    unsafe fn present(url: &str, x: f64, y: f64) {
-        use objc2_foundation::{NSPoint, NSRect, NSSize};
-        unsafe {
-            let app: Retained<AnyObject> = msg_send![class!(NSApplication), sharedApplication];
-            let window: Option<Retained<AnyObject>> = msg_send![&*app, keyWindow];
-            let window = match window {
-                Some(w) => w,
-                None => {
-                    let main: Option<Retained<AnyObject>> = msg_send![&*app, mainWindow];
-                    let Some(w) = main else { return };
-                    w
-                }
-            };
-            let Some(view): Option<Retained<AnyObject>> = msg_send![&*window, contentView] else {
-                return;
-            };
-            let bounds: NSRect = msg_send![&*view, bounds];
-            let flipped: bool = msg_send![&*view, isFlipped];
-            let (px, top) = if x >= 0.0 && y >= 0.0 {
-                (x, y)
-            } else {
-                (bounds.size.width / 2.0, bounds.size.height / 2.0)
-            };
-            let py = if flipped {
-                top
-            } else {
-                bounds.size.height - top
-            };
-            let items = items(url);
-            let picker: Allocated<AnyObject> = msg_send![class!(NSSharingServicePicker), alloc];
-            let picker: Retained<AnyObject> = msg_send![picker, initWithItems: &*items];
-            // NSRectEdgeMinY: below the point in a flipped view, above it otherwise.
-            let _: () = msg_send![
-                &*picker,
-                showRelativeToRect: NSRect::new(NSPoint::new(px, py), NSSize::new(1.0, 1.0)),
-                ofView: &*view,
-                preferredEdge: 1usize
-            ];
-            PICKER.with(|p| *p.borrow_mut() = Some(picker));
         }
     }
 }

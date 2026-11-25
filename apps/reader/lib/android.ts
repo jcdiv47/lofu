@@ -20,9 +20,6 @@ export const readAndroidToken = async () => {
 export const writeAndroidToken = async (token: string) => {
   await host.call("lofu.secret.write", token);
 };
-export const shareAndroidUrl = async (url: string) => {
-  await host.call("lofu.share", url);
-};
 
 /**
  * Android's back button takes `handler` while the calling component lives

@@ -1,9 +1,9 @@
-import { signal, Text, View } from "nsh";
+import { signal, View } from "nsh";
 import { Input } from "nsh/base";
 import type { Bookmark } from "../lib/api";
-import { look } from "../lib/look";
 import { bookmark as current, updateBookmark } from "../lib/store";
 import { normalizeTag, TagField } from "./TagField";
+import { ActionButton, ErrorText, FieldLabel, fieldClass } from "./ui";
 
 /**
  * A bookmark's title, tags and note. A dialog on desktops, a page on phones.
@@ -45,18 +45,7 @@ export function EditBookmark(props: { b: Bookmark; onDone: () => void; onCancel?
     }
   };
 
-  const fieldStyle = (height: number) => ({
-    height,
-    color: look().ink,
-    fontSize: 15,
-    backgroundColor: look().card,
-    borderWidth: 1,
-    borderColor: look().rule,
-    placeholderColor: look().inkFaint,
-  });
-  const label = (text: string) => (
-    <Text style={{ color: look().inkSoft, fontSize: 12.5, fontWeight: "600" }}>{text}</Text>
-  );
+  const label = (text: string) => <FieldLabel text={text} />;
 
   return (
     <View class="gap-4">
@@ -68,8 +57,8 @@ export function EditBookmark(props: { b: Bookmark; onDone: () => void; onCancel?
           placeholder={b().url}
           returnKeyType="next"
           onChange={({ value }) => title.set(value)}
-          class="rounded-xl px-3.5"
-          style={fieldStyle(40)}
+          class={fieldClass}
+          style={{ height: 40, fontSize: 15 }}
         />
       </View>
       <View class="gap-1.5">
@@ -84,37 +73,23 @@ export function EditBookmark(props: { b: Bookmark; onDone: () => void; onCancel?
           placeholder="Why you saved it, what to look for…"
           multiline
           onChange={({ value }) => note.set(value)}
-          class="rounded-xl px-3.5 py-2.5"
-          style={fieldStyle(132)}
+          class={`${fieldClass} py-2.5`}
+          style={{ height: 132, fontSize: 15 }}
         />
       </View>
       <If when={error()}>
-        <Text testID="edit-error" style={{ color: look().stamp, fontSize: 13.5, lineHeight: 19 }}>
-          {error()}
-        </Text>
+        <ErrorText testID="edit-error" text={error()} />
       </If>
       <View class="flex-row items-center justify-end gap-2">
         <If when={props.onCancel}>
-          <View
-            role="button"
-            onPress={() => props.onCancel?.()}
-            class="rounded-full px-4 py-2.5 active:opacity-60"
-          >
-            <Text style={{ color: look().inkSoft, fontSize: 14.5, fontWeight: "500" }}>Cancel</Text>
-          </View>
+          <ActionButton variant="cancel" label="Cancel" onPress={() => props.onCancel?.()} />
         </If>
-        <View
-          role="button"
+        <ActionButton
           testID="edit-save"
-          accessibilityState={{ disabled: busy() }}
+          busy={busy()}
+          label={busy() ? "Saving…" : "Save"}
           onPress={() => void save()}
-          class="rounded-full px-5 py-2.5 active:opacity-70"
-          style={{ backgroundColor: look().ink, opacity: busy() ? 0.6 : 1 }}
-        >
-          <Text style={{ color: look().paper, fontSize: 14.5, fontWeight: "600" }}>
-            {busy() ? "Saving…" : "Save"}
-          </Text>
-        </View>
+        />
       </View>
     </View>
   );

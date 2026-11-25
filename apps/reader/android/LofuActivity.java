@@ -38,12 +38,6 @@ public final class LofuActivity extends Activity {
             try { writeSecret((String)data); reply.resolve(true); }
             catch (Exception e) { reply.reject("Cannot securely store the token."); }
         }));
-        view.handle("lofu.share", (data, reply) -> {
-            Intent send = new Intent(Intent.ACTION_SEND).setType("text/plain")
-                .putExtra(Intent.EXTRA_TEXT, (String)data);
-            startActivity(Intent.createChooser(send, "Share link"));
-            reply.resolve(true);
-        });
         // A read-only RichEditor (the article) focuses nsh's hidden input at the caret on
         // every press, which raises the keyboard: inputs inside a view labelled with one of
         // these labels keep it down. Selecting and copying still work.

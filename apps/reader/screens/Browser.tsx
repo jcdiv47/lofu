@@ -7,7 +7,7 @@ import {
 } from "../components/native";
 import { GlassButton, GlassGroup, GlassTint, IconButton, RoundGlassButton } from "../components/ui";
 import { openInBrowser } from "../lib/actions";
-import { glass, look } from "../lib/look";
+import { glass } from "../lib/look";
 import { contentLeft, nativeToolbar, useToolbar } from "../lib/toolbar";
 import { isAppLinkRefusal } from "../lib/web";
 
@@ -197,7 +197,7 @@ export function Browser(props: {
   }
 
   return (
-    <View class="flex-1" style={{ backgroundColor: look().paper }}>
+    <View class="flex-1 bg-paper">
       <If when={props.wide}>
         <View
           desktop={{ windowDrag: true }}
@@ -222,12 +222,12 @@ export function Browser(props: {
           <View class="flex-1 px-1">
             <Text
               testID="web-title"
-              class="truncate"
-              style={{ color: look().ink, fontSize: 13, fontWeight: "600" }}
+              class="truncate text-ink"
+              style={{ fontSize: 13, fontWeight: "600" }}
             >
               {at().title || host(at().url)}
             </Text>
-            <Text class="truncate" style={{ color: look().inkFaint, fontSize: 11.5 }}>
+            <Text class="truncate text-ink-faint" style={{ fontSize: 11.5 }}>
               {host(at().url)}
             </Text>
           </View>
@@ -262,14 +262,8 @@ export function Browser(props: {
         />
         <If when={failed()}>
           {(message) => (
-            <View
-              class="absolute inset-0 items-center gap-2 px-8 pt-24"
-              style={{ backgroundColor: look().paper }}
-            >
-              <Text
-                class="text-center"
-                style={{ color: look().inkSoft, fontSize: 15, lineHeight: 21 }}
-              >
+            <View class="absolute inset-0 items-center gap-2 px-8 pt-24 bg-paper">
+              <Text class="text-center text-ink-soft" style={{ fontSize: 15, lineHeight: 21 }}>
                 {`This page didn't load: ${message()}`}
               </Text>
               <View class="mt-2">

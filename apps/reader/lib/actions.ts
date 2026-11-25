@@ -1,9 +1,8 @@
-import { PopupMenu, Share } from "lofu/native";
-import { Clipboard, openUrl, platform } from "nsh";
+import { PopupMenu } from "lofu/native";
+import { Clipboard, openUrl, platform, Share, signal } from "nsh";
 import { AlertDialog } from "nsh/base";
 import { isAvailable, Menu } from "nsh/desktop";
 import { promptText } from "../components/Prompt";
-import { shareAndroidUrl } from "./android";
 import { api, type Bookmark } from "./api";
 import { type OpenIn, prefs, sortedCollections } from "./prefs";
 import {
@@ -111,31 +110,29 @@ export function openBookmark(b: Bookmark, how: OpenIn = prefs().openIn) {
   else openInReader(b);
 }
 
-/** A point in the window, where a menu or the share picker points from. */
+/** A point in the window, where a menu points from. */
 export type At = { x: number; y: number };
 
 /**
- * The system's share sheet (`src/lib.rs`): iOS and macOS. Elsewhere there is
- * none, and the menus offer *Copy link* only.
+ * Whether there is a share sheet (nsh's `Share`, `"share"` in `nsh.json`):
+ * iOS, Android, macOS and browsers with `navigator.share`. Elsewhere the
+ * menus offer *Copy link* only. Known once `Share.available()` answers.
  */
-export const canShare = (() => {
-  if (platform.os === "android") return true;
-  try {
-    return Share.available();
-  } catch {
-    return false;
-  }
-})();
+export const canShare = signal(false);
+void Share.available().then(
+  (yes) => canShare.set(yes),
+  () => canShare.set(false),
+);
 
-/** Shares the bookmark's link with the system's share sheet. */
-export function shareBookmark(b: Bookmark, at?: At) {
-  if (platform.os === "android") {
-    void shareAndroidUrl(b.url).catch(() => notice("Cannot share", "Try Copy Link instead."));
-    return;
-  }
-  if (!canShare || !Share.url(b.url, at?.x ?? -1, at?.y ?? -1)) {
-    void Clipboard.writeText(b.url);
-  }
+/**
+ * Shares the bookmark's link with the system's share sheet (on an iPad and
+ * the Mac, a popover at the middle of the window: nsh's points only at a
+ * view); where it can't, the link goes on the clipboard.
+ */
+export function shareBookmark(b: Bookmark) {
+  void Share.show({ url: b.url, title: b.title || null }).catch(
+    () => void Clipboard.writeText(b.url),
+  );
 }
 
 /**
@@ -341,12 +338,12 @@ export function bookmarkActions(b: Bookmark, o: BookmarkMenuOptions = {}): Bookm
       group: "link",
       run: () => void Clipboard.writeText(b.url),
     },
-    canShare && {
+    canShare() && {
       id: "share",
       label: "Share…",
       symbol: "square.and.arrow.up",
       group: "link",
-      run: () => shareBookmark(b, o.at),
+      run: () => shareBookmark(b),
     },
     !trashed && {
       id: "favorite",

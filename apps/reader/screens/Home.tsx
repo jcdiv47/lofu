@@ -11,18 +11,18 @@ import {
   untracked,
   View,
 } from "nsh";
-import { Input } from "nsh/base";
+import { Button } from "nsh/base";
 import type { JSX } from "nsh/jsx-runtime";
+import { EntryMenu } from "../components/ListControls";
 import { nativeScrollEdges, ScrollEdge } from "../components/native";
-import { systemPrompt } from "../components/Prompt";
 import { SearchField } from "../components/SearchField";
 import {
   BottomEdge,
-  GlassButton,
-  GlassTint,
+  focusRing,
   Icon,
   type IconName,
   RoundGlassButton,
+  SyncStatus,
   TopEdge,
 } from "../components/ui";
 import {
@@ -32,8 +32,7 @@ import {
   systemMenu,
   systemMenus,
 } from "../lib/actions";
-import { onAndroidBack } from "../lib/android";
-import { glass, look } from "../lib/look";
+import { look } from "../lib/look";
 import {
   type CollectionSort,
   isCollapsed,
@@ -45,20 +44,15 @@ import {
   type TagSort,
   toggleSection,
 } from "../lib/prefs";
-import {
-  countFor,
-  createCollection,
-  offline,
-  outbox,
-  type Source,
-  syncError,
-  syncing,
-} from "../lib/store";
-import { filters, syncStatus, tint } from "./Sidebar";
+import { countFor, type Source } from "../lib/store";
+import { filters, type Live, read, tint } from "./Sidebar";
 
 /** The top bar's height under the status bar: iOS 26's bar, or room for the app's round buttons. */
 const BAR = 54;
 const BUTTON = 46;
+
+/** Names a new collection: the system's alert, with its text field. */
+const newCollection = () => void newCollectionPrompt();
 
 /**
  * The phone's first page: where the library can be looked at from, in inset
@@ -79,21 +73,14 @@ export function Home(props: {
   onAdd: () => void;
 }) {
   const menu = props.menu;
-  const naming = signal(false);
-  /** Names a new collection: the system's alert on iOS, else the card below. */
-  const newCollection = () => {
-    if (systemPrompt) void newCollectionPrompt();
-    else naming.set(true);
-  };
-  // iOS: the system's menu (Liquid Glass) from the bar's •••, instead of the
-  // app's panel.
+  // iOS: the system's menu (Liquid Glass) from the bar's •••.
   effect(() => {
     if (!systemMenus || !menu()) return;
     // Down at once, not when the menu's done (a second or two after it's
     // gone), so that the next tap opens it again (`Library`'s menu too).
     untracked(() => {
       menu.set(false);
-      void openSystemMenu(newCollection);
+      void systemMenu("", homeMenuEntries()).then(applyHomeChoice);
     });
   });
   const query = signal("");
@@ -114,15 +101,18 @@ export function Home(props: {
   const row = (
     source: Source,
     icon: IconName,
-    color: string,
-    label: string,
+    /** A data color: the glyph's (a collection's own, once it has one). */
+    color: Live<string>,
+    /** Reactive where it can change in place: a collection renamed. */
+    label: Live<string>,
     /** Reactive: rows are kept while the list around them changes (sorting, filtering). */
-    last: boolean | (() => boolean),
+    last: Live<boolean>,
     testID?: string,
   ) => (
+    // A view, not a `Button`: a long press opens the row's menu where it was pressed.
     <View
       role="button"
-      accessibilityLabel={label}
+      accessibilityLabel={read(label)}
       testID={testID}
       onPress={() => props.onSelect(source)}
       onLongPress={
@@ -135,31 +125,27 @@ export function Home(props: {
           ? (e) => void showSourceMenu(source, e.pagePosition)
           : undefined
       }
-      class="h-[52px] flex-row items-center gap-3.5 pr-5 pl-4"
-      activeStyle={{ backgroundColor: look().selected }}
+      class={`h-[52px] flex-row items-center gap-3.5 pr-5 pl-4 active:bg-selected ${focusRing}`}
     >
-      <Icon name={icon} size={22} color={color} />
-      <Text class="flex-1 truncate" style={{ color: look().ink, fontSize: 17 }}>
-        {label}
+      <Icon name={icon} size={22} color={read(color)} />
+      <Text class="flex-1 truncate text-ink" style={{ fontSize: 17 }}>
+        {read(label)}
       </Text>
-      <Text style={{ color: look().inkFaint, fontSize: 17, fontVariant: ["tabular-nums"] }}>
+      <Text class="text-ink-faint" style={{ fontSize: 17, fontVariant: ["tabular-nums"] }}>
         {countFor(source) ? countFor(source).toLocaleString() : ""}
       </Text>
-      <If when={!(typeof last === "function" ? last() : last)}>
+      <If when={!read(last)}>
         {/* iOS's inset separator, from the label's leading edge. */}
         <View
-          class="absolute right-0 bottom-0"
-          style={{ left: 52, height: 1 / pixelRatio(), backgroundColor: look().rule }}
+          class="absolute right-0 bottom-0 bg-rule"
+          style={{ left: 52, height: 1 / pixelRatio() }}
         />
       </If>
     </View>
   );
 
   const group = (children: JSX.Element) => (
-    <View
-      class="mx-4 overflow-hidden rounded-[24px]"
-      style={{ backgroundColor: look().card, borderCurve: "continuous" }}
-    >
+    <View class="mx-4 overflow-hidden rounded-[24px] bg-card" style={{ borderCurve: "continuous" }}>
       {children}
     </View>
   );
@@ -167,24 +153,24 @@ export function Home(props: {
   /** A section's heading: its name folds it away, `action` sits at the other end. */
   const heading = (section: Section, label: string, action?: JSX.Element) => (
     <View class="flex-row items-center pt-7 pr-4 pb-2.5 pl-5">
+      {/* A disclosure: screen readers hear whether it's open (`Button` has no `expanded`). */}
       <View
         role="button"
         accessibilityLabel={isCollapsed(section) ? `Show ${label}` : `Hide ${label}`}
         accessibilityState={{ expanded: !isCollapsed(section) }}
         testID={`section-${section}`}
         onPress={() => toggleSection(section)}
-        class="flex-row items-center gap-1.5 active:opacity-60"
+        class={`flex-row items-center gap-1.5 rounded-lg active:opacity-60 ${focusRing}`}
       >
-        <Text style={{ color: look().inkSoft, fontSize: 17, fontWeight: "600" }}>{label}</Text>
+        <Text class="text-ink-soft" style={{ fontSize: 17, fontWeight: "600" }}>
+          {label}
+        </Text>
         <View
-          style={{
-            transform: isCollapsed(section) ? "rotate(-90deg)" : "rotate(0deg)",
-            transitionProperty: "transform",
-            transitionDuration: 200,
-            transitionTimingFunction: "ease-out",
-          }}
+          class={`transition-transform duration-200 ease-out motion-reduce:transition-none ${
+            isCollapsed(section) ? "-rotate-90" : "rotate-0"
+          }`}
         >
-          <Icon name="chevronDown" size={16} color={look().inkSoft} />
+          <Icon name="chevronDown" size={16} />
         </View>
       </View>
       <View class="flex-1" />
@@ -194,10 +180,7 @@ export function Home(props: {
 
   /** A heading for search results: it doesn't fold. */
   const label = (text: string) => (
-    <Text
-      class="pt-7 pr-4 pb-2.5 pl-5"
-      style={{ color: look().inkSoft, fontSize: 17, fontWeight: "600" }}
-    >
+    <Text class="pt-7 pr-4 pb-2.5 pl-5 text-ink-soft" style={{ fontSize: 17, fontWeight: "600" }}>
       {text}
     </Text>
   );
@@ -230,20 +213,18 @@ export function Home(props: {
   const results = () => (
     <>
       {group(
-        <View
-          role="button"
+        <Button
           accessibilityLabel={`Search bookmarks for ${query().trim()}`}
           testID="search-bookmarks"
           onPress={submit}
-          class="h-[52px] flex-row items-center gap-3.5 pr-5 pl-4"
-          activeStyle={{ backgroundColor: look().selected }}
+          class={`h-[52px] flex-row items-center gap-3.5 pr-5 pl-4 active:bg-selected ${focusRing}`}
         >
-          <Icon name="search" size={22} color={look().stamp} />
-          <Text class="flex-1 truncate" style={{ color: look().ink, fontSize: 17 }}>
+          <Icon name="search" size={22} class="tint-stamp" />
+          <Text class="flex-1 truncate text-ink" style={{ fontSize: 17 }}>
             {`Search bookmarks for “${query().trim()}”`}
           </Text>
-          <Icon name="chevron" size={15} color={look().inkFaint} />
-        </View>,
+          <Icon name="chevron" size={15} class="tint-ink-faint" />
+        </Button>,
       )}
       <If when={libraryHits().length}>
         {label("Library")}
@@ -253,8 +234,8 @@ export function Home(props: {
               row(
                 f().source,
                 f().icon,
-                f().color,
-                f().label,
+                () => f().color,
+                () => f().label,
                 () => i() === libraryHits().length - 1,
               )
             }
@@ -269,8 +250,8 @@ export function Home(props: {
               row(
                 { kind: "collection", id: c().id },
                 "folder",
-                c().color ?? tint.folder,
-                c().name,
+                () => c().color ?? tint.folder,
+                () => c().name,
                 () => i() === collectionHits().length - 1,
               )
             }
@@ -286,7 +267,7 @@ export function Home(props: {
                 { kind: "tag", name: t().name },
                 "hash",
                 tint.tag,
-                t().name,
+                () => t().name,
                 () => i() === tagHits().length - 1,
               )
             }
@@ -294,17 +275,15 @@ export function Home(props: {
         )}
       </If>
       <If when={!libraryHits().length && !collectionHits().length && !tagHits().length}>
-        <Text class="px-6 pt-5" style={{ color: look().inkFaint, fontSize: 15 }}>
+        <Text class="px-6 pt-5 text-ink-faint" style={{ fontSize: 15 }}>
           No collections, filters or tags are called that.
         </Text>
       </If>
     </>
   );
 
-  const status = syncStatus;
-
   return (
-    <View class="flex-1" style={{ backgroundColor: look().paper }}>
+    <View class="flex-1 bg-paper">
       <Scroll
         class="flex-1"
         keyboardDismissMode="on-drag"
@@ -313,27 +292,10 @@ export function Home(props: {
         contentStyle={{ paddingTop: top() + BAR + 4, paddingBottom: bottom() + 96 }}
       >
         <View class="gap-1 px-5 pb-4">
-          <Text style={{ color: look().ink, fontSize: 34, fontWeight: "700", lineHeight: 41 }}>
+          <Text class="text-ink" style={{ fontSize: 34, fontWeight: "700", lineHeight: 41 }}>
             Library
           </Text>
-          <View class="flex-row items-center gap-1.5">
-            <View
-              style={{
-                width: 7,
-                height: 7,
-                borderRadius: 4,
-                backgroundColor:
-                  syncError() || offline()
-                    ? look().stamp
-                    : syncing() || outbox().length
-                      ? look().favorite
-                      : "#6f9b6a",
-              }}
-            />
-            <Text class="truncate" style={{ color: look().inkFaint, fontSize: 13 }}>
-              {status()}
-            </Text>
-          </View>
+          <SyncStatus size="regular" />
         </View>
 
         <If when={!searching()} else={results()}>
@@ -354,21 +316,20 @@ export function Home(props: {
           {heading(
             "collections",
             "Collections",
-            <View
-              role="button"
+            <Button
               accessibilityLabel="New collection"
               testID="new-collection"
               onPress={newCollection}
-              class="h-9 w-9 items-center justify-center rounded-full active:opacity-60"
+              class={`h-9 w-9 items-center justify-center rounded-full active:opacity-60 ${focusRing}`}
             >
-              <Icon name="plus" size={22} color={look().stamp} />
-            </View>,
+              <Icon name="plus" size={22} class="tint-stamp" />
+            </Button>,
           )}
           <If when={!isCollapsed("collections")}>
             <If
               when={sortedCollections().length}
               else={
-                <Text class="px-5" style={{ color: look().inkFaint, fontSize: 15 }}>
+                <Text class="px-5 text-ink-faint" style={{ fontSize: 15 }}>
                   No collections yet.
                 </Text>
               }
@@ -376,11 +337,12 @@ export function Home(props: {
               {group(
                 <Each of={sortedCollections()} key={(c) => c.id}>
                   {(c, i) =>
+                    // Kept by id: a rename or a new color shows in place.
                     row(
                       { kind: "collection", id: c().id },
                       "folder",
-                      c().color ?? tint.folder,
-                      c().name,
+                      () => c().color ?? tint.folder,
+                      () => c().name,
                       () => i() === sortedCollections().length - 1,
                     )
                   }
@@ -397,8 +359,8 @@ export function Home(props: {
                   row(
                     f().source,
                     f().icon,
-                    f().color,
-                    f().label,
+                    () => f().color,
+                    () => f().label,
                     () => i() === filters().length - 1,
                     `source-${f().label.toLowerCase()}`,
                   )
@@ -417,7 +379,7 @@ export function Home(props: {
                       { kind: "tag", name: t().name },
                       "hash",
                       tint.tag,
-                      t().name,
+                      () => t().name,
                       () => i() === sortedTags().length - 1,
                     )
                   }
@@ -450,14 +412,21 @@ export function Home(props: {
             color={look().ink}
             onPress={props.onSettings}
           />
-          <RoundGlassButton
-            name="more"
-            label="More"
-            testID="home-menu"
-            diameter={BUTTON}
-            size={22}
-            color={look().ink}
-            onPress={() => menu.set(true)}
+          {/* The menu opens from its trigger: a sheet on phones, a popup under it in a wide browser. */}
+          <EntryMenu
+            testID="home-menu-panel"
+            entries={homeMenuEntries}
+            onPick={applyHomeChoice}
+            trigger={
+              <RoundGlassButton
+                name="more"
+                label="More"
+                testID="home-menu"
+                diameter={BUTTON}
+                size={22}
+                color={look().ink}
+              />
+            }
           />
         </View>
       </If>
@@ -491,20 +460,6 @@ export function Home(props: {
           onPress={props.onAdd}
         />
       </View>
-
-      <If when={menu() && !systemMenus}>
-        <HomeMenu
-          top={props.systemBar ? top() + BAR + 4 : top() + 6 + BUTTON + 8}
-          onClose={() => menu.set(false)}
-          onNewCollection={() => {
-            menu.set(false);
-            newCollection();
-          }}
-        />
-      </If>
-      <If when={naming()}>
-        <NewCollection top={top() + BAR + 40} onClose={() => naming.set(false)} />
-      </If>
     </View>
   );
 }
@@ -522,15 +477,16 @@ const allSections: Section[] = ["collections", "filters", "tags"];
 const allCollapsed = () => allSections.every((s) => isCollapsed(s));
 
 /**
- * The "…" menu as the system's (iOS): `UIMenu` from the bar's button, the
- * sorts as submenus with the current one checked and named under them.
+ * The "…" menu: new collection, fold or unfold every section, and the sorts
+ * as submenus, the current one checked and named under them. The system's
+ * menu draws it on iOS (`UIMenu`), nsh's `Menu` elsewhere (`EntryMenu`).
  */
-async function openSystemMenu(onNewCollection: () => void) {
+function homeMenuEntries(): MenuEntry[] {
   const sortEntries = (prefix: string, sorts: [string, string][], now: string): MenuEntry[] =>
     sorts.map(([v, title]) => ({ id: `${prefix}:${v}`, title, checked: v === now }));
   const label = (sorts: [string, string][], now: string) => sorts.find(([v]) => v === now)?.[1];
   const collapsed = allCollapsed();
-  const id = await systemMenu("", [
+  return [
     { id: "new", title: "New collection", symbol: "folder.badge.plus" },
     {
       id: "collapse",
@@ -552,216 +508,14 @@ async function openSystemMenu(onNewCollection: () => void) {
       symbol: "number",
       children: sortEntries("tags", tagSorts, prefs().tagSort),
     },
-  ]);
-  if (id === "new") onNewCollection();
-  else if (id === "collapse") setPrefs({ collapsed: collapsed ? [] : allSections });
+  ];
+}
+
+/** Does what was picked from the "…" menu (an entry's id), if anything. */
+function applyHomeChoice(id: string | null) {
+  if (id === "new") newCollection();
+  else if (id === "collapse") setPrefs({ collapsed: allCollapsed() ? [] : allSections });
   else if (id?.startsWith("collections:"))
     setPrefs({ collectionSort: id.slice(12) as CollectionSort });
   else if (id?.startsWith("tags:")) setPrefs({ tagSort: id.slice(5) as TagSort });
-}
-
-/**
- * The "…" menu: a glass panel growing from its button, as iOS 26's pull-down
- * menus do; a submenu takes its place, with a way back.
- */
-function HomeMenu(props: { top: number; onClose: () => void; onNewCollection: () => void }) {
-  const page = signal<"root" | "collections" | "tags">("root");
-  onAndroidBack(() => (page() === "root" ? props.onClose() : page.set("root")));
-  const shown = signal(false);
-  setTimeout(() => shown.set(true), 0);
-  const item = (
-    label: string,
-    icon: IconName | null,
-    onPress: () => void,
-    opts?: { submenu?: boolean; checked?: boolean; testID?: string },
-  ) => (
-    <View
-      role={opts?.checked === undefined ? "menuitem" : "menuitemradio"}
-      accessibilityLabel={label}
-      accessibilityState={opts?.checked === undefined ? undefined : { checked: opts.checked }}
-      testID={opts?.testID}
-      onPress={onPress}
-      class="h-12 flex-row items-center gap-3.5 rounded-2xl px-4"
-      activeStyle={{ backgroundColor: `${look().ink}14` }}
-    >
-      <View class="w-5 items-center">
-        <If when={opts?.checked !== undefined ? opts.checked : icon}>
-          <Icon name={icon ?? "check"} size={19} color={look().ink} />
-        </If>
-      </View>
-      <Text class="flex-1" style={{ color: look().ink, fontSize: 17 }}>
-        {label}
-      </Text>
-      <If when={opts?.submenu}>
-        <Icon name="chevron" size={15} color={look().inkSoft} />
-      </If>
-    </View>
-  );
-  const rule = () => (
-    <View class="mx-4 my-1.5" style={{ height: 1, backgroundColor: `${look().ink}1f` }} />
-  );
-
-  const choose = (patch: Parameters<typeof setPrefs>[0]) => {
-    setPrefs(patch);
-    props.onClose();
-  };
-  return (
-    <>
-      <View
-        class="absolute inset-0"
-        accessibilityLabel="Close menu"
-        onPress={props.onClose}
-        style={{ backgroundColor: "#00000014" }}
-      />
-      <View
-        testID="home-menu-panel"
-        class="absolute right-4 overflow-hidden rounded-[30px] p-1.5"
-        style={{
-          ...glass(),
-          borderCurve: "continuous",
-          top: props.top,
-          width: 286,
-          opacity: shown() ? 1 : 0,
-          transform: shown() ? "scale(1)" : "scale(0.6)",
-          transformOrigin: "top right",
-          transitionProperty: "opacity, transform",
-          transitionDuration: 220,
-          transitionTimingFunction: "cubic-bezier(0.2, 0.9, 0.3, 1.1)",
-        }}
-      >
-        <GlassTint radius={30} />
-        {() => {
-          switch (page()) {
-            case "root":
-              return (
-                <>
-                  {item("New collection", "plus", props.onNewCollection, {
-                    testID: "menu-new-collection",
-                  })}
-                  {item(
-                    allCollapsed() ? "Expand all" : "Collapse all",
-                    allCollapsed() ? "expand" : "collapse",
-                    () =>
-                      choose({
-                        collapsed: allCollapsed() ? [] : allSections,
-                      }),
-                    { testID: "menu-collapse" },
-                  )}
-                  {item("Sort collections", "sort", () => page.set("collections"), {
-                    submenu: true,
-                    testID: "menu-sort-collections",
-                  })}
-                  {rule()}
-                  {item("Sort tags", "sort", () => page.set("tags"), {
-                    submenu: true,
-                    testID: "menu-sort-tags",
-                  })}
-                </>
-              );
-            case "collections":
-            case "tags": {
-              const isTags = page() === "tags";
-              return (
-                <>
-                  <View
-                    role="button"
-                    accessibilityLabel="Back"
-                    onPress={() => page.set("root")}
-                    class="h-12 flex-row items-center gap-2 px-4 active:opacity-60"
-                  >
-                    <Icon name="back" size={17} color={look().inkSoft} />
-                    <Text style={{ color: look().ink, fontSize: 17, fontWeight: "600" }}>
-                      {isTags ? "Sort tags" : "Sort collections"}
-                    </Text>
-                  </View>
-                  {rule()}
-                  {isTags
-                    ? tagSorts.map(([v, label]) =>
-                        item(label, null, () => choose({ tagSort: v }), {
-                          checked: prefs().tagSort === v,
-                        }),
-                      )
-                    : collectionSorts.map(([v, label]) =>
-                        item(label, null, () => choose({ collectionSort: v }), {
-                          checked: prefs().collectionSort === v,
-                        }),
-                      )}
-                </>
-              );
-            }
-          }
-        }}
-      </View>
-    </>
-  );
-}
-
-/** Names a new collection: a small glass card over the page, above the keyboard. */
-function NewCollection(props: { top: number; onClose: () => void }) {
-  const name = signal("");
-  onAndroidBack(props.onClose);
-  const busy = signal(false);
-  const error = signal("");
-  const create = async () => {
-    if (!name().trim() || busy()) return;
-    busy.set(true);
-    error.set("");
-    try {
-      await createCollection(name());
-      props.onClose();
-    } catch (e) {
-      error.set((e as Error).message);
-      busy.set(false);
-    }
-  };
-  return (
-    <>
-      <View
-        class="absolute inset-0"
-        onPress={props.onClose}
-        style={{ backgroundColor: "#00000040" }}
-      />
-      <View
-        testID="new-collection-card"
-        class="absolute right-5 left-5 gap-4 overflow-hidden rounded-[30px] p-5"
-        style={{ ...glass(), borderCurve: "continuous", top: props.top }}
-      >
-        <GlassTint radius={30} />
-        <Text class="text-center" style={{ color: look().ink, fontSize: 17, fontWeight: "700" }}>
-          New collection
-        </Text>
-        <View
-          class="h-12 justify-center rounded-2xl px-4"
-          style={{ backgroundColor: look().card, borderCurve: "continuous" }}
-        >
-          <Input
-            testID="collection-name"
-            value={name()}
-            placeholder="Name"
-            autoFocus
-            returnKeyType="done"
-            onChange={({ value }) => name.set(value)}
-            onSubmit={() => void create()}
-            style={{ color: look().ink, fontSize: 17, placeholderColor: look().inkFaint }}
-          />
-        </View>
-        <If when={error()}>
-          <Text style={{ color: look().stamp, fontSize: 13 }}>{error()}</Text>
-        </If>
-        <View class="flex-row gap-3">
-          <View class="flex-1">
-            <GlassButton label="Cancel" onPress={props.onClose} />
-          </View>
-          <View class="flex-1" style={{ opacity: name().trim() && !busy() ? 1 : 0.5 }}>
-            <GlassButton
-              label={busy() ? "Creating…" : "Create"}
-              prominent
-              testID="create-collection"
-              onPress={() => void create()}
-            />
-          </View>
-        </View>
-      </View>
-    </>
-  );
 }

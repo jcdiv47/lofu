@@ -1,4 +1,4 @@
-import { computed, Storage, signal } from "nsh";
+import { batch, computed, Storage, signal } from "nsh";
 import {
   api,
   type Bookmark,
@@ -369,40 +369,43 @@ function apply(page: {
   collections: Collection[];
   highlights: { id: string; bookmarkId: string; deletedAt?: string | null }[];
 }) {
-  if (page.bookmarks.length) {
-    byId.update((m) => {
-      for (const b of page.bookmarks) {
-        // The server's state, under the changes still waiting to be sent.
-        const local = overlay(normalize(b));
-        if (local) m.set(b.id, local);
-        else m.delete(b.id);
-      }
-      return m;
-    });
-  }
-  if (page.collections.length) {
-    collectionsById.update((m) => {
-      for (const c of page.collections) m.set(c.id, c);
-      return m;
-    });
-  }
-  if (page.highlights.length) {
-    highlightCounts.update((m) => {
-      for (const h of page.highlights) {
-        const had = highlightOwner.has(h.id);
-        if (h.deletedAt) {
-          if (had) {
-            highlightOwner.delete(h.id);
-            m.set(h.bookmarkId, Math.max(0, (m.get(h.bookmarkId) ?? 1) - 1));
-          }
-        } else if (!had) {
-          highlightOwner.set(h.id, h.bookmarkId);
-          m.set(h.bookmarkId, (m.get(h.bookmarkId) ?? 0) + 1);
+  // One pass of the views for the page, not one per map.
+  batch(() => {
+    if (page.bookmarks.length) {
+      byId.update((m) => {
+        for (const b of page.bookmarks) {
+          // The server's state, under the changes still waiting to be sent.
+          const local = overlay(normalize(b));
+          if (local) m.set(b.id, local);
+          else m.delete(b.id);
         }
-      }
-      return m;
-    });
-  }
+        return m;
+      });
+    }
+    if (page.collections.length) {
+      collectionsById.update((m) => {
+        for (const c of page.collections) m.set(c.id, c);
+        return m;
+      });
+    }
+    if (page.highlights.length) {
+      highlightCounts.update((m) => {
+        for (const h of page.highlights) {
+          const had = highlightOwner.has(h.id);
+          if (h.deletedAt) {
+            if (had) {
+              highlightOwner.delete(h.id);
+              m.set(h.bookmarkId, Math.max(0, (m.get(h.bookmarkId) ?? 1) - 1));
+            }
+          } else if (!had) {
+            highlightOwner.set(h.id, h.bookmarkId);
+            m.set(h.bookmarkId, (m.get(h.bookmarkId) ?? 0) + 1);
+          }
+        }
+        return m;
+      });
+    }
+  });
 }
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -494,9 +497,11 @@ export function sync(): Promise<void> {
       syncError.set((e as Error).message);
       if (e instanceof OfflineError) offline.set(true);
     } finally {
-      if (!syncError()) offline.set(false);
-      loaded.set(true);
-      syncing.set(false);
+      batch(() => {
+        if (!syncError()) offline.set(false);
+        loaded.set(true);
+        syncing.set(false);
+      });
       inflight = null;
     }
   })();
@@ -508,13 +513,15 @@ export const offline = signal(false);
 
 /** Forgets the mirror (a different server or token). */
 export async function reset() {
-  byId.set(new Map());
-  collectionsById.set(new Map());
-  highlightCounts.set(new Map());
   highlightOwner.clear();
   cursor = 0;
-  loaded.set(false);
-  outbox.set([]);
+  batch(() => {
+    byId.set(new Map());
+    collectionsById.set(new Map());
+    highlightCounts.set(new Map());
+    loaded.set(false);
+    outbox.set([]);
+  });
   await Storage.removeItem(OUTBOX_KEY);
   await removeText(SNAPSHOT_KEY);
   await clearArticles();
@@ -698,14 +705,16 @@ export async function renameCollection(id: string, name: string) {
 /** Deletes a collection; its bookmarks go to Unsorted (as the server does). */
 export async function deleteCollection(id: string) {
   await api.removeCollection(id);
-  collectionsById.update((m) => {
-    m.delete(id);
-    return m;
-  });
-  byId.update((m) => {
-    for (const b of m.values())
-      if (b.collectionId === id) m.set(b.id, { ...b, collectionId: null });
-    return m;
+  batch(() => {
+    collectionsById.update((m) => {
+      m.delete(id);
+      return m;
+    });
+    byId.update((m) => {
+      for (const b of m.values())
+        if (b.collectionId === id) m.set(b.id, { ...b, collectionId: null });
+      return m;
+    });
   });
   persist();
   void sync();
