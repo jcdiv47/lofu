@@ -2,8 +2,8 @@ import { Clipboard, platform, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
 import { extractUrl, isRedirectLink } from "../../../packages/shared/src/links";
 import type { Bookmark } from "../lib/api";
-import { look } from "../lib/look";
 import { addBookmark, type Source, sourceTitle } from "../lib/store";
+import { ActionButton, ErrorText, fieldClass } from "./ui";
 
 /** Where saving adds something the source shows; the fixed views just save. */
 const intoLabel = (s: Source) =>
@@ -96,53 +96,28 @@ export function AddBookmark(props: {
             fromClipboard.set(false);
           }}
           onSubmit={() => void save()}
-          class="rounded-xl px-3.5"
-          style={{
-            height: 40,
-            color: look().ink,
-            fontSize: 15,
-            backgroundColor: look().card,
-            borderWidth: 1,
-            borderColor: look().rule,
-            placeholderColor: look().inkFaint,
-          }}
+          class={fieldClass}
+          style={{ height: 40, fontSize: 15 }}
         />
         <If when={hint()}>
-          <Text
-            testID="add-hint"
-            style={{ color: look().inkFaint, fontSize: 12.5, lineHeight: 17 }}
-          >
+          <Text testID="add-hint" class="text-ink-faint" style={{ fontSize: 12.5, lineHeight: 17 }}>
             {hint()}
           </Text>
         </If>
       </View>
       <If when={error()}>
-        <Text testID="add-error" style={{ color: look().stamp, fontSize: 13.5, lineHeight: 19 }}>
-          {error()}
-        </Text>
+        <ErrorText testID="add-error" text={error()} />
       </If>
       <View class="flex-row items-center justify-end gap-2">
         <If when={props.onCancel}>
-          <View
-            role="button"
-            onPress={() => props.onCancel?.()}
-            class="rounded-full px-4 py-2.5 active:opacity-60"
-          >
-            <Text style={{ color: look().inkSoft, fontSize: 14.5, fontWeight: "500" }}>Cancel</Text>
-          </View>
+          <ActionButton variant="cancel" label="Cancel" onPress={() => props.onCancel?.()} />
         </If>
-        <View
-          role="button"
+        <ActionButton
           testID="add-save"
-          accessibilityState={{ disabled: busy() }}
+          busy={busy()}
+          label={busy() ? "Saving…" : "Save"}
           onPress={() => void save()}
-          class="rounded-full px-5 py-2.5 active:opacity-70"
-          style={{ backgroundColor: look().ink, opacity: busy() ? 0.6 : 1 }}
-        >
-          <Text style={{ color: look().paper, fontSize: 14.5, fontWeight: "600" }}>
-            {busy() ? "Saving…" : "Save"}
-          </Text>
-        </View>
+        />
       </View>
     </View>
   );

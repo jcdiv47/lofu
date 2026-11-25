@@ -3,10 +3,12 @@ import {
   effect,
   type PressEvent,
   platform,
+  reduceMotion,
   signal,
   Text,
   untracked,
   View,
+  windowSize,
 } from "nsh";
 import {
   type At,
@@ -17,10 +19,9 @@ import {
   showBookmarkMenu,
 } from "../lib/actions";
 import type { Bookmark } from "../lib/api";
-import { look } from "../lib/look";
 import { inTrash, restoreBookmark } from "../lib/store";
 import { BookmarkHeadline, BookmarkRow, type Shows } from "./BookmarkCard";
-import { Icon, type IconName } from "./ui";
+import { focusRing, Icon, type IconName } from "./ui";
 
 /*
  * A phone row that swipes, as Mail's do: to the right for Move, to the left
@@ -59,7 +60,8 @@ function shown(x: number, trail: number) {
 function Action(props: {
   icon: IconName;
   label: string;
-  color: string;
+  /** The button's fill, a token's `bg-*` class (the system's action colors). */
+  tone: "bg-action-info" | "bg-action-destructive" | "bg-action-neutral";
   /** With where it was pressed, which a menu it opens points from. */
   onPress: (e?: PressEvent) => void;
   testID?: string;
@@ -70,16 +72,16 @@ function Action(props: {
       accessibilityLabel={props.label}
       testID={props.testID}
       onPress={props.onPress}
-      class="items-center gap-1.5 active:opacity-60"
+      class={`items-center gap-1.5 active:opacity-60 ${focusRing}`}
       style={{ width: SLOT }}
     >
       <View
-        class="items-center justify-center rounded-full"
-        style={{ width: BUTTON, height: BUTTON, backgroundColor: props.color }}
+        class={`items-center justify-center rounded-full ${props.tone}`}
+        style={{ width: BUTTON, height: BUTTON }}
       >
-        <Icon name={props.icon} size={23} color="#fff" />
+        <Icon name={props.icon} size={23} class="tint-on-fill" />
       </View>
-      <Text class="truncate" style={{ color: look().inkSoft, fontSize: 12 }}>
+      <Text class="truncate text-ink-soft" style={{ fontSize: 12 }}>
         {props.label}
       </Text>
     </View>
@@ -98,9 +100,8 @@ export function SwipeRow(props: {
   headline?: boolean;
 }) {
   const b = () => props.b;
-  const trail = () => TRAIL_SLOTS(canShare ? 3 : 2);
+  const trail = () => TRAIL_SLOTS(canShare() ? 3 : 2);
   const x = createAnimatedValue(0);
-  const width = signal(0);
   /** Which side is open; read in JS (the value itself lives on the UI thread). */
   const open = signal<"lead" | "trail" | null>(null);
   /** The buttons exist while a drag or an open side shows them, so a shut
@@ -114,6 +115,12 @@ export function SwipeRow(props: {
     } else {
       if (closeOpen && closeOpen !== close) closeOpen();
       closeOpen = close;
+    }
+    // With reduced motion the row is open or shut at once.
+    if (reduceMotion()) {
+      x.set(to);
+      if (to === 0) revealed.set(false);
+      return;
     }
     void x.spring(to, { velocity, stiffness: 420, damping: 38 }).then(({ finished }) => {
       if (finished && open() === null) revealed.set(false);
@@ -146,10 +153,11 @@ export function SwipeRow(props: {
       await deleteBookmark(item);
       return;
     }
-    // Slide it out, then it leaves the list.
+    // Slide it out, then it leaves the list. The row is the list's width,
+    // the window's on a phone: no row measures itself for it.
     open.set(null);
     if (closeOpen === close) closeOpen = null;
-    await x.timing(-(width() || 400), { duration: 180 });
+    if (!reduceMotion()) await x.timing(-windowSize().width, { duration: 180 });
     await deleteBookmark(item);
   };
 
@@ -160,11 +168,7 @@ export function SwipeRow(props: {
   });
 
   return (
-    <View
-      class="overflow-hidden"
-      style={{ backgroundColor: look().paper }}
-      onLayout={(e) => width.set(e.bounds.size.width)}
-    >
+    <View class="overflow-hidden bg-paper">
       {/* Behind the row: Move on the leading side, the rest on the trailing. */}
       <If when={revealed()}>
         <View
@@ -177,7 +181,7 @@ export function SwipeRow(props: {
               <Action
                 icon="folder"
                 label="Move"
-                color="#0a84ff"
+                tone="bg-action-info"
                 testID="swipe-move"
                 onPress={then((at) => void chooseDestination(b(), at))}
               />
@@ -186,7 +190,7 @@ export function SwipeRow(props: {
             <Action
               icon="restore"
               label="Put back"
-              color="#0a84ff"
+              tone="bg-action-info"
               testID="swipe-restore"
               onPress={then(() => void restoreBookmark(b().id).catch(() => {}))}
             />
@@ -196,26 +200,26 @@ export function SwipeRow(props: {
           class="absolute top-0 right-0 bottom-0 flex-row items-center justify-end pr-2.5"
           style={{ width: trail() }}
         >
-          <If when={canShare}>
+          <If when={canShare()}>
             <Action
               icon="share"
               label="Share…"
-              color="#0a84ff"
+              tone="bg-action-info"
               testID="swipe-share"
-              onPress={then((at) => shareBookmark(b(), at))}
+              onPress={then(() => shareBookmark(b()))}
             />
           </If>
           <Action
             icon="trash"
             label="Delete"
-            color="#ff453a"
+            tone="bg-action-destructive"
             testID="swipe-delete"
             onPress={() => void remove()}
           />
           <Action
             icon="more"
             label="More"
-            color="#636366"
+            tone="bg-action-neutral"
             testID="swipe-more"
             onPress={then((at) => void showBookmarkMenu(b(), { at }))}
           />
@@ -225,7 +229,6 @@ export function SwipeRow(props: {
         pan={{ x }}
         // Out of the edge's way; clipped, so its rows aren't hit there either.
         hitSlop={{ left: -EDGE }}
-        class="overflow-hidden"
         onPanStart={() => {
           if (closeOpen && closeOpen !== close) closeOpen();
           revealed.set(true);
@@ -241,7 +244,8 @@ export function SwipeRow(props: {
           else if (heading < -t / 2 && open() !== "lead") settle(-t, e.velocity.x);
           else settle(0, e.velocity.x);
         }}
-        style={{ backgroundColor: look().paper, transform: [{ translateX: offset }] }}
+        class="overflow-hidden bg-paper"
+        style={{ transform: [{ translateX: offset }] }}
       >
         <If
           when={props.headline}

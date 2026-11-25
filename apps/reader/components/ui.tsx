@@ -7,8 +7,10 @@ import {
   signal,
   Text,
   View,
+  type ViewRef,
   type ViewStyle,
 } from "nsh";
+import { Button } from "nsh/base";
 import alertIcon from "../assets/icons/alert.svg";
 import allIcon from "../assets/icons/all.svg";
 import articleIcon from "../assets/icons/article.svg";
@@ -58,7 +60,8 @@ import trashIcon from "../assets/icons/trash.svg";
 import upDownIcon from "../assets/icons/updown.svg";
 import videoIcon from "../assets/icons/video.svg";
 import windowIcon from "../assets/icons/window.svg";
-import { backdropBlur, glass, hasGlass, look } from "../lib/look";
+import { backdropBlur, glass, hasGlass, look, monogramColors } from "../lib/look";
+import { offline, outbox, syncError, syncing } from "../lib/store";
 import {
   nativeControls,
   nativeScrollEdges,
@@ -124,13 +127,28 @@ export const icons = {
 };
 export type IconName = keyof typeof icons;
 
-/** A one-color icon, tinted to follow the theme. */
-export function Icon(props: { name: IconName; size?: number; color?: string }) {
+/**
+ * The keyboard's ring (`focus-visible:`: not after a click or a tap), on every
+ * control of the app's that takes the focus.
+ */
+export const focusRing =
+  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stamp";
+
+/**
+ * A one-color icon, tinted to follow the theme: a token's `tint-*` class
+ * (`tint-ink-soft` by default), or `color` for a data color (a collection's).
+ */
+export function Icon(props: { name: IconName; size?: number; color?: string; class?: string }) {
   const size = props.size ?? 16;
   return (
     <Image
       src={icons[props.name]}
-      style={{ width: size, height: size, tintColor: props.color ?? look().inkSoft }}
+      class={props.class ?? "tint-ink-soft"}
+      style={
+        props.color
+          ? { width: size, height: size, tintColor: props.color }
+          : { width: size, height: size }
+      }
     />
   );
 }
@@ -142,6 +160,8 @@ export function IconButton(props: {
   /** Leave it out when a `Menu` around the button opens on the press. */
   onPress?: (e?: PressEvent) => void;
   color?: string;
+  /** The icon's tint, as a token's `tint-*` class. */
+  iconClass?: string;
   size?: number;
   testID?: string;
   active?: boolean;
@@ -151,31 +171,149 @@ export function IconButton(props: {
     <View
       role="button"
       accessibilityLabel={props.label}
+      accessibilityState={{ disabled: !!props.disabled, selected: !!props.active }}
       testID={props.testID}
       onPress={props.onPress}
       disabled={props.disabled}
-      class="h-8 w-8 items-center justify-center rounded-full active:opacity-60"
-      style={{
-        backgroundColor: props.active ? look().selected : undefined,
-        opacity: props.disabled ? 0.35 : 1,
-      }}
-      hoverStyle={{ backgroundColor: look().selected }}
+      class={`h-8 w-8 items-center justify-center rounded-full hover:bg-selected active:opacity-60 ${focusRing} ${
+        props.active ? "bg-selected" : ""
+      } ${props.disabled ? "opacity-35" : ""}`}
     >
-      <Icon name={props.name} size={props.size ?? 17} color={props.color} />
+      <Icon name={props.name} size={props.size ?? 17} color={props.color} class={props.iconClass} />
     </View>
   );
 }
 
-/** The paper's tint over the system's glass, as its first child (see `glass`). */
+/**
+ * The app's text buttons: `primary` (ink filled: Save, Connect), `secondary`
+ * (a capsule on the glass of Settings' groups) and `cancel` (text only).
+ */
+export function ActionButton(props: {
+  label: string;
+  onPress: () => void;
+  variant?: "primary" | "secondary" | "cancel";
+  /** Its action runs: screen readers say so, and it shows dimmed. */
+  busy?: boolean;
+  disabled?: boolean;
+  testID?: string;
+  ref?: (r: ViewRef) => void;
+}) {
+  const variant = () => props.variant ?? "primary";
+  const box = () => {
+    switch (variant()) {
+      case "primary":
+        return "rounded-full bg-ink px-5 py-2.5 active:opacity-70";
+      case "secondary":
+        return "rounded-full border border-group-edge bg-control px-4 py-2 active:opacity-60";
+      default:
+        return "rounded-full px-4 py-2.5 active:opacity-60";
+    }
+  };
+  return (
+    <Button
+      ref={props.ref}
+      testID={props.testID}
+      accessibilityLabel={props.label}
+      disabled={props.disabled || props.busy}
+      onPress={props.onPress}
+      class={`${box()} ${focusRing} ${props.busy ? "opacity-60" : "disabled:opacity-50"}`}
+    >
+      <Text
+        class={
+          variant() === "primary"
+            ? "text-paper"
+            : variant() === "secondary"
+              ? "text-ink"
+              : "text-ink-soft"
+        }
+        style={{
+          fontSize: variant() === "secondary" ? 13.5 : 14.5,
+          fontWeight: variant() === "primary" ? "600" : "500",
+        }}
+      >
+        {props.label}
+      </Text>
+    </Button>
+  );
+}
+
+/** A form's text field: on the card, ruled, in the theme's ink (`<Input class={fieldClass}>`). */
+export const fieldClass =
+  "rounded-xl border border-rule bg-card px-3.5 text-ink placeholder:text-ink-faint";
+
+/** A form field's label, over it. */
+export function FieldLabel(props: { text: string }) {
+  return (
+    <Text class="text-ink-soft" style={{ fontSize: 12.5, fontWeight: "600" }}>
+      {props.text}
+    </Text>
+  );
+}
+
+/** What went wrong, under a form. */
+export function ErrorText(props: { text: string; testID?: string }) {
+  return (
+    <Text testID={props.testID} class="text-stamp" style={{ fontSize: 13.5, lineHeight: 19 }}>
+      {props.text}
+    </Text>
+  );
+}
+
+/**
+ * The surface of the app's drawn popups (the web's menus, the search box's
+ * suggestions): the raised card, ruled, with a lifted shadow. Reactive
+ * (the shadow reads `look()`).
+ */
+export const popupSurface = () => ({
+  popupClass: `rounded-xl border border-rule bg-card-hover p-1.5 transition duration-100 ease-out motion-reduce:transition-none`,
+  popupStyle: { boxShadow: look().popupShadow },
+  popupStartingClass: "opacity-0 scale-95",
+  popupEndingClass: "opacity-0",
+});
+
+/**
+ * The sync line: a dot (red offline or failing, amber sending or syncing,
+ * green up to date) and what it says (`syncStatus`).
+ */
+export function SyncStatus(props: { size?: "small" | "regular"; class?: string }) {
+  const regular = () => props.size === "regular";
+  const tone = () =>
+    syncError() || offline() ? "bg-stamp" : syncing() || outbox().length ? "bg-favorite" : "bg-ok";
+  return (
+    <View class={`flex-row items-center ${regular() ? "gap-1.5" : "gap-2"} ${props.class ?? ""}`}>
+      <View class={`rounded-full ${tone()}`} style={{ width: 7, height: 7 }} />
+      <Text class="flex-1 truncate text-ink-faint" style={{ fontSize: regular() ? 13 : 12 }}>
+        {syncStatus()}
+      </Text>
+    </View>
+  );
+}
+
+/** The sync line's words: phones' Library page and the desktop's sidebar say the same. */
+export const syncStatus = () => {
+  const waiting = outbox().length;
+  const pending = waiting ? ` · ${waiting} change${waiting === 1 ? "" : "s"} waiting` : "";
+  if (offline()) return `Offline${pending}`;
+  if (syncError()) return syncError();
+  if (syncing()) return "Syncing…";
+  return waiting ? `Sending${pending}` : "Up to date";
+};
+
+/**
+ * The paper's tint over the system's glass, as its first child (see `glass`).
+ * A view of its own, not the glass's `glassTintColor`: the system tints the
+ * material toward the color, which on macOS 26 came out grey and cool, where
+ * the paper laid over it keeps the glass warm.
+ */
 export function GlassTint(props: { radius?: number; color?: string }) {
   return (
     <If when={hasGlass}>
       <View
-        class="absolute inset-0"
+        class={props.color ? "absolute inset-0" : "absolute inset-0 bg-glass-tint"}
         style={{
           borderRadius: props.radius ?? 999,
           borderCurve: "continuous",
-          backgroundColor: props.color ?? look().glassTint,
+          backgroundColor: props.color,
           pointerEvents: "none",
         }}
       />
@@ -196,10 +334,9 @@ export function BottomEdge(props: { height: number }) {
   if (nativeScrollEdges) return null;
   return (
     <View
-      class="absolute right-0 bottom-0 left-0"
+      class={`absolute right-0 bottom-0 left-0 ${backdropBlur ? "bg-paper/60" : "bg-paper/88"}`}
       style={{
         height: props.height,
-        backgroundColor: `${look().paper}${backdropBlur ? "99" : "e0"}`,
         backdropFilter: backdropBlur ? "blur(10px)" : undefined,
         maskImage: "linear-gradient(to top, #000 0%, #000 45%, #0000 100%)",
         pointerEvents: "none",
@@ -224,14 +361,13 @@ export function TopEdge(props: {
   const insets = safeAreaInsets();
   return (
     <View
-      class="absolute top-0 right-0 left-0"
+      // A progressive blur, as the system's scroll edge effect: the page
+      // under the bar is blurred and washed with paper, easing off below it.
+      class={`absolute top-0 right-0 left-0 ${backdropBlur ? "bg-paper/70" : "bg-paper/90"}`}
       style={{
         height:
           (props.largeTitle ? safeArea().top + 54 : Math.max(insets().top, safeArea().top + 54)) +
           26,
-        // A progressive blur, as the system's scroll edge effect: the page
-        // under the bar is blurred and washed with paper, easing off below it.
-        backgroundColor: `${look().paper}${backdropBlur ? "b3" : "e6"}`,
         backdropFilter: backdropBlur ? "blur(10px)" : undefined,
         maskImage: "linear-gradient(to bottom, #000 0%, #000 72%, #0000 100%)",
         pointerEvents: "none",
@@ -341,15 +477,16 @@ export function GlassButton(props: {
     );
   }
   return (
-    <View
-      role="button"
+    <Button
       accessibilityLabel={props.label}
       testID={props.testID}
       onPress={props.onPress}
-      class="h-10 items-center justify-center rounded-full px-5 active:opacity-70"
+      class={`h-10 items-center justify-center rounded-full px-5 active:opacity-70 ${focusRing} ${
+        props.prominent ? "bg-stamp" : ""
+      }`}
       style={
         props.prominent
-          ? { backgroundColor: look().stamp, boxShadow: look().glassShadow }
+          ? { boxShadow: look().glassShadow }
           : { ...glass(), borderCurve: "continuous" }
       }
     >
@@ -357,19 +494,15 @@ export function GlassButton(props: {
         <GlassTint />
       </If>
       <Text
-        style={{
-          color: props.prominent ? "#fff" : look().ink,
-          fontSize: 14,
-          fontWeight: "600",
-        }}
+        class={props.prominent ? "text-on-fill" : "text-ink"}
+        style={{ fontSize: 14, fontWeight: "600" }}
       >
         {props.label}
       </Text>
-    </View>
+    </Button>
   );
 }
 
-const monogramColors = ["#b4654a", "#5f7f6a", "#5b6f93", "#8a6a9a", "#a5803f", "#6b7d7d"];
 const hash = (s: string) => {
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
@@ -391,7 +524,8 @@ export function Favicon(props: { url: string | null; domain: string; size?: numb
           style={{ width: size, height: size, borderRadius: size / 4, backgroundColor: color() }}
         >
           <Text
-            style={{ color: "#fff", fontSize: size * 0.62, fontWeight: "700", lineHeight: size }}
+            class="text-on-fill"
+            style={{ fontSize: size * 0.62, fontWeight: "700", lineHeight: size }}
           >
             {(props.domain.replace(/^www\./, "")[0] ?? "?").toUpperCase()}
           </Text>

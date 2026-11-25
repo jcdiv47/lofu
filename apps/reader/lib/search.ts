@@ -11,6 +11,7 @@ import {
 import type { IconName } from "../components/ui";
 import type { Bookmark } from "./api";
 import { shortDate } from "./format";
+import { glyphColors } from "./look";
 import { type BookmarkType, highlightCount, type Source, typeTitles } from "./store";
 
 /*
@@ -128,8 +129,8 @@ export interface SuggestInput {
   now?: Date;
 }
 
-export const NOTE_TINT = "#e2b33c";
-export const HIGHLIGHT_TINT = "#a66fd6";
+export const NOTE_TINT = glyphColors.note;
+export const HIGHLIGHT_TINT = glyphColors.highlight;
 
 export const TYPE_ICONS: Record<BookmarkType, IconName> = {
   link: "link",

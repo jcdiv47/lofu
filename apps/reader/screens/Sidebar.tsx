@@ -1,8 +1,9 @@
 import type { TouchProps, ViewStyle } from "nsh";
 import { PanResponder, Scroll, signal, Text, View } from "nsh";
-import { Icon, type IconName } from "../components/ui";
+import { Button } from "nsh/base";
+import { focusRing, Icon, type IconName, SyncStatus } from "../components/ui";
 import { newCollectionPrompt, showSourceMenu } from "../lib/actions";
-import { fonts, look } from "../lib/look";
+import { fonts, glyphColors, look } from "../lib/look";
 import {
   isCollapsed,
   prefs,
@@ -15,31 +16,20 @@ import {
   type BookmarkType,
   countFor,
   moveCollectionTo,
-  offline,
-  outbox,
   type Source,
   sameSource,
-  syncError,
-  syncing,
   typeTitles,
 } from "../lib/store";
 
 /** The colored glyphs of the filters, on the phone's Home and the desktop's sidebar. */
-export const tint = {
-  library: "#4f7fc9",
-  folder: "#4f7fc9",
-  favorites: "#e0a030",
-  highlights: "#b8569e",
-  trash: "#8d8577",
-  tag: "#8d8577",
-} as const;
+export const tint = glyphColors;
 
 const types: { type: BookmarkType; icon: IconName; color: string }[] = [
-  { type: "article", icon: "article", color: "#e3843a" },
-  { type: "video", icon: "video", color: "#a35bd6" },
-  { type: "image", icon: "image", color: "#3e9e72" },
-  { type: "audio", icon: "audio", color: "#d6566a" },
-  { type: "document", icon: "document", color: "#33a39b" },
+  { type: "article", icon: "article", color: glyphColors.article },
+  { type: "video", icon: "video", color: glyphColors.video },
+  { type: "image", icon: "image", color: glyphColors.image },
+  { type: "audio", icon: "audio", color: glyphColors.audio },
+  { type: "document", icon: "document", color: glyphColors.document },
 ];
 
 /** Favorites, Highlights and the kinds of bookmark there are any of. */
@@ -66,15 +56,9 @@ export const filters = () =>
         : f.source.kind[0].toUpperCase() + f.source.kind.slice(1),
   }));
 
-/** The sync line under the sources: phones' Library page says the same. */
-export const syncStatus = () => {
-  const waiting = outbox().length;
-  const pending = waiting ? ` · ${waiting} change${waiting === 1 ? "" : "s"} waiting` : "";
-  if (offline()) return `Offline${pending}`;
-  if (syncError()) return syncError();
-  if (syncing()) return "Syncing…";
-  return waiting ? `Sending${pending}` : "Up to date";
-};
+/** A value, or a function of one: a row kept by `Each` reads what may change (a renamed collection). */
+export type Live<T> = T | (() => T);
+export const read = <T,>(v: Live<T>): T => (typeof v === "function" ? (v as () => T)() : v);
 
 /** A sidebar row's height and the gap under it: where a dragged collection lands. */
 const ROW = 33;
@@ -90,14 +74,14 @@ export function Sources(props: {
   onSettings: () => void;
 }) {
   // On glass, selection and hover darken what's behind instead of covering it.
-  const selectedBg = () => `${look().ink}17`;
-  const hoverBg = () => `${look().ink}0c`;
   const row = (
     source: Source,
     icon: IconName,
-    label: string,
+    /** Reactive where it can change in place: a collection renamed. */
+    label: Live<string>,
     testID?: string,
-    color?: string,
+    /** A data color (a filter's glyph); else the ink, the accent while selected. */
+    color?: Live<string | undefined>,
     /** A collection's row while it can be dragged: its touch handlers and how it's drawn mid-drag. */
     drag?: { handlers: TouchProps; style: () => ViewStyle | undefined },
   ) => {
@@ -108,7 +92,7 @@ export function Sources(props: {
     return (
       <View
         role="button"
-        accessibilityLabel={label}
+        accessibilityLabel={read(label)}
         accessibilityState={{ selected: active() }}
         testID={testID}
         onPress={() => props.onSelect(source)}
@@ -121,19 +105,24 @@ export function Sources(props: {
             : undefined
         }
         {...(drag?.handlers ?? {})}
-        class="h-8 flex-row items-center gap-2.5 rounded-lg px-2.5"
-        style={{ backgroundColor: active() ? selectedBg() : undefined, ...drag?.style() }}
-        hoverStyle={{ backgroundColor: active() ? selectedBg() : hoverBg() }}
-        activeStyle={{ backgroundColor: selectedBg() }}
+        class={`h-8 flex-row items-center gap-2.5 rounded-lg px-2.5 hover:bg-ink/5 active:bg-ink/9 ${focusRing} ${
+          active() ? "bg-ink/9 hover:bg-ink/9" : ""
+        }`}
+        style={drag?.style()}
       >
-        <Icon name={icon} size={15} color={color ?? (active() ? look().stamp : look().inkSoft)} />
+        <Icon
+          name={icon}
+          size={15}
+          color={read(color)}
+          class={active() ? "tint-stamp" : "tint-ink-soft"}
+        />
         <Text
-          class="flex-1 truncate"
-          style={{ color: look().ink, fontSize: 13.5, fontWeight: active() ? "600" : "400" }}
+          class="flex-1 truncate text-ink"
+          style={{ fontSize: 13.5, fontWeight: active() ? "600" : "400" }}
         >
-          {label}
+          {read(label)}
         </Text>
-        <Text style={{ color: look().inkFaint, fontSize: 12, fontVariant: ["tabular-nums"] }}>
+        <Text class="text-ink-faint" style={{ fontSize: 12, fontVariant: ["tabular-nums"] }}>
           {countFor(source) || ""}
         </Text>
       </View>
@@ -146,39 +135,35 @@ export function Sources(props: {
    */
   const heading = (
     section: Section,
-    label: string,
+    label: Live<string>,
     add?: { label: string; testID: string; run: () => void },
   ) => (
     <View class="mx-2 mt-4 mb-0.5 flex-row items-center gap-1">
+      {/* A disclosure: screen readers hear whether it's open (`Button` has no `expanded`). */}
       <View
         role="button"
-        accessibilityLabel={isCollapsed(section) ? `Show ${label}` : `Hide ${label}`}
+        accessibilityLabel={isCollapsed(section) ? `Show ${read(label)}` : `Hide ${read(label)}`}
         accessibilityState={{ expanded: !isCollapsed(section) }}
         testID={`section-${section}`}
         onPress={() => toggleSection(section)}
-        class="flex-1 flex-row items-center rounded-lg px-2.5 py-1"
-        hoverStyle={{ backgroundColor: hoverBg() }}
-        activeStyle={{ backgroundColor: selectedBg() }}
+        class={`flex-1 flex-row items-center rounded-lg px-2.5 py-1 hover:bg-ink/5 active:bg-ink/9 ${focusRing}`}
       >
         <Text
-          class="flex-1"
-          style={{ color: look().inkFaint, fontSize: 11, fontWeight: "600", letterSpacing: 0.6 }}
+          class="flex-1 text-ink-faint"
+          style={{ fontSize: 11, fontWeight: "600", letterSpacing: 0.6 }}
         >
-          {label.toUpperCase()}
+          {read(label).toUpperCase()}
         </Text>
       </View>
       {add ? (
-        <View
-          role="button"
+        <Button
           accessibilityLabel={add.label}
           testID={add.testID}
           onPress={add.run}
-          class="h-6 w-6 items-center justify-center rounded-lg"
-          hoverStyle={{ backgroundColor: hoverBg() }}
-          activeStyle={{ backgroundColor: selectedBg() }}
+          class={`h-6 w-6 items-center justify-center rounded-lg hover:bg-ink/5 active:bg-ink/9 ${focusRing}`}
         >
-          <Icon name="plus" size={13} color={look().inkFaint} />
-        </View>
+          <Icon name="plus" size={13} class="tint-ink-faint" />
+        </Button>
       ) : null}
     </View>
   );
@@ -218,7 +203,7 @@ export function Sources(props: {
         transform: `translateY(${d.dy}px)`,
         opacity: 0.6,
         zIndex: 2,
-        backgroundColor: selectedBg(),
+        backgroundColor: `${look().ink}17`,
         cursor: "grabbing",
       };
     };
@@ -242,10 +227,11 @@ export function Sources(props: {
           <View class="gap-px px-2" testID="collections">
             <Each of={sortedCollections()} key={(c) => c.id}>
               {(c, i) =>
+                // Kept by id: the name follows a rename in place.
                 row(
                   { kind: "collection", id: c().id },
                   "folder",
-                  c().name,
+                  () => c().name,
                   `collection-${c().id}`,
                   undefined,
                   draggable(c().id, i),
@@ -255,14 +241,12 @@ export function Sources(props: {
             <If when={slot() >= 0}>
               <View
                 testID="drop-line"
-                class="absolute right-2 left-2"
+                class="absolute right-2 left-2 rounded-[1px] bg-stamp"
                 style={{
                   pointerEvents: "none",
                   zIndex: 1,
                   top: slot() * ROW - 1.5,
                   height: 2,
-                  borderRadius: 1,
-                  backgroundColor: look().stamp,
                 }}
               />
             </If>
@@ -273,53 +257,39 @@ export function Sources(props: {
           <View class="gap-px px-2">
             <Each of={filters()} key={(f) => f.label}>
               {(f) =>
-                row(f().source, f().icon, f().label, `source-${f().label.toLowerCase()}`, f().color)
+                row(
+                  f().source,
+                  f().icon,
+                  () => f().label,
+                  `source-${f().label.toLowerCase()}`,
+                  () => f().color,
+                )
               }
             </Each>
           </View>
         </If>
         <If when={sortedTags().length}>
-          {heading("tags", `Tags (${sortedTags().length})`)}
+          {heading("tags", () => `Tags (${sortedTags().length})`)}
           <If when={!isCollapsed("tags")}>
             <View class="gap-px px-2">
               <Each of={sortedTags()} key={(t) => t.name}>
-                {(t) => row({ kind: "tag", name: t().name }, "hash", t().name)}
+                {(t) => row({ kind: "tag", name: t().name }, "hash", () => t().name)}
               </Each>
             </View>
           </If>
         </If>
       </Scroll>
       {/* Sync status and settings, at the foot of the sidebar. */}
-      <View
-        class="flex-row items-center gap-2 px-3 py-2.5"
-        style={{ borderTopWidth: 1, borderColor: `${look().ink}12` }}
-      >
-        <View
-          style={{
-            width: 7,
-            height: 7,
-            borderRadius: 4,
-            backgroundColor:
-              syncError() || offline()
-                ? look().stamp
-                : syncing() || outbox().length
-                  ? look().favorite
-                  : "#6f9b6a",
-          }}
-        />
-        <Text class="flex-1 truncate" style={{ color: look().inkFaint, fontSize: 12 }}>
-          {syncStatus()}
-        </Text>
-        <View
-          role="button"
+      <View class="flex-row items-center gap-2 border-t border-ink/7 px-3 py-2.5">
+        <SyncStatus class="min-w-0 flex-1" />
+        <Button
           accessibilityLabel="Settings"
           testID="settings"
           onPress={props.onSettings}
-          class="h-7 w-7 items-center justify-center rounded-full active:opacity-60"
-          hoverStyle={{ backgroundColor: hoverBg() }}
+          class={`h-7 w-7 items-center justify-center rounded-full hover:bg-ink/5 active:opacity-60 ${focusRing}`}
         >
-          <Icon name="settings" size={16} color={look().inkSoft} />
-        </View>
+          <Icon name="settings" size={16} />
+        </Button>
       </View>
     </View>
   );
@@ -329,8 +299,8 @@ export function Sources(props: {
 export function Wordmark(props: { size?: number }) {
   return (
     <Text
+      class="text-ink"
       style={{
-        color: look().ink,
         fontSize: props.size ?? 22,
         fontStyle: "italic",
         fontFamily: fonts.serif,

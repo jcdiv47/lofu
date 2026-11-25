@@ -1,5 +1,6 @@
 import { Keyboard } from "lofu/native";
 import {
+  batch,
   cleanup,
   createAnimatedValue,
   effect,
@@ -86,7 +87,7 @@ import {
 import { nativeEditMenu, useEditMenuItem } from "../lib/editMenu";
 import { isFootnoteNumber, numberFootnotes, raiseFootnotes } from "../lib/footnotes";
 import { readingTime } from "../lib/format";
-import { fonts, glass, look } from "../lib/look";
+import { fonts, glass, highlightClass, look } from "../lib/look";
 import {
   depthTitle,
   type FormulaPicture,
@@ -151,32 +152,37 @@ export function placeImages(
   textWidth: number,
   formulas: ArticleImage[] = [],
 ): RichNodeJSON {
-  const out = JSON.parse(JSON.stringify(doc)) as RichNodeJSON;
   const formulaSrc = new Map(formulas.map((f) => [f.src, f]));
   const bySrc = new Map(images.map((i) => [i.src, i]));
+  // A copy of the nodes (their attrs, marks and text are shared: what
+  // changes gets new attrs), collecting the images on the way.
   const nodes: RichNodeJSON[] = [];
-  const walk = (n: RichNodeJSON) => {
-    if (n.type === "image") nodes.push(n);
-    n.content?.forEach(walk);
+  const copy = (n: RichNodeJSON): RichNodeJSON => {
+    const c = { ...n };
+    if (n.type === "image") nodes.push(c);
+    if (n.content) c.content = n.content.map(copy);
+    return c;
   };
-  walk(out);
+  const out = copy(doc);
+  const srcOf = (n: RichNodeJSON) => String(n.attrs?.src ?? "");
   // Formula pictures (typesetMath) are matched by URL only: the article's images by position too.
-  const articleNodes = nodes.filter((n) => !formulaSrc.has(String(n.attrs?.src ?? "")));
-  nodes.forEach((n) => {
-    const src = String(n.attrs?.src ?? "");
-    const k = articleNodes.indexOf(n);
+  const articleCount = nodes.reduce((k, n) => (formulaSrc.has(srcOf(n)) ? k : k + 1), 0);
+  /** The article image's place among the article's images. */
+  let k = -1;
+  for (const n of nodes) {
+    const src = srcOf(n);
+    const formula = formulaSrc.get(src);
+    if (!formula) k++;
     const img =
-      formulaSrc.get(src) ??
-      bySrc.get(src) ??
-      (articleNodes.length === images.length ? images[k] : undefined);
-    if (!img) return;
+      formula ?? bySrc.get(src) ?? (articleCount === images.length ? images[k] : undefined);
+    if (!img) continue;
     n.attrs = { ...n.attrs, src: img.proxy ?? src };
     if (img.width && img.height) {
       const width = Math.max(1, Math.min(img.width, Math.floor(textWidth)));
       n.attrs.width = width;
       n.attrs.height = Math.max(1, Math.round((img.height * width) / img.width));
     }
-  });
+  }
   markPictureParagraphs(out);
   return out;
 }
@@ -359,8 +365,10 @@ export function Reader(props: {
   const retrying = signal(false);
   /** Asks the server to read the page again, and shows it once it has. */
   const retry = async () => {
-    retrying.set(true);
-    status.set("Reading the page again…");
+    batch(() => {
+      retrying.set(true);
+      status.set("Reading the page again…");
+    });
     try {
       await api.refetch(props.bookmark.id);
       for (let i = 0; i < 15; i++) {
@@ -418,7 +426,7 @@ export function Reader(props: {
           from: p.from,
           to: p.to,
           kind: "inline" as const,
-          attrs: { class: look().highlightClass },
+          attrs: { class: highlightClass },
         })),
     );
   };
@@ -448,8 +456,10 @@ export function Reader(props: {
       }
       out.push({ highlight: h, ...range });
     }
-    placed.set(out);
-    orphans.set(missing);
+    batch(() => {
+      placed.set(out);
+      orphans.set(missing);
+    });
     // All of them: one the text has lost is still the bookmark's.
     setHighlightCount(
       props.bookmark.id,
@@ -619,9 +629,11 @@ export function Reader(props: {
     present(ed, doc, doc !== parsed || ed !== parser, ed !== parser ? shownTo : 0);
     shown = markdown;
     if (ed === parser) hideForRestore();
-    editor.set(ed);
-    status.set("");
-    place(pendingHighlights(props.bookmark.id, a.highlights));
+    batch(() => {
+      editor.set(ed);
+      status.set("");
+      place(pendingHighlights(props.bookmark.id, a.highlights));
+    });
     if (ed === parser) restoreProgress();
   };
 
@@ -730,10 +742,15 @@ export function Reader(props: {
   let restored = false;
   let restoreFrame: number | null = null;
   let revealTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The selection let go a moment after the reveal, and the editor's views given their extras. */
+  let settleTimer: ReturnType<typeof setTimeout> | undefined;
+  let attachTimer: ReturnType<typeof setTimeout> | undefined;
   const fade = createAnimatedValue(1);
   cleanup(() => {
     if (restoreFrame != null) cancelAnimationFrame(restoreFrame);
     if (revealTimer != null) clearTimeout(revealTimer);
+    clearTimeout(settleTimer);
+    clearTimeout(attachTimer);
   });
   const willRestore = () => {
     const p = b().readProgress;
@@ -753,7 +770,7 @@ export function Reader(props: {
     revealTimer = null;
     if (untracked(reduceMotion)) fade.set(1);
     else void fade.timing(1, { duration: 150, easing: "easeOut" });
-    setTimeout(() => {
+    settleTimer = setTimeout(() => {
       restoring = false;
       selection.set(null);
     }, 100);
@@ -884,7 +901,9 @@ export function Reader(props: {
 
   const menuButton = (label: string, onPress: () => void) => (
     <View onPress={onPress} role="button" class="px-3.5 py-2.5 active:opacity-60">
-      <Text style={{ color: look().ink, fontSize: 14, fontWeight: "600" }}>{label}</Text>
+      <Text class="text-ink" style={{ fontSize: 14, fontWeight: "600" }}>
+        {label}
+      </Text>
     </View>
   );
 
@@ -987,14 +1006,14 @@ export function Reader(props: {
           tint: bm.favorite ? look().favorite : undefined,
           onPress: () => void updateBookmark(bm.id, { favorite: !bm.favorite }).catch(() => {}),
         },
-        ...(canShare
+        ...(canShare()
           ? [
               {
                 kind: "button" as const,
                 id: "share",
                 symbol: "square.and.arrow.up",
                 label: "Share",
-                onPress: (at: { x: number; y: number }) => shareBookmark(b(), at),
+                onPress: () => shareBookmark(b()),
               },
             ]
           : []),
@@ -1036,27 +1055,23 @@ export function Reader(props: {
 
   return (
     <View
-      class="flex-1"
       ref={(r) => {
         host = r;
       }}
-      style={{ backgroundColor: look().paper }}
+      class="flex-1 bg-paper"
       onLayout={(e) => width.set(e.bounds.size.width)}
     >
       <If
         when={editor()}
         else={
           <View class="items-center gap-3 px-8 pt-32">
-            <Text
-              class="text-center"
-              style={{ color: look().inkSoft, fontSize: 15, lineHeight: 21 }}
-            >
+            <Text class="text-center text-ink-soft" style={{ fontSize: 15, lineHeight: 21 }}>
               {status()}
             </Text>
             <If when={b().contentStatus === "failed"}>
               <Text
-                class="text-center"
-                style={{ color: look().inkFaint, fontSize: 13.5, lineHeight: 19, maxWidth: 420 }}
+                class="text-center text-ink-faint"
+                style={{ fontSize: 13.5, lineHeight: 19, maxWidth: 420 }}
               >
                 Pages behind a login or a bot check save in full from the browser extension: open
                 the page there and save it again.
@@ -1089,7 +1104,8 @@ export function Reader(props: {
               view = r;
               // Once its views are up: a press focuses its text view, which
               // would raise iOS's keyboard (Keyboard in src/lib.rs).
-              setTimeout(() => {
+              clearTimeout(attachTimer);
+              attachTimer = setTimeout(() => {
                 Keyboard.keepAway(ARTICLE);
                 editMenu.attach();
               }, 0);
@@ -1122,13 +1138,13 @@ export function Reader(props: {
                 "heading[level=1]": "text-[32px] leading-[39px] mt-0 mb-6",
                 "heading[level=2]": "text-[24px] leading-[31px]",
                 "heading[level=3]": "text-[20px] leading-[27px]",
-                blockquote: `pl-4 border-l-2 border-[${look().rule}]`,
+                blockquote: `pl-4 border-l-2 border-rule`,
                 // A panel of its own, as code is set apart on the page it came from.
-                codeBlock: `mt-1 mb-6 rounded-lg px-4 py-3 font-mono text-[13px] leading-[20px] bg-[${look().paperDeep}] border border-[${look().rule}]`,
+                codeBlock: `mt-1 mb-6 rounded-lg px-4 py-3 font-mono text-[13px] leading-[20px] bg-paper-deep border border-rule`,
                 table: "my-6",
-                tableCell: `px-3 py-2 border-b border-[${look().rule}]`,
-                tableHeader: `px-3 py-2 border-b-2 border-[${look().rule}] font-semibold`,
-                horizontalRule: `my-8 border-t border-[${look().rule}]`,
+                tableCell: `px-3 py-2 border-b border-rule`,
+                tableHeader: `px-3 py-2 border-b-2 border-rule font-semibold`,
+                horizontalRule: `my-8 border-t border-rule`,
                 // Paragraphs in cells (compactCells).
                 "paragraph[textAlign=left]": "text-[15px] leading-[22px] mb-0",
                 // A paragraph of pictures only (markPictureParagraphs): no line height.
@@ -1138,15 +1154,15 @@ export function Reader(props: {
                 // Formulas in text lowered to the baseline (depthTitle).
                 ...depthClasses,
                 // The bookmark's note (withNote).
-                "paragraph[textAlign=justify]": `text-[15px] leading-[23px] mb-2 text-[${look().inkSoft}]`,
+                "paragraph[textAlign=justify]": `text-[15px] leading-[23px] mb-2 text-ink-soft`,
               },
               marks: {
-                code: `font-mono text-[15px] rounded-sm bg-[${look().selected}]`,
+                code: `font-mono text-[15px] rounded-sm bg-selected`,
                 bold: "font-bold",
                 italic: "italic",
-                link: `text-[${look().stamp}] underline`,
+                link: `text-stamp underline`,
                 // Footnote numbers: the editor can't raise text, so small and in the accent.
-                superscript: `text-[12px] font-semibold text-[${look().stamp}]`,
+                superscript: `text-[12px] font-semibold text-stamp`,
                 // Scripts of formulas Unicode has no raised or lowered letters for.
                 mathSub: "text-[13px]",
                 mathSup: "text-[13px]",
@@ -1177,7 +1193,7 @@ export function Reader(props: {
                 style={{ ...glass(), borderCurve: "continuous" }}
               >
                 <GlassTint />
-                <Text testID="highlight-count" style={{ color: look().stamp, fontSize: 13 }}>
+                <Text testID="highlight-count" class="text-stamp" style={{ fontSize: 13 }}>
                   {highlights()}
                 </Text>
               </View>
@@ -1227,8 +1243,8 @@ export function Reader(props: {
             />
           </If>
           <Text
-            class={native ? "truncate" : "flex-1 truncate"}
-            style={{ color: look().inkSoft, fontSize: 12.5, flexShrink: 1 }}
+            class={native ? "truncate text-ink-soft" : "flex-1 truncate text-ink-soft"}
+            style={{ fontSize: 12.5, flexShrink: 1 }}
           >
             {meta()}
           </Text>
@@ -1238,7 +1254,7 @@ export function Reader(props: {
             onPress={orphans().length ? () => void showOrphans() : undefined}
             class="active:opacity-60"
           >
-            <Text testID="highlight-count" style={{ color: look().stamp, fontSize: 12 }}>
+            <Text testID="highlight-count" class="text-stamp" style={{ fontSize: 12 }}>
               {highlights()}
             </Text>
           </View>
@@ -1250,17 +1266,13 @@ export function Reader(props: {
               <IconButton
                 name={b().favorite ? "starFill" : "star"}
                 label={b().favorite ? "Remove from favorites" : "Add to favorites"}
-                color={b().favorite ? look().favorite : undefined}
+                iconClass={b().favorite ? "tint-favorite" : undefined}
                 onPress={() =>
                   void updateBookmark(b().id, { favorite: !b().favorite }).catch(() => {})
                 }
               />
-              <If when={canShare}>
-                <IconButton
-                  name="share"
-                  label="Share"
-                  onPress={(e) => shareBookmark(b(), e?.pagePosition)}
-                />
+              <If when={canShare()}>
+                <IconButton name="share" label="Share" onPress={() => shareBookmark(b())} />
               </If>
               <IconButton
                 name="trash"

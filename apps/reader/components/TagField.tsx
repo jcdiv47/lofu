@@ -1,5 +1,6 @@
 import {
   cleanup,
+  computed,
   effect,
   type InputRef,
   keymap,
@@ -10,9 +11,8 @@ import {
   View,
 } from "nsh";
 import { Input } from "nsh/base";
-import { look } from "../lib/look";
 import { tags as allTags } from "../lib/store";
-import { Icon } from "./ui";
+import { focusRing, Icon } from "./ui";
 
 /** What separates tags as they're typed or pasted (a tag may have spaces). */
 const SEPARATOR = /[,，\n]/;
@@ -55,7 +55,8 @@ export function TagField(props: {
   const remove = (name: string) => props.value.set(props.value().filter((t) => t !== name));
 
   /** The tags in use that aren't chips yet and match what's typed. */
-  const matches = () => {
+  // Computed: the pills, their count and the "+N more" read them on every change.
+  const matches = computed(() => {
     const typed = normalizeTag(props.query());
     const have = new Set(props.value());
     const unused = allTags().filter((t) => !have.has(t.name));
@@ -64,10 +65,10 @@ export function TagField(props: {
       ...unused.filter((t) => t.name.startsWith(typed)),
       ...unused.filter((t) => !t.name.startsWith(typed) && t.name.includes(typed)),
     ];
-  };
+  });
   const hidden = () => (unfolded() ? 0 : Math.max(0, matches().length - FOLDED));
 
-  const pills = (): Pill[] => {
+  const pills = computed((): Pill[] => {
     const all = matches();
     const out: Pill[] = (unfolded() ? all : all.slice(0, FOLDED)).map((t) => ({
       key: t.name,
@@ -80,7 +81,7 @@ export function TagField(props: {
       out.push({ key: "+new", name: typed, label: `Create “${typed}”`, create: true });
     }
     return out;
-  };
+  });
 
   // Typing lights the first suggestion, so Return takes it; with nothing
   // typed, Return saves unless an arrow key picked a row.
@@ -159,21 +160,18 @@ export function TagField(props: {
       <View
         focusable={false}
         onPress={() => input?.focus()}
-        class="min-h-10 flex-row flex-wrap items-center gap-1.5 rounded-xl py-1.5 pr-2 pl-1.5"
-        style={{
-          backgroundColor: look().card,
-          borderWidth: 1,
-          borderColor: focused() ? look().inkFaint : look().rule,
-        }}
+        class={`min-h-10 flex-row flex-wrap items-center gap-1.5 rounded-xl border bg-card py-1.5 pr-2 pl-1.5 ${
+          focused() ? "border-ink-faint" : "border-rule"
+        }`}
       >
         <Each of={props.value()}>
           {(t) => (
             <View
               testID={`tag-chip-${t()}`}
-              class="flex-row items-center gap-1 rounded-full py-1 pr-1 pl-2.5"
-              style={{ backgroundColor: look().field, maxWidth: 260 }}
+              class="flex-row items-center gap-1 rounded-full bg-field py-1 pr-1 pl-2.5"
+              style={{ maxWidth: 260 }}
             >
-              <Text class="shrink truncate" style={{ color: look().ink, fontSize: 13 }}>
+              <Text class="shrink truncate text-ink" style={{ fontSize: 13 }}>
                 #{t()}
               </Text>
               <View
@@ -181,10 +179,9 @@ export function TagField(props: {
                 accessibilityLabel={`Remove tag ${t()}`}
                 focusable={false}
                 onPress={() => remove(t())}
-                class="h-4.5 w-4.5 items-center justify-center rounded-full active:opacity-60"
-                hoverStyle={{ backgroundColor: look().selected }}
+                class="h-4.5 w-4.5 items-center justify-center rounded-full hover:bg-selected active:opacity-60"
               >
-                <Icon name="close" size={9} color={look().inkSoft} />
+                <Icon name="close" size={9} />
               </View>
             </View>
           )}
@@ -209,8 +206,8 @@ export function TagField(props: {
           }}
           onFocus={onFocus}
           onBlur={onBlur}
-          class="min-w-30 flex-1 px-1.5"
-          style={{ height: 28, color: look().ink, fontSize: 15, placeholderColor: look().inkFaint }}
+          class="min-w-30 flex-1 px-1.5 text-ink placeholder:text-ink-faint"
+          style={{ height: 28, fontSize: 15 }}
         />
       </View>
       <If when={pills().length || hidden()}>
@@ -219,48 +216,48 @@ export function TagField(props: {
           style={{ maxHeight: unfolded() ? 168 : undefined }}
           contentClass="flex-row flex-wrap gap-1.5"
         >
-          {pills().map((pill, i) => (
-            <View
-              role="button"
-              testID={`tag-suggest-${pill.key}`}
-              accessibilityLabel={pill.count ? `Add ${pill.label}, ${pill.count}` : pill.label}
-              focusable={false}
-              onPress={() => pick(pill)}
-              class="flex-row items-center gap-1.5 rounded-full px-2.5 py-1 active:opacity-60"
-              style={{
-                borderWidth: 1,
-                borderColor: i === active() ? look().inkFaint : look().rule,
-                borderStyle: pill.create ? "dashed" : "solid",
-                maxWidth: 260,
-                backgroundColor: i === active() ? look().selected : undefined,
-              }}
-              hoverStyle={{ backgroundColor: look().selected }}
-            >
-              <If when={pill.create}>
-                <Icon name="plus" size={10} color={look().inkSoft} />
-              </If>
-              <Text class="shrink truncate" style={{ color: look().inkSoft, fontSize: 12.5 }}>
-                {pill.label}
-              </Text>
-              <If when={pill.count}>
-                <Text
-                  style={{ color: look().inkFaint, fontSize: 11, fontVariant: ["tabular-nums"] }}
-                >
-                  {pill.count}
+          <Each of={pills()} key={(p) => p.key}>
+            {(pill, i) => (
+              <View
+                role="button"
+                testID={`tag-suggest-${pill().key}`}
+                accessibilityLabel={
+                  pill().count ? `Add ${pill().label}, ${pill().count}` : pill().label
+                }
+                accessibilityState={{ selected: i() === active() }}
+                focusable={false}
+                onPress={() => pick(pill())}
+                class={`flex-row items-center gap-1.5 rounded-full border px-2.5 py-1 hover:bg-selected active:opacity-60 ${
+                  i() === active() ? "border-ink-faint bg-selected" : "border-rule"
+                }`}
+                style={{ borderStyle: pill().create ? "dashed" : "solid", maxWidth: 260 }}
+              >
+                <If when={pill().create}>
+                  <Icon name="plus" size={10} />
+                </If>
+                <Text class="shrink truncate text-ink-soft" style={{ fontSize: 12.5 }}>
+                  {pill().label}
                 </Text>
-              </If>
-            </View>
-          ))}
+                <If when={pill().count}>
+                  <Text
+                    class="text-ink-faint"
+                    style={{ fontSize: 11, fontVariant: ["tabular-nums"] }}
+                  >
+                    {pill().count}
+                  </Text>
+                </If>
+              </View>
+            )}
+          </Each>
           <If when={hidden() || (unfolded() && matches().length > FOLDED)}>
             <View
               role="button"
               testID="tag-suggest-more"
               focusable={false}
               onPress={() => unfolded.set(!unfolded())}
-              class="rounded-full px-2.5 py-1 active:opacity-60"
-              hoverStyle={{ backgroundColor: look().selected }}
+              class={`rounded-full px-2.5 py-1 hover:bg-selected active:opacity-60 ${focusRing}`}
             >
-              <Text style={{ color: look().inkFaint, fontSize: 12.5, fontWeight: "500" }}>
+              <Text class="text-ink-faint" style={{ fontSize: 12.5, fontWeight: "500" }}>
                 {unfolded() ? "Show fewer" : `+${hidden()} more`}
               </Text>
             </View>

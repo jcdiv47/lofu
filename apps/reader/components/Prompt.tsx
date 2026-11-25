@@ -1,17 +1,17 @@
 import { TextPrompt } from "lofu/native";
-import { keyboardFrame, safeArea, signal, Text, View } from "nsh";
+import { batch, keyboardFrame, safeArea, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
 import { onAndroidBack } from "../lib/android";
 import { glass, look } from "../lib/look";
-import { GlassButton, GlassTint } from "./ui";
+import { ErrorText, GlassButton, GlassTint } from "./ui";
 
 /**
  * Asks for a line of text (a new name). On iOS, the system's alert with a
  * text field (`src/prompt.rs`, Liquid Glass on iOS 26); elsewhere a small
- * card of glass over the app, above the keyboard, since nsh's `AlertDialog`
- * takes no text. `run` does the work and may throw: its message shows on
- * the card, which stays open (the alert opens again with it); resolves
- * with whether it was done.
+ * card of glass over the app, above the keyboard, since `nsh-core` 0.6.1's
+ * native `AlertDialog` doesn't implement `input` yet. `run` does the work
+ * and may throw: its message shows on the card, which stays open (the alert
+ * opens again with it); resolves with whether it was done.
  */
 interface Ask {
   title: string;
@@ -78,14 +78,18 @@ function PromptCard(props: { ask: Ask }) {
   onAndroidBack(() => close(false));
   const submit = async () => {
     if (!text().trim() || busy()) return;
-    busy.set(true);
-    error.set("");
+    batch(() => {
+      busy.set(true);
+      error.set("");
+    });
     try {
       await props.ask.run(text().trim());
       close(true);
     } catch (e) {
-      error.set((e as Error).message);
-      busy.set(false);
+      batch(() => {
+        error.set((e as Error).message);
+        busy.set(false);
+      });
     }
   };
   /** Over the keyboard on phones; a third of the way down elsewhere. */
@@ -95,11 +99,7 @@ function PromptCard(props: { ask: Ask }) {
       : Math.max(safeArea().top + 80, 140);
   return (
     <View class="absolute inset-0" style={{ zIndex: 100 }}>
-      <View
-        class="absolute inset-0"
-        onPress={() => close(false)}
-        style={{ backgroundColor: "#00000040" }}
-      />
+      <View class="absolute inset-0 bg-black/25" onPress={() => close(false)} />
       <View class="absolute right-0 left-0 items-center px-5" style={{ top: top() }}>
         <View
           testID="prompt-card"
@@ -107,12 +107,12 @@ function PromptCard(props: { ask: Ask }) {
           style={{ ...glass(), borderCurve: "continuous", maxWidth: 420 }}
         >
           <GlassTint radius={26} />
-          <Text class="text-center" style={{ color: look().ink, fontSize: 17, fontWeight: "700" }}>
+          <Text class="text-center text-ink" style={{ fontSize: 17, fontWeight: "700" }}>
             {props.ask.title}
           </Text>
           <View
-            class="h-12 justify-center rounded-2xl px-4"
-            style={{ backgroundColor: look().card, borderCurve: "continuous" }}
+            class="h-12 justify-center rounded-2xl bg-card px-4"
+            style={{ borderCurve: "continuous" }}
           >
             <Input
               testID="prompt-text"
@@ -122,15 +122,18 @@ function PromptCard(props: { ask: Ask }) {
               autoCorrect={false}
               returnKeyType="done"
               onChange={({ value }) => {
-                text.set(value);
-                error.set("");
+                batch(() => {
+                  text.set(value);
+                  error.set("");
+                });
               }}
               onSubmit={() => void submit()}
-              style={{ color: look().ink, fontSize: 17, placeholderColor: look().inkFaint }}
+              class="text-ink placeholder:text-ink-faint"
+              style={{ fontSize: 17 }}
             />
           </View>
           <If when={error()}>
-            <Text style={{ color: look().stamp, fontSize: 13 }}>{error()}</Text>
+            <ErrorText text={error()} />
           </If>
           <View class="flex-row gap-3">
             <View class="flex-1">

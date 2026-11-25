@@ -5,6 +5,12 @@ import { colorScheme, platform } from "nsh";
  * iron-gall ink, a red stamp, highlighter yellow. Surfaces step from the
  * sidebar (deepest) through the page to the cards (lightest in light mode,
  * raised in dark mode).
+ *
+ * The colors are the app's theme tokens, `nsh.json` `"theme"` (kebab-case:
+ * `paperDeep` is `bg-paper-deep`), which views draw with as classes
+ * (`bg-paper`, `text-ink`, `border-rule`, `tint-stamp`): keep the two the
+ * same. `look()` stays for what takes a JS value: shadows, gradients, the
+ * glass's tint and the props of native controls and menus.
  */
 const light = {
   paper: "#f3ece0",
@@ -23,10 +29,12 @@ const light = {
   stampSoft: "#c2412d1f",
   favorite: "#d4952a",
   highlight: "#f2d37a",
-  /** Decorations take classes, not inline styles (nsh ignores a decoration's `style`). */
-  highlightClass: "bg-[#f2d37a] rounded-sm",
   shadow: "0px 1px 2px rgb(60 45 25 / 0.08), 0px 4px 14px rgb(60 45 25 / 0.06)",
   shadowLift: "0px 2px 4px rgb(60 45 25 / 0.08), 0px 12px 28px rgb(60 45 25 / 0.12)",
+  /** The app's drawn popups: the web's menus, the search box's suggestions. */
+  popupShadow: "0px 2px 6px rgb(0 0 0 / 0.12), 0px 12px 32px rgb(0 0 0 / 0.22)",
+  /** A menu drawn as a sheet or a panel (phones without the system's). */
+  menuShadow: "0px 4px 12px rgb(0 0 0 / 0.14), 0px 16px 40px rgb(0 0 0 / 0.24)",
   /** Liquid Glass: the paper's tint over the material, and the blur it falls back to. */
   glassTint: "#efe6d673",
   glassFallback: "#f3ece0d9",
@@ -59,9 +67,10 @@ const dark: typeof light = {
   stampSoft: "#f0694f24",
   favorite: "#e8b04a",
   highlight: "#6e5a24",
-  highlightClass: "bg-[#6e5a24] rounded-sm",
   shadow: "0px 1px 2px rgb(0 0 0 / 0.3)",
   shadowLift: "0px 2px 4px rgb(0 0 0 / 0.3), 0px 12px 28px rgb(0 0 0 / 0.35)",
+  popupShadow: "0px 2px 6px rgb(0 0 0 / 0.12), 0px 12px 32px rgb(0 0 0 / 0.22)",
+  menuShadow: "0px 4px 12px rgb(0 0 0 / 0.14), 0px 16px 40px rgb(0 0 0 / 0.24)",
   glassTint: "#4a443bb3",
   glassFallback: "#2f2b25e6",
   glassEdge: "#ffffff1f",
@@ -104,6 +113,31 @@ export const glass = (opts?: { shadow?: boolean; edge?: boolean }) => ({
   borderColor: look().glassEdge,
   boxShadow: opts?.shadow === false ? undefined : look().glassShadow,
 });
+
+/** Decorations take classes, not inline styles (nsh ignores a decoration's `style`). */
+export const highlightClass = "bg-highlight rounded-sm";
+
+/**
+ * Data colors, the same in both appearances: a site's initial (`Favicon`),
+ * and the glyphs of the library's views and filters.
+ */
+export const monogramColors = ["#b4654a", "#5f7f6a", "#5b6f93", "#8a6a9a", "#a5803f", "#6b7d7d"];
+export const glyphColors = {
+  library: "#4f7fc9",
+  folder: "#4f7fc9",
+  favorites: "#e0a030",
+  highlights: "#b8569e",
+  trash: "#8d8577",
+  tag: "#8d8577",
+  article: "#e3843a",
+  video: "#a35bd6",
+  image: "#3e9e72",
+  audio: "#d6566a",
+  document: "#33a39b",
+  /** The search box's rows for notes and highlights. */
+  note: "#e2b33c",
+  highlight: "#a66fd6",
+} as const;
 
 /** The ink of both appearances (formula pictures are kept in each). */
 export const inks = [light.ink, dark.ink];

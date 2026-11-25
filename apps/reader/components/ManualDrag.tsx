@@ -9,7 +9,6 @@ import {
   type ViewStyle,
 } from "nsh";
 import type { Bookmark } from "../lib/api";
-import { look } from "../lib/look";
 import { dropBookmark } from "../lib/manual";
 
 /** A cell on screen: its bookmark and its frame in the root view. */
@@ -181,7 +180,7 @@ export function useManualDrag(opts: {
       <If when={line()}>
         <View
           testID="drop-line"
-          class="absolute"
+          class="absolute bg-stamp"
           style={{
             pointerEvents: "none",
             left: line()?.origin.x ?? 0,
@@ -189,7 +188,6 @@ export function useManualDrag(opts: {
             width: line()?.size.width ?? 0,
             height: line()?.size.height ?? 0,
             borderRadius: 1.5,
-            backgroundColor: look().stamp,
             zIndex: 20,
           }}
         />

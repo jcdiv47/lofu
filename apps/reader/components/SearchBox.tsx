@@ -1,5 +1,6 @@
 import {
   type Bounds,
+  batch,
   cleanup,
   computed,
   effect,
@@ -107,24 +108,35 @@ export function useSearchBox(o: {
   );
   const rows = () => sections().flatMap((s) => s.rows);
 
-  const show = (m: "suggest" | "narrow") => {
-    mode.set(m);
-    open.set(true);
-    untracked(() => {
-      const q = query();
-      active.set(
-        firstRowIsDefault({ query: q, mode: m, base: [], collections: [], recent: [] }) ? 0 : -1,
-      );
+  const show = (m: "suggest" | "narrow") =>
+    batch(() => {
+      mode.set(m);
+      open.set(true);
+      untracked(() => {
+        const q = query();
+        active.set(
+          firstRowIsDefault({ query: q, mode: m, base: [], collections: [], recent: [] }) ? 0 : -1,
+        );
+      });
     });
-  };
-  const close = () => {
-    open.set(false);
-    active.set(-1);
-  };
+  const close = () =>
+    batch(() => {
+      open.set(false);
+      active.set(-1);
+    });
+  /** Empties the field and the search, the panel closed. */
+  const clear = () =>
+    batch(() => {
+      close();
+      query.set("");
+      applied.set("");
+    });
 
   const commit = (q = query()) => {
-    close();
-    apply(q);
+    batch(() => {
+      close();
+      apply(q);
+    });
     if (hasQuery(q)) remember(q);
   };
 
@@ -134,34 +146,35 @@ export function useSearchBox(o: {
       case "replace":
       case "append": {
         const next = applySuggestion(query(), a);
-        query.set(next);
-        if (a.commit) commit(next);
-        else {
-          show("suggest");
-          o.focusField();
-        }
+        batch(() => {
+          query.set(next);
+          if (a.commit) commit(next);
+          else show("suggest");
+        });
+        if (!a.commit) o.focusField();
         return;
       }
       case "query":
-        query.set(`${a.query} `);
-        commit(a.query);
+        batch(() => {
+          query.set(`${a.query} `);
+          commit(a.query);
+        });
         return;
       case "submit":
         commit();
         return;
       case "source":
-        close();
-        query.set("");
-        applied.set("");
+        clear();
         o.onSource?.(a.source);
     }
   };
 
-  const onChange = (v: string) => {
-    query.set(v);
-    apply(o.live ? v : asTyped(v));
-    if (!o.live) show("suggest");
-  };
+  const onChange = (v: string) =>
+    batch(() => {
+      query.set(v);
+      apply(o.live ? v : asTyped(v));
+      if (!o.live) show("suggest");
+    });
 
   const key = (k: "up" | "down" | "enter" | "escape") => {
     if (k === "escape") return close();
@@ -196,8 +209,10 @@ export function useSearchBox(o: {
     if (at) anchor.set(at);
     if (open() && mode() === "narrow") return close();
     // It narrows the results shown: a search typed but not run is put back.
-    query.set(applied());
-    show("narrow");
+    batch(() => {
+      query.set(applied());
+      show("narrow");
+    });
   };
 
   // The arrows move through the rows (Return reaches the field's submit,
@@ -245,11 +260,7 @@ export function useSearchBox(o: {
     onBlur,
     key,
     commit,
-    clear: () => {
-      query.set("");
-      applied.set("");
-      close();
-    },
+    clear,
     toggleNarrow,
     setAnchor: (a: ViewRef | Bounds) => anchor.set(a),
     panel,

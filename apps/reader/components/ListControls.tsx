@@ -1,8 +1,7 @@
-import { type JSX, Scroll, signal, Text, View, type ViewRef } from "nsh";
-import { Menu as DrawnMenu, MenuItem, MenuSeparator, Slider } from "nsh/base";
+import { type JSX, Text, View, type ViewRef } from "nsh";
+import { Menu as DrawnMenu, MenuItem, MenuSeparator, Slider, Submenu } from "nsh/base";
 import { isAvailable, Menu } from "nsh/desktop";
 import { type MenuEntry, systemMenu } from "../lib/actions";
-import { onAndroidBack } from "../lib/android";
 import type { Bookmark } from "../lib/api";
 import {
   filterCounts,
@@ -39,7 +38,7 @@ import {
   viewFor,
 } from "../lib/prefs";
 import { type BookmarkType, type Source, typeTitles } from "../lib/store";
-import { Icon, type IconName } from "./ui";
+import { focusRing, Icon, type IconName, popupSurface } from "./ui";
 
 /*
  * The library's *Sort by* and *View* buttons, beside its title, as
@@ -166,15 +165,8 @@ const popup = () => ({
   align: "start" as const,
   offset: 6,
   margin: 8,
-  popupClass: "min-w-[200px] rounded-xl p-1.5 transition duration-100 ease-out",
-  popupStyle: {
-    backgroundColor: look().cardHover,
-    borderWidth: 1,
-    borderColor: look().rule,
-    boxShadow: "0px 2px 6px rgb(0 0 0 / 0.12), 0px 12px 32px rgb(0 0 0 / 0.22)",
-  },
-  popupStartingClass: "opacity-0 scale-95",
-  popupEndingClass: "opacity-0",
+  ...popupSurface(),
+  popupClass: `min-w-[200px] ${popupSurface().popupClass}`,
 });
 
 /** The button: the current choice's icon and name; lit while its menu is open. */
@@ -193,11 +185,10 @@ function Trigger(props: {
       accessibilityLabel={props.accessibilityLabel}
       testID={props.testID}
       onPress={props.onPress}
-      class="h-8 flex-row items-center gap-1.5 rounded-lg px-2.5 active:opacity-70"
-      hoverStyle={{ backgroundColor: look().selected }}
+      class={`h-8 flex-row items-center gap-1.5 rounded-lg px-2.5 hover:bg-selected active:opacity-70 ${focusRing}`}
     >
-      <Icon name={props.icon} size={16} color={look().inkSoft} />
-      <Text style={{ color: look().inkSoft, fontSize: 13.5, fontWeight: "600" }}>
+      <Icon name={props.icon} size={16} />
+      <Text class="text-ink-soft" style={{ fontSize: 13.5, fontWeight: "600" }}>
         {props.label}
       </Text>
     </View>
@@ -206,10 +197,16 @@ function Trigger(props: {
 
 /** The menu's heading: *Sort by*, *View*. */
 const Heading = (props: { text: string }) => (
-  <Text class="px-2.5 pt-1 pb-1.5" style={{ color: look().inkFaint, fontSize: 12 }}>
+  <Text class="px-2.5 pt-1 pb-1.5 text-ink-faint" style={{ fontSize: 12 }}>
     {props.text}
   </Text>
 );
+
+/** A drawn menu's rule between groups. */
+const Rule = () => <MenuSeparator class="mx-2 my-1 h-px bg-rule" />;
+
+/** The rows of the drawn menus: lit under the pointer and with the keyboard. */
+const itemClass = "rounded-md px-2.5 py-1.5 hover:bg-selected focus:bg-selected";
 
 /** A choice of the drawn menu: a radio mark, the choice's icon, its name. */
 function RadioItem(props: {
@@ -227,28 +224,24 @@ function RadioItem(props: {
       closeOnSelect={props.closeOnSelect}
       testID={props.testID}
       onSelect={props.onSelect}
-      class="flex-row items-center gap-2.5 rounded-md px-2.5 py-1.5"
-      hoverStyle={{ backgroundColor: look().selected }}
-      focusStyle={{ backgroundColor: look().selected }}
+      class={`flex-row items-center gap-2.5 ${itemClass}`}
     >
       <View
-        class="items-center justify-center rounded-full"
-        style={{
-          width: 15,
-          height: 15,
-          borderWidth: props.checked ? 0 : 1.5,
-          borderColor: look().inkFaint,
-          backgroundColor: props.checked ? look().stamp : undefined,
-        }}
+        class={`items-center justify-center rounded-full ${
+          props.checked ? "bg-stamp" : "border-[1.5px] border-ink-faint"
+        }`}
+        style={{ width: 15, height: 15 }}
       >
         <If when={props.checked}>
-          <View class="rounded-full" style={{ width: 6, height: 6, backgroundColor: "#fff" }} />
+          <View class="rounded-full bg-on-fill" style={{ width: 6, height: 6 }} />
         </If>
       </View>
       <If when={props.icon}>
-        <Icon name={props.icon ?? "check"} size={15} color={look().inkSoft} />
+        <Icon name={props.icon ?? "check"} size={15} />
       </If>
-      <Text style={{ color: look().ink, fontSize: 13.5, lineHeight: 18 }}>{props.label}</Text>
+      <Text class="text-ink" style={{ fontSize: 13.5, lineHeight: 18 }}>
+        {props.label}
+      </Text>
     </MenuItem>
   );
 }
@@ -266,25 +259,21 @@ function CheckItem(props: {
       closeOnSelect={false}
       testID={props.testID}
       onSelect={props.onSelect}
-      class="flex-row items-center gap-2.5 rounded-md px-2.5 py-1.5"
-      hoverStyle={{ backgroundColor: look().selected }}
-      focusStyle={{ backgroundColor: look().selected }}
+      class={`flex-row items-center gap-2.5 ${itemClass}`}
     >
       <View
-        class="items-center justify-center rounded"
-        style={{
-          width: 15,
-          height: 15,
-          borderWidth: props.checked ? 0 : 1.5,
-          borderColor: look().inkFaint,
-          backgroundColor: props.checked ? look().stamp : undefined,
-        }}
+        class={`items-center justify-center rounded ${
+          props.checked ? "bg-stamp" : "border-[1.5px] border-ink-faint"
+        }`}
+        style={{ width: 15, height: 15 }}
       >
         <If when={props.checked}>
-          <Icon name="check" size={11} color="#fff" />
+          <Icon name="check" size={11} class="tint-on-fill" />
         </If>
       </View>
-      <Text style={{ color: look().ink, fontSize: 13.5, lineHeight: 18 }}>{props.label}</Text>
+      <Text class="text-ink" style={{ fontSize: 13.5, lineHeight: 18 }}>
+        {props.label}
+      </Text>
     </MenuItem>
   );
 }
@@ -294,18 +283,20 @@ function ViewOptions(props: { view: Choice<BookmarkView> }) {
   const v = () => props.view.value;
   return (
     <>
-      <MenuSeparator class="mx-2 my-1 h-px" style={{ backgroundColor: look().rule }} />
+      <Rule />
       <Heading text={`Show in ${props.view.label}`} />
-      {showFields.map(([f, label]) => (
-        <CheckItem
-          checked={shows(v(), f)}
-          label={label}
-          testID={`show-${f}`}
-          onSelect={() => toggleShow(v(), f)}
-        />
-      ))}
+      <Each of={showFields} key={([f]) => f}>
+        {(field) => (
+          <CheckItem
+            checked={shows(v(), field()[0])}
+            label={field()[1]}
+            testID={`show-${field()[0]}`}
+            onSelect={() => toggleShow(v(), field()[0])}
+          />
+        )}
+      </Each>
       <If when={sizedViews.includes(v())}>
-        <MenuSeparator class="mx-2 my-1 h-px" style={{ backgroundColor: look().rule }} />
+        <Rule />
         <Heading text="Cover" />
         <View class="px-3 pt-1 pb-2.5">
           <Slider
@@ -317,22 +308,15 @@ function ViewOptions(props: { view: Choice<BookmarkView> }) {
             value={coverSize(v())}
             onChange={(e) => setCoverSize(v(), e.value as number)}
             class="h-5"
-            trackStyle={{ height: 4, borderRadius: 2, backgroundColor: look().rule }}
-            rangeStyle={{ backgroundColor: look().stamp, borderRadius: 2 }}
-            thumbStyle={{
-              width: 16,
-              height: 16,
-              borderRadius: 8,
-              backgroundColor: look().card,
-              borderWidth: 1,
-              borderColor: look().rule,
-              boxShadow: look().shadow,
-            }}
+            trackClass="h-1 rounded-sm bg-rule"
+            rangeClass="rounded-sm bg-stamp"
+            thumbClass={`size-4 rounded-full border border-rule bg-card ${focusRing}`}
+            thumbStyle={{ boxShadow: look().shadow }}
           />
         </View>
       </If>
       <If when={v() === "list"}>
-        <MenuSeparator class="mx-2 my-1 h-px" style={{ backgroundColor: look().rule }} />
+        <Rule />
         <Heading text="Cover position" />
         {positions.map(([p, label]) => (
           <RadioItem
@@ -352,7 +336,7 @@ function ViewOptions(props: { view: Choice<BookmarkView> }) {
  * A button whose menu opens under it: the system's on the desktop apps
  * (at the button's bottom left), the app's on the web.
  */
-function MenuButton(props: {
+function ChoiceButton(props: {
   icon: IconName;
   label: string;
   accessibilityLabel: string;
@@ -391,7 +375,7 @@ function MenuButton(props: {
 export function SortButton(props: { source: Source }) {
   const now = () => currentSort(props.source);
   return (
-    <MenuButton
+    <ChoiceButton
       icon={now().icon}
       label={sortLabel(props.source)}
       accessibilityLabel={`Sort by: ${sortLabel(props.source)}`}
@@ -419,7 +403,7 @@ export function SortButton(props: { source: Source }) {
 export function ViewButton(props: { source: Source }) {
   const now = () => currentView(props.source);
   return (
-    <MenuButton
+    <ChoiceButton
       icon={now().icon}
       label={now().label}
       accessibilityLabel={`View: ${now().label}`}
@@ -437,15 +421,15 @@ export function ViewButton(props: { source: Source }) {
               onSelect={() => setViewFor(props.source, c.value)}
             />
           ))}
-          <MenuSeparator class="mx-2 my-1 h-px" style={{ backgroundColor: look().rule }} />
+          <Rule />
           <MenuItem
             testID="view-apply-all"
             onSelect={() => applyViewToAll(now().value)}
-            class="items-center rounded-md px-2.5 py-1.5"
-            hoverStyle={{ backgroundColor: look().selected }}
-            focusStyle={{ backgroundColor: look().selected }}
+            class={`items-center ${itemClass}`}
           >
-            <Text style={{ color: look().ink, fontSize: 13.5, lineHeight: 18 }}>Apply to all</Text>
+            <Text class="text-ink" style={{ fontSize: 13.5, lineHeight: 18 }}>
+              Apply to all
+            </Text>
           </MenuItem>
           <ViewOptions view={now()} />
         </>
@@ -482,7 +466,7 @@ export async function phoneListMenu(o: ListMenuOptions) {
   applyListChoice(o, await systemMenu("", listMenuEntries(o)));
 }
 
-/** The phone list's menu as entries: the system's menu (iOS) or `PanelMenu` (Android, the web) draws them. */
+/** The phone list's menu as entries: the system's menu (iOS) or `EntryMenu` (Android, the web) draws them. */
 export function listMenuEntries(o: ListMenuOptions): MenuEntry[] {
   const s = o.source;
   const view = currentView(s);
@@ -666,7 +650,7 @@ export function FilterButton(props: {
         />
       ))}
       <If when={offersType(props.source) && types().length > 1}>
-        <MenuSeparator class="mx-2 my-1 h-px" style={{ backgroundColor: look().rule }} />
+        <Rule />
         <Heading text="Type" />
         <RadioItem
           checked={f().type === null}
@@ -712,131 +696,114 @@ const symbolIcons: Record<string, IconName> = {
 };
 
 /**
- * The system's menu (`MenuEntry`), drawn where there is none (Android, the
- * web): a panel under the bar's •••, a submenu taking its place with a way
- * back, as `Home`'s menu. A pick closes it (`onPick`); a press outside it or
- * Android's back button closes it, or goes back from a submenu.
+ * The system's menu (`MenuEntry`), drawn by nsh's `Menu` where there is none
+ * (Android, the web): a sheet at the bottom on phones, a popup at `trigger`
+ * elsewhere; a submenu takes the sheet's place with a way back (`Submenu`),
+ * and the system's back button and a press outside close it. A pick closes
+ * it (`onPick`). Without a trigger it opens as `open` says (a button of the
+ * navigation bar's, outside it).
  */
-export function PanelMenu(props: {
-  items: () => MenuEntry[];
-  top: number;
-  right: number;
-  /** The height it may take; longer menus scroll. */
-  maxHeight: number;
+export function EntryMenu(props: {
+  entries: () => MenuEntry[];
   onPick: (id: string) => void;
-  onClose: () => void;
+  trigger?: JSX.Element;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   testID?: string;
 }) {
-  /** The submenus open, as indexes from the top level down. */
-  const path = signal<number[]>([]);
-  const shown = signal(false);
-  setTimeout(() => shown.set(true), 0);
-  const level = () => {
-    let items = props.items();
-    let title = "";
-    for (const k of path()) {
-      const e = items[k];
-      if (!e || !("children" in e)) return { items: props.items(), title: "" };
-      items = e.children;
-      title = e.title;
-    }
-    return { items, title };
-  };
-  const back = () => path.set(path().slice(0, -1));
-  onAndroidBack(() => (path().length ? back() : props.onClose()));
   const text = (e: { title: string; subtitle?: string }) => (
     <View class="min-w-0 flex-1">
-      <Text style={{ color: look().ink, fontSize: 16, lineHeight: 21 }}>{e.title}</Text>
+      <Text class="text-ink" style={{ fontSize: 16, lineHeight: 21 }}>
+        {e.title}
+      </Text>
       <If when={e.subtitle}>
-        <Text style={{ color: look().inkSoft, fontSize: 13, lineHeight: 17 }}>{e.subtitle}</Text>
+        <Text class="text-ink-soft" style={{ fontSize: 13, lineHeight: 17 }}>
+          {e.subtitle}
+        </Text>
       </If>
     </View>
   );
   const icon = (symbol?: string) => {
     const name = symbol ? symbolIcons[symbol] : undefined;
-    return name ? <Icon name={name} size={18} color={look().inkSoft} /> : null;
+    return name ? <Icon name={name} size={18} /> : null;
   };
-  const row = (e: MenuEntry, k: number) => {
-    if ("separator" in e)
-      return <View class="mx-4 my-1" style={{ height: 1, backgroundColor: look().rule }} />;
-    const sub = "children" in e;
-    const checked = !sub && e.checked;
-    const testID = sub ? `menu-${e.title.toLowerCase().replace(/\W+/g, "-")}` : `menu-${e.id}`;
-    return (
-      <View
-        role={sub ? "menuitem" : e.checked === undefined ? "menuitem" : "menuitemradio"}
-        accessibilityLabel={e.subtitle ? `${e.title}, ${e.subtitle}` : e.title}
-        accessibilityState={!sub && e.checked !== undefined ? { checked: !!e.checked } : undefined}
-        testID={testID}
-        onPress={() => (sub ? path.set([...path(), k]) : props.onPick(e.id))}
-        class="min-h-12 flex-row items-center gap-3 rounded-2xl py-2 pr-4 pl-3"
-        activeStyle={{ backgroundColor: look().selected }}
-      >
-        <View class="w-5 items-center">
-          <If when={checked}>
-            <Icon name="check" size={17} color={look().stamp} />
-          </If>
-        </View>
-        {text(e)}
-        {sub ? <Icon name="chevron" size={14} color={look().inkSoft} /> : icon(e.symbol)}
-      </View>
-    );
-  };
+  const rowClass =
+    "min-h-12 flex-row items-center gap-3 rounded-2xl py-2 pr-4 pl-3 hover:bg-selected focus:bg-selected active:bg-selected";
+  const testIDOf = (e: MenuEntry) =>
+    "separator" in e
+      ? undefined
+      : "children" in e
+        ? `menu-${e.title.toLowerCase().replace(/\W+/g, "-")}`
+        : `menu-${e.id}`;
+  const rows = (entries: MenuEntry[]): JSX.Element =>
+    entries.map((e) => {
+      if ("separator" in e) return <MenuSeparator class="mx-4 my-1 h-px bg-rule" />;
+      if ("children" in e)
+        return (
+          <Submenu
+            trigger={
+              <View
+                testID={testIDOf(e)}
+                accessibilityLabel={e.subtitle ? `${e.title}, ${e.subtitle}` : e.title}
+                class={rowClass}
+              >
+                <View class="w-5" />
+                {text(e)}
+                <Icon name="chevron" size={14} />
+              </View>
+            }
+            back={
+              <View
+                testID="menu-back"
+                accessibilityLabel={`Back from ${e.title}`}
+                class="h-12 flex-row items-center gap-2 rounded-2xl px-3 active:bg-selected"
+              >
+                <Icon name="back" size={17} />
+                <Text class="text-ink" style={{ fontSize: 16, fontWeight: "600" }}>
+                  {e.title}
+                </Text>
+              </View>
+            }
+          >
+            {rows(e.children)}
+          </Submenu>
+        );
+      return (
+        <MenuItem
+          testID={testIDOf(e)}
+          role={e.checked === undefined ? "menuitem" : "menuitemradio"}
+          checked={e.checked}
+          accessibilityLabel={e.subtitle ? `${e.title}, ${e.subtitle}` : e.title}
+          onSelect={() => props.onPick(e.id)}
+          class={rowClass}
+        >
+          <View class="w-5 items-center">
+            <If when={e.checked}>
+              <Icon name="check" size={17} class="tint-stamp" />
+            </If>
+          </View>
+          {text(e)}
+          {icon(e.symbol)}
+        </MenuItem>
+      );
+    });
   return (
-    <>
-      <View
-        class="absolute inset-0"
-        accessibilityLabel="Close menu"
-        onPress={props.onClose}
-        style={{ backgroundColor: "#00000024" }}
-      />
-      <View
-        testID={props.testID}
-        class="absolute overflow-hidden rounded-[26px]"
-        style={{
-          top: props.top,
-          right: props.right,
-          width: 290,
-          maxHeight: props.maxHeight,
-          backgroundColor: look().card,
-          borderWidth: 1,
-          borderColor: look().rule,
-          boxShadow: "0px 4px 12px rgb(0 0 0 / 0.14), 0px 16px 40px rgb(0 0 0 / 0.24)",
-          opacity: shown() ? 1 : 0,
-          transform: shown() ? "scale(1)" : "scale(0.9)",
-          transformOrigin: "top right",
-          transitionProperty: "opacity, transform",
-          transitionDuration: 160,
-          transitionTimingFunction: "ease-out",
-        }}
-      >
-        <Scroll style={{ maxHeight: props.maxHeight }} contentStyle={{ padding: 6 }}>
-          {() => {
-            const { items, title } = level();
-            return (
-              <>
-                <If when={path().length}>
-                  <View
-                    role="button"
-                    accessibilityLabel={`Back from ${title}`}
-                    testID="menu-back"
-                    onPress={back}
-                    class="h-12 flex-row items-center gap-2 rounded-2xl px-3"
-                    activeStyle={{ backgroundColor: look().selected }}
-                  >
-                    <Icon name="back" size={17} color={look().inkSoft} />
-                    <Text style={{ color: look().ink, fontSize: 16, fontWeight: "600" }}>
-                      {title}
-                    </Text>
-                  </View>
-                  <View class="mx-4 my-1" style={{ height: 1, backgroundColor: look().rule }} />
-                </If>
-                {items.map(row)}
-              </>
-            );
-          }}
-        </Scroll>
-      </View>
-    </>
+    <DrawnMenu
+      testID={props.testID}
+      trigger={props.trigger}
+      open={props.open}
+      onOpenChange={(e) => props.onOpenChange?.(e.open)}
+      placement="bottom"
+      align="end"
+      offset={8}
+      margin={8}
+      popupClass="min-w-[260px] rounded-[26px] border border-rule bg-card p-1.5 transition duration-150 ease-out motion-reduce:transition-none"
+      popupStyle={{ boxShadow: look().menuShadow }}
+      popupStartingClass="opacity-0 scale-90"
+      popupEndingClass="opacity-0"
+      backdropClass="bg-black/15"
+    >
+      {rows(props.entries())}
+    </DrawnMenu>
   );
 }

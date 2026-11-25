@@ -1,5 +1,6 @@
 import { Sidebar } from "lofu/native";
 import {
+  batch,
   cleanup,
   computed,
   effect,
@@ -66,8 +67,18 @@ type Route =
   | { name: "add"; source: Source }
   | { name: "edit"; bookmark: Bookmark };
 
+/**
+ * The desktop's pages: the library, whose source is the sidebar's (one page
+ * that follows it, rather than one per source), under the reader and the
+ * original page.
+ */
+type DesktopRoute =
+  | { name: "library" }
+  | { name: "reader"; bookmark: Bookmark }
+  | { name: "browser"; url: string; domain: string };
+
 /** The reader and "Open Original" push onto this stack while it's mounted. */
-function useOpeners(push: (r: Route) => void) {
+function useOpeners(push: (r: Extract<Route, { name: "reader" | "browser" }>) => void) {
   setReader((b) => push({ name: "reader", bookmark: b }));
   setBrowser((b) => push({ name: "browser", url: b.url, domain: b.domain }));
   cleanup(() => {
@@ -152,11 +163,8 @@ function App() {
 
   return (
     <View
-      class="flex-1"
       // The system's sidebar lies under the root: the desktop's layout paints its own paper.
-      style={{
-        backgroundColor: nativeSidebar && ready() === "app" && wide() ? undefined : look().paper,
-      }}
+      class={nativeSidebar && ready() === "app" && wide() ? "flex-1" : "flex-1 bg-paper"}
     >
       {() => {
         const r = ready();
@@ -173,11 +181,11 @@ function App() {
               if (!e.open) incomingShare.set("");
             }}
             backdropClass="bg-black/40"
-            class="m-auto overflow-hidden rounded-[20px]"
-            style={{ width: Math.min(440, windowSize().width - 32), backgroundColor: look().paper }}
+            class="m-auto overflow-hidden rounded-[20px] bg-paper"
+            style={{ width: Math.min(440, windowSize().width - 32) }}
           >
-            <View class="gap-5 p-5" style={{ backgroundColor: look().paper }}>
-              <Text style={{ color: look().ink, fontSize: 20, fontWeight: "700" }}>
+            <View class="gap-5 bg-paper p-5">
+              <Text class="text-ink" style={{ fontSize: 20, fontWeight: "700" }}>
                 Save shared link
               </Text>
               <AddBookmark
@@ -198,32 +206,42 @@ function App() {
 /** Sidebar, and a stack of the library and the reader beside it. */
 function Desktop(props: { onReconnect: () => void }) {
   const source = signal<Source>({ kind: "all" });
-  const nav = createNavStack<Route>([{ name: "library", source: source() }]);
+  /**
+   * The library's page stays for every source (`Library` follows `source`):
+   * picking one in the sidebar only goes back to it from the reader, so the
+   * page, its toolbar and its search field aren't made again on each click.
+   */
+  const nav = createNavStack<DesktopRoute>([{ name: "library" }]);
   const settingsOpen = signal(false);
   const adding = signal(false);
   const editing = signal<Bookmark | null>(null);
-  // What the add and edit dialogs show stays until their fade out ends.
+  // What the add and edit dialogs show stays until their fade out ends
+  // (`onGone`), so it's set as they open, not cleared as they close.
   const edited = signal<Bookmark | null>(null);
   const addShown = signal(false);
-  effect(() => {
-    const b = editing();
-    if (b) edited.set(b);
-  });
-  effect(() => {
-    if (adding()) addShown.set(true);
-  });
+  const edit = (b: Bookmark) =>
+    batch(() => {
+      edited.set(b);
+      editing.set(b);
+    });
+  const add = () =>
+    batch(() => {
+      addShown.set(true);
+      adding.set(true);
+    });
   useOpeners((r) => nav.push(r));
-  setEditor((b) => editing.set(b));
+  setEditor(edit);
   cleanup(() => setEditor(null));
   // The window toolbar's leading items line up with the content (`lib/toolbar.ts`).
   contentLeft.set(SIDEBAR + INSET);
   // The window toolbar can't be covered by a dialog: it waits while one is open.
   effect(() => toolbarBlocked.set(settingsOpen() || !!editing() || adding() || prompting()));
   cleanup(() => toolbarBlocked.set(false));
-  const select = (s: Source) => {
-    source.set(s);
-    nav.setRoutes([{ name: "library", source: s }]);
-  };
+  const select = (s: Source) =>
+    batch(() => {
+      source.set(s);
+      if (nav.routes().length > 1) nav.popToRoot();
+    });
   /** The bookmark open in the reader, for the Bookmark menu. */
   const reading = () => {
     const top = nav.routes().at(-1);
@@ -236,7 +254,7 @@ function Desktop(props: { onReconnect: () => void }) {
   useMenuBar({
     select,
     reading,
-    add: () => adding.set(true),
+    add,
     newCollection: () => void newCollectionPrompt((id) => select({ kind: "collection", id })),
     settings: () => settingsOpen.set(true),
     back: () => {
@@ -285,7 +303,7 @@ function Desktop(props: { onReconnect: () => void }) {
           onSettings={() => settingsOpen.set(true)}
         />
       </View>
-      <View class="flex-1" style={{ backgroundColor: look().paper }}>
+      <View class="flex-1 bg-paper">
         <NavStack state={nav} testID={SWIPE_STACK} class="flex-1">
           {(route) => {
             if (route.name === "browser") {
@@ -302,15 +320,14 @@ function Desktop(props: { onReconnect: () => void }) {
                 </NavPage>
               );
             }
-            const s = route.name === "library" ? route.source : { kind: "all" as const };
             return (
-              <NavPage animation={pageAnimation} header={<View />} title={sourceTitle(s)}>
+              <NavPage animation={pageAnimation} header={<View />} title={sourceTitle(source())}>
                 <Library
-                  source={s}
+                  source={source()}
                   wide
                   onSource={select}
                   onOpen={(b) => openBookmark(b)}
-                  onAdd={() => adding.set(true)}
+                  onAdd={add}
                 />
               </NavPage>
             );
@@ -323,7 +340,11 @@ function Desktop(props: { onReconnect: () => void }) {
         backdropClass="bg-black/40"
         class="m-auto w-[500px] overflow-hidden rounded-[26px]"
         // Taller than a short window: it scrolls inside it.
-        style={{ ...glass(), borderCurve: "continuous", maxHeight: dialogMaxHeight() }}
+        style={{
+          ...glass(),
+          borderCurve: "continuous",
+          maxHeight: dialogMaxHeight(),
+        }}
       >
         <GlassTint radius={26} color={look().sheetTint} />
         <Scroll class="shrink" keyboardShouldPersistTaps="handled">
@@ -350,7 +371,7 @@ function Desktop(props: { onReconnect: () => void }) {
         <If when={edited()}>
           {(b) => (
             <View class="gap-5 p-6">
-              <Text style={{ color: look().ink, fontSize: 19, fontWeight: "700" }}>
+              <Text class="text-ink" style={{ fontSize: 19, fontWeight: "700" }}>
                 Edit bookmark
               </Text>
               <EditBookmark
@@ -375,7 +396,9 @@ function Desktop(props: { onReconnect: () => void }) {
         <GlassTint radius={26} />
         <If when={addShown()}>
           <View class="gap-5 p-6">
-            <Text style={{ color: look().ink, fontSize: 19, fontWeight: "700" }}>Add bookmark</Text>
+            <Text class="text-ink" style={{ fontSize: 19, fontWeight: "700" }}>
+              Add bookmark
+            </Text>
             <AddBookmark
               source={source()}
               onCancel={() => adding.set(false)}
@@ -562,12 +585,11 @@ function Phone(props: { onReconnect: () => void }) {
   cleanup(() => setEditor(null));
   // No header background: iOS 26 draws its bar as Liquid Glass over the page,
   // with the content scrolling under it; the app only tints it.
-  const headerClass = () =>
-    `${platform.os === "android" ? `bg-[${look().paper}] ` : ""}text-[${look().ink}] tint-[${look().stamp}]`;
+  const headerClass = `${platform.os === "android" ? "bg-paper " : ""}text-ink tint-stamp`;
   /** Pages that keep an opaque bar (forms, the web view) draw it in the paper. */
-  const solidHeaderClass = () => `bg-[${look().paper}] ${headerClass()}`;
+  const solidHeaderClass = `bg-paper ${headerClass}`;
   return (
-    <NavStack state={nav} class="flex-1" style={{ backgroundColor: look().paper }}>
+    <NavStack state={nav} class="flex-1 bg-paper">
       {(route) => {
         switch (route.name) {
           case "sources":
@@ -583,7 +605,7 @@ function Phone(props: { onReconnect: () => void }) {
                 headerTransparent
                 headerTitle={<View />}
                 headerBackTitle="Library"
-                headerClass={headerClass()}
+                headerClass={headerClass}
                 ios={{ headerLeftSymbol: "gearshape", headerRightSymbol: "ellipsis" }}
                 headerLeft={
                   <View
@@ -601,7 +623,7 @@ function Phone(props: { onReconnect: () => void }) {
                     onPress={() => homeMenu.set(true)}
                   />
                 }
-                style={{ backgroundColor: look().paper }}
+                class="bg-paper"
               >
                 <Home
                   menu={homeMenu}
@@ -624,8 +646,8 @@ function Phone(props: { onReconnect: () => void }) {
                 title={sourceTitle(route.source)}
                 headerLargeTitle={platform.os === "ios"}
                 headerTransparent={platform.os === "ios"}
-                headerClass={headerClass()}
-                style={{ backgroundColor: look().paper }}
+                headerClass={headerClass}
+                class="bg-paper"
                 ios={{ headerRightSymbol: "ellipsis" }}
                 headerRight={
                   <View
@@ -668,8 +690,8 @@ function Phone(props: { onReconnect: () => void }) {
                 animation={pageAnimation}
                 title={route.bookmark.domain.replace(/^www\./, "")}
                 headerTransparent={platform.os === "ios"}
-                headerClass={headerClass()}
-                style={{ backgroundColor: look().paper }}
+                headerClass={headerClass}
+                class="bg-paper"
                 ios={{ headerRightSymbol: "ellipsis" }}
                 headerRight={
                   <View
@@ -702,8 +724,8 @@ function Phone(props: { onReconnect: () => void }) {
               <NavPage
                 animation={pageAnimation}
                 title={route.domain.replace(/^www\./, "")}
-                headerClass={solidHeaderClass()}
-                style={{ backgroundColor: look().paper }}
+                headerClass={solidHeaderClass}
+                class="bg-paper"
               >
                 <Browser url={route.url} wide={false} onClose={() => nav.pop()} />
               </NavPage>
@@ -713,11 +735,11 @@ function Phone(props: { onReconnect: () => void }) {
               <NavPage
                 animation={pageAnimation}
                 title="Add bookmark"
-                headerClass={solidHeaderClass()}
-                style={{ backgroundColor: look().paper }}
+                headerClass={solidHeaderClass}
+                class="bg-paper"
               >
                 <WebBar title="Add bookmark" onBack={() => nav.pop()} />
-                <View class="flex-1 p-5" style={{ backgroundColor: look().paper }}>
+                <View class="flex-1 bg-paper p-5">
                   <AddBookmark
                     source={route.source}
                     onDone={() => nav.pop()}
@@ -732,16 +754,15 @@ function Phone(props: { onReconnect: () => void }) {
               <NavPage
                 animation={pageAnimation}
                 title="Edit bookmark"
-                headerClass={solidHeaderClass()}
-                style={{ backgroundColor: look().paper }}
+                headerClass={solidHeaderClass}
+                class="bg-paper"
               >
                 <WebBar title="Edit bookmark" onBack={() => nav.pop()} />
                 <Scroll
-                  class="flex-1"
+                  class="flex-1 bg-paper"
                   keyboardDismissMode="on-drag"
                   keyboardShouldPersistTaps="handled"
                   contentStyle={{ padding: 20, paddingBottom: keyboardFrame().height + 20 }}
-                  style={{ backgroundColor: look().paper }}
                 >
                   <EditBookmark
                     b={route.bookmark}
@@ -756,17 +777,16 @@ function Phone(props: { onReconnect: () => void }) {
               <NavPage
                 animation={pageAnimation}
                 title="Settings"
-                headerClass={solidHeaderClass()}
-                style={{ backgroundColor: look().paper }}
+                headerClass={solidHeaderClass}
+                class="bg-paper"
               >
                 <WebBar title="Settings" onBack={() => nav.pop()} />
                 {/* Taller than a small phone: the server, opening, reading offline. */}
                 <Scroll
-                  class="flex-1"
+                  class="flex-1 bg-paper"
                   keyboardDismissMode="on-drag"
                   keyboardShouldPersistTaps="handled"
                   contentStyle={{ paddingBottom: keyboardFrame().height }}
-                  style={{ backgroundColor: look().paper }}
                 >
                   <Settings
                     onDone={() => {
@@ -796,14 +816,11 @@ function WebBar(props: {
 }) {
   if (platform.os !== "web") return null;
   return (
-    <View
-      class="flex-row items-center gap-3 px-3"
-      style={{ height: 56, backgroundColor: look().paper }}
-    >
+    <View class="flex-row items-center gap-3 bg-paper px-3" style={{ height: 56 }}>
       <RoundGlassButton name="back" label="Back" testID="back" onPress={props.onBack} />
       <Text
-        class="flex-1 truncate"
-        style={{ color: look().ink, fontSize: 17, fontWeight: "600", textAlign: "center" }}
+        class="flex-1 truncate text-ink"
+        style={{ fontSize: 17, fontWeight: "600", textAlign: "center" }}
       >
         {props.title}
       </Text>

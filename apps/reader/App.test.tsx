@@ -57,6 +57,17 @@ const library = {
   ],
 };
 
+/**
+ * A platform with a share sheet: headless runs have none unless told
+ * (`Share.available()` resolves false), and the menus leave *Share…* out.
+ */
+const shareable = {
+  nsh: {
+    "Share.available": () => true,
+    "Share.show": () => ({ action: "shared", target: null }),
+  },
+};
+
 test("first launch asks for the server", async () => {
   const app = await open("./App.tsx");
   await app.waitFor("text:Server address");
@@ -473,7 +484,7 @@ test("phone: the Trash is last on the Library page, and holds what was deleted",
 
 test("phone: swiping a row left deletes it into the Trash", async () => {
   const log = { patches: [] as [string, unknown][], deletes: [] as string[] };
-  const app = await open("./App.tsx", { ...saved, network: editable(log) });
+  const app = await open("./App.tsx", { ...saved, network: editable(log), modules: shareable });
   await app.waitFor("id:source-all");
   await app.press("id:source-all");
   await app.waitFor("text:Article bb");
@@ -613,6 +624,7 @@ test("desktop: the context menu moves, shares and deletes", async () => {
     width: 1200,
     height: 800,
     network: editable(log),
+    modules: shareable,
   });
   await app.waitFor("text:Article bb");
   await app.rightClick("id:card-bb");
@@ -1032,6 +1044,124 @@ test("desktop: the sidebar's + makes a collection and opens it", async () => {
   await app.waitFor("id:collection-c9");
   // It's opened: the library shows it, empty (All bookmarks isn't).
   await app.waitFor("text:Nothing here yet");
+});
+
+test("desktop: a renamed collection keeps its row in the sidebar, with the new name", async () => {
+  let now = library;
+  const patches: unknown[] = [];
+  const app = await open("./App.tsx", {
+    ...desktop,
+    network: {
+      [`GET ${S}/v1/sync*`]: () => ({ body: now }),
+      [`PATCH ${S}/v1/collections/c1`]: (r) => {
+        const patch = JSON.parse(r.body ?? "{}");
+        patches.push(patch);
+        const c = { ...now.collections[0], ...patch, seq: 10 };
+        now = { ...now, collections: [c] };
+        return { body: c };
+      },
+    },
+  });
+  await app.waitFor("label:Homelab");
+  await app.press("label:Homelab");
+  await app.waitFor("id:library-title");
+  await app.rightClick("id:collection-c1");
+  await app.chooseMenuItem("Rename…");
+  await app.waitFor("id:prompt-text");
+  await app.clear("id:prompt-text");
+  await app.type("id:prompt-text", "Lab notes");
+  await app.press("id:prompt-confirm");
+  await app.waitUntil(() => patches.length > 0);
+  expect(patches[0]).toEqual({ name: "Lab notes" });
+  // The row is kept (by id), and says the new name; it's still the one selected.
+  await app.waitFor("label:Lab notes");
+  expect(app.shows("label:Homelab")).toBe(false);
+  expect(app.count("id:collection-c1")).toBe(1);
+  // Still the source shown.
+  expect(app.texts()).toContain("Lab notes");
+  expect(app.shows("text:Nothing here yet")).toBe(false);
+});
+
+test("desktop: the sidebar's Tags heading counts the tags as they change", async () => {
+  const log = { patches: [] as [string, unknown][], deletes: [] as string[] };
+  const app = await open("./App.tsx", {
+    ...desktop,
+    network: {
+      ...editable(log),
+      [`PATCH ${S}/v1/bookmarks/bb`]: (r) => {
+        const patch = JSON.parse(r.body ?? "{}");
+        log.patches.push(["bb", patch]);
+        return { body: { ...library.bookmarks[1], ...patch, seq: 5 } };
+      },
+    },
+  });
+  await app.waitFor("text:TAGS (1)");
+  await app.rightClick("id:card-bb");
+  await app.chooseMenuItem("Edit Title, Tags and Note…");
+  await app.waitFor("id:edit-tags");
+  await app.type("id:edit-tags", "golang, essays,");
+  await app.press("id:edit-save");
+  await app.waitUntil(() => log.patches.length > 0);
+  await app.waitFor("text:TAGS (3)");
+  expect(app.shows("text:TAGS (1)")).toBe(false);
+  await app.waitFor("label:golang");
+});
+
+test("desktop: the moodboard keeps its tiles as a bookmark changes", async () => {
+  const many = Array.from({ length: 24 }, (_, k) =>
+    bookmark(`m${k}`, {
+      createdAt: new Date(Date.parse("2026-11-04T10:00:00.000Z") - k * 60_000).toISOString(),
+    }),
+  );
+  const patches: [string, unknown][] = [];
+  const app = await open("./App.tsx", {
+    ...desktop,
+    network: {
+      [`GET ${S}/v1/sync*`]: { body: { ...library, bookmarks: many, highlights: [] } },
+      [`PATCH ${S}/v1/bookmarks/*`]: (r) => {
+        const id = r.url.split("/").pop() ?? "";
+        const patch = JSON.parse(r.body ?? "{}");
+        patches.push([id, patch]);
+        const b = many.find((m) => m.id === id);
+        return { body: { ...b, ...patch, seq: 50 } };
+      },
+    },
+  });
+  await app.waitFor("id:card-m0");
+  await app.press("id:view-button");
+  await app.chooseMenuItem("Moodboard");
+  await app.waitFor("id:tile-m5");
+  // Under the pointer, the tile is lit (`hover:`): a tile made again isn't, until the pointer moves.
+  await app.hover("id:tile-m5");
+  const lit = app.viewStyle("id:tile-m5")?.backgroundColor;
+  expect(lit).not.toBe(app.viewStyle("id:tile-m6")?.backgroundColor);
+
+  // An edit reaches the tile's column in place: the scroll view, its
+  // columns and their tiles stay.
+  await app.rightClick("id:tile-m5");
+  await app.chooseMenuItem("Add to Favorites");
+  await app.waitUntil(() => patches.length > 0);
+  expect(patches[0]).toEqual(["m5", { favorite: true }]);
+  await app.rightClick("id:tile-m5");
+  expect((app.menu() ?? []).map((m) => m.label)).toContain("Remove from Favorites");
+  await app.closeMenu();
+  expect(app.viewStyle("id:tile-m5")?.backgroundColor).toBe(lit);
+});
+
+test("phone web: the Library page's ••• menu opens and collapses sections", async () => {
+  const app = await open("./App.tsx", {
+    ...saved,
+    platform: "web",
+    width: 390,
+    height: 844,
+    network: { [`GET ${S}/v1/sync*`]: { body: library } },
+  });
+  await app.waitFor("id:home-menu");
+  await app.waitFor("text:Homelab");
+  await app.press("id:home-menu");
+  await app.waitFor("id:menu-collapse");
+  await app.press("id:menu-collapse");
+  await app.waitUntil(() => !app.shows("text:Homelab"));
 });
 
 /** The titles the library shows, in order (one column: a grid's row says its cards in no set order). */

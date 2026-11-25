@@ -6,12 +6,18 @@
   "rust": ".",
   "icon": "../../design/logo/logo.png",
   "capabilities": {
-    "network": { "hosts": ["*"] },
-    "webview": { "hosts": ["*"] },
+    "network": {
+      "hosts": ["*"]
+    },
+    "webview": {
+      "hosts": ["*"]
+    },
     "application": true,
     "clipboard": true,
     "statusBar": true,
-    "openUrl": { "schemes": ["http", "https"] },
+    "openUrl": {
+      "schemes": ["http", "https"]
+    },
     "fs": {
       "read": [
         "${dataDir}",
@@ -19,7 +25,8 @@
         "${homeDir}/Library/Application Support/app.lofu.reader"
       ]
     },
-    "host": ["lofu.secret.read", "lofu.secret.write", "lofu.share", "lofu.keyboard.keepAway"]
+    "host": ["lofu.secret.read", "lofu.secret.write", "lofu.keyboard.keepAway"],
+    "share": true
   },
   "window": {
     "titleBar": {
@@ -29,6 +36,70 @@
     "minSize": {
       "width": 800,
       "height": 480
+    }
+  },
+  "theme": {
+    "cssVars": {
+      "light": {
+        "paper": "#f3ece0",
+        "paper-deep": "#e9e0d0",
+        "sidebar": "#ebe3d5",
+        "card": "#fbf8f2",
+        "card-hover": "#fffdf9",
+        "field": "#e4dbca",
+        "selected": "#ddd2bf",
+        "ink": "#1f1b16",
+        "ink-soft": "#5d554a",
+        "ink-faint": "#968c7d",
+        "rule": "#d8cdbb",
+        "rule-soft": "#e3dacb",
+        "stamp": "#c2412d",
+        "stamp-soft": "#c2412d1f",
+        "favorite": "#d4952a",
+        "highlight": "#f2d37a",
+        "glass-tint": "#efe6d673",
+        "glass-fallback": "#f3ece0d9",
+        "glass-edge": "#ffffff80",
+        "sheet-tint": "#f3ece0b8",
+        "group-fill": "#ffffffa6",
+        "group-edge": "#3c2d1914",
+        "control": "#ffffffb8",
+        "ok": "#6f9b6a",
+        "on-fill": "#ffffff",
+        "action-info": "#0a84ff",
+        "action-destructive": "#ff3b30",
+        "action-neutral": "#636366"
+      },
+      "dark": {
+        "paper": "#1b1915",
+        "paper-deep": "#24211c",
+        "sidebar": "#161411",
+        "card": "#24211c",
+        "card-hover": "#2a2620",
+        "field": "#2a2620",
+        "selected": "#332e27",
+        "ink": "#ece4d6",
+        "ink-soft": "#b3a998",
+        "ink-faint": "#7d7567",
+        "rule": "#39332b",
+        "rule-soft": "#2e2a24",
+        "stamp": "#f0694f",
+        "stamp-soft": "#f0694f24",
+        "favorite": "#e8b04a",
+        "highlight": "#6e5a24",
+        "glass-tint": "#4a443bb3",
+        "glass-fallback": "#2f2b25e6",
+        "glass-edge": "#ffffff1f",
+        "sheet-tint": "#1f1c18c4",
+        "group-fill": "#ffffff12",
+        "group-edge": "#ffffff14",
+        "control": "#ffffff17",
+        "ok": "#6f9b6a",
+        "on-fill": "#ffffff",
+        "action-info": "#0a84ff",
+        "action-destructive": "#ff453a",
+        "action-neutral": "#636366"
+      }
     }
   }
 }
