@@ -1,5 +1,5 @@
 import { Files } from "lofu/native";
-import { platform, Storage } from "nsh";
+import { Storage } from "nsh";
 
 /**
  * Text kept on the device beyond `Storage`'s 5 MB: files in the app's data
@@ -14,19 +14,6 @@ export const onDisk = (() => {
     return false; // No native module (headless tests).
   }
 })();
-
-/**
- * Whether an image on `os` may show a file of the app's own by its path
- * (`filePath`). nsh 0.6.1 lets images load from local paths on desktops
- * only: on iOS and Android an app that declares capabilities gets no
- * `fs.read` roots for images, `${dataDir}` included (`native_files` in
- * nsh-core's `access.rs`), so a picture shown from a file stays blank.
- * Fixed on nsh's `main` after 0.6.1 (longbridge/nsh#2292).
- */
-export const showsFiles = (os: string) => os === "macos" || os === "windows" || os === "linux";
-
-/** Whether article pictures are kept as files and shown from them (desktops). */
-export const picturesOnDisk = onDisk && showsFiles(platform.os);
 
 export async function readText(name: string): Promise<string | null> {
   if (onDisk) return (await Files.read(name).catch(() => null)) ?? null;

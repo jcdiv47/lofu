@@ -12,7 +12,6 @@ import {
   filePath,
   listText,
   onDisk,
-  picturesOnDisk,
   readText,
   removeText,
   sizeOf,
@@ -29,9 +28,7 @@ import { inks } from "./look";
  * beside them, as files of the app's own (`picture-<id>-<hash of the URL>`)
  * rather than in nsh's image cache, which holds 256 MB for every image the
  * app shows and which the system may clear. The reader shows the kept
- * copies, online too. The web keeps none, and phones keep the text only
- * (`picturesOnDisk`): nsh shows no image from a file there, so their
- * pictures load from the server, through nsh's cache.
+ * copies, online too. The web keeps none.
  */
 export interface Kept {
   markdown: string | null;
@@ -98,12 +95,6 @@ if (onDisk) {
       return s;
     }),
   );
-  // Pictures an earlier version kept on a phone, which nsh never showed.
-  if (!picturesOnDisk) {
-    void listText(PICTURE).then(async (names) => {
-      for (const name of names) await removeText(name);
-    });
-  }
 }
 
 /** Whether the article `id` can be read without the server. */
@@ -202,11 +193,10 @@ const PICTURES_AT_ONCE = 3;
 
 /**
  * The article with its kept pictures shown from their files, for showing
- * (the copy on the disk keeps the URLs it came with). Where nsh shows no
- * file (phones), unchanged.
+ * (the copy on the disk keeps the URLs it came with).
  */
 export async function withKeptPictures(id: string, a: Kept): Promise<Kept> {
-  if (!picturesOnDisk || !(a.images.length || a.formulas?.length)) return a;
+  if (!onDisk || !(a.images.length || a.formulas?.length)) return a;
   const here = new Set(await listText(`${PICTURE}${id}-`));
   if (!here.size) return a;
   const local = (url: string) => {
@@ -237,7 +227,6 @@ export async function withKeptPictures(id: string, a: Kept): Promise<Kept> {
  * the copy a reader has on screen. Resolves with whether it got all it
  * could: a picture its site no longer has (an error status, or not a
  * picture) is given up on; one that couldn't be reached is tried again later.
- * Where nsh shows no file (phones), it keeps none and removes any there.
  */
 export async function keepPictures(
   id: string,
@@ -246,9 +235,10 @@ export async function keepPictures(
 ): Promise<boolean> {
   if (!onDisk) return false;
   const here = new Set(await listText(`${PICTURE}${id}-`));
-  const urls = picturesOnDisk ? pictureUrls(a) : [];
-  const shown = picturesOnDisk && showing ? pictureUrls(showing) : [];
-  const wanted = new Set([...urls, ...shown].map((u) => pictureFile(id, u)));
+  const urls = pictureUrls(a);
+  const wanted = new Set(
+    [...urls, ...(showing ? pictureUrls(showing) : [])].map((u) => pictureFile(id, u)),
+  );
   for (const name of here) {
     if (!wanted.has(name)) await removeText(name);
   }

@@ -1,7 +1,6 @@
 import { expect, test } from "nsh/test";
 import type { Bookmark } from "./lib/api";
 import { AHEAD, pictureFile, pictureUrls, toKeep } from "./lib/articles";
-import { showsFiles } from "./lib/files";
 
 const b = (id: string, over: Partial<Bookmark> = {}): Bookmark => ({
   id,
@@ -75,10 +74,4 @@ test("a picture's file is named by its article and URL, in the characters files 
   expect(
     pictureFile("01JD2Q_x-y", "https://lofu.test/img/s?u=https%3A%2F%2Fx.test%2Fb.jpg"),
   ).not.toBe(a);
-});
-
-test("pictures are kept as files only where nsh shows an image from a file", () => {
-  expect(["macos", "windows", "linux"].every(showsFiles)).toBe(true);
-  // nsh 0.6.1 grants images no local paths on phones, fs.read or not.
-  expect(["ios", "android", "web"].some(showsFiles)).toBe(false);
 });
