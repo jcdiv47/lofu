@@ -49,6 +49,8 @@ interface Prefs {
   /** The size of the covers of cards and the moodboard, 1–5 (`coverSize`). */
   coverSizes: Partial<Record<BookmarkView, number>>;
   coverPosition: CoverPosition;
+  /** Wide windows: the sidebar is hidden (View › Hide Sidebar, ⌘B). */
+  sidebarHidden?: boolean;
 }
 
 const KEY = "prefs.v1";

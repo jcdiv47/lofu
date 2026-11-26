@@ -208,6 +208,23 @@ test("desktop: a narrow Mac window keeps the sidebar, not the phone's Library pa
   expect(app.shows("text:Library")).toBe(false);
 });
 
+test("desktop: ⌘B hides the sidebar and shows it again", async () => {
+  const app = await open("./App.tsx", {
+    ...saved,
+    platform: "macos",
+    width: 1200,
+    height: 800,
+    network: { [`GET ${S}/v1/sync*`]: { body: library } },
+  });
+  await app.waitFor("text:Article a");
+  expect(app.texts()).toContain("COLLECTIONS");
+  await app.keyboard.press("mod+b");
+  await app.waitUntil(() => !app.texts().includes("COLLECTIONS"));
+  expect(app.shows("text:Article a")).toBe(true);
+  await app.keyboard.press("mod+b");
+  await app.waitFor("text:COLLECTIONS");
+});
+
 test("desktop: sections fold away, and collections are put in order by dragging", async () => {
   const col = (id: string, name: string, sort: number) => ({
     id,
