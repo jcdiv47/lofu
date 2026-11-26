@@ -4,6 +4,7 @@ import { AlertDialog } from "nsh/base";
 import { isAvailable, Menu } from "nsh/desktop";
 import { promptText } from "../components/Prompt";
 import { api, type Bookmark } from "./api";
+import { glideNext } from "./motion";
 import { type OpenIn, prefs, sortedCollections } from "./prefs";
 import {
   collectionName,
@@ -209,7 +210,9 @@ async function actionSheet(title: string, actions: SheetAction[]): Promise<strin
 }
 
 const move = (b: Bookmark, to: string | null) => {
-  if (inTrash(b) || b.collectionId !== to) void moveBookmark(b.id, to).catch(() => {});
+  if (!inTrash(b) && b.collectionId === to) return;
+  glideNext();
+  void moveBookmark(b.id, to).catch(() => {});
 };
 
 /** The places a bookmark can move to, as items of the desktop's menu, where it is checked. */
@@ -263,6 +266,7 @@ const moveEntries = (b: Bookmark): MenuEntry[] =>
  */
 export async function deleteBookmark(b: Bookmark): Promise<boolean> {
   if (!inTrash(b)) {
+    glideNext();
     void trashBookmark(b.id).catch(() => {});
     return true;
   }
@@ -275,6 +279,7 @@ export async function deleteBookmark(b: Bookmark): Promise<boolean> {
     ],
   });
   if (action !== "delete") return false;
+  glideNext();
   void deleteForever(b.id).catch(() => {});
   return true;
 }
@@ -379,7 +384,10 @@ export function bookmarkActions(b: Bookmark, o: BookmarkMenuOptions = {}): Bookm
       label: "Put Back",
       symbol: "arrow.uturn.backward",
       group: "bookmark",
-      run: () => void restoreBookmark(b.id).catch(() => {}),
+      run: () => {
+        glideNext();
+        void restoreBookmark(b.id).catch(() => {});
+      },
     },
     b.contentStatus === "failed" && {
       id: "refetch",
