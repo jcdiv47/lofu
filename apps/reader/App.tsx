@@ -41,6 +41,7 @@ import { incomingShare, listenForShares } from "./lib/android";
 import type { Bookmark } from "./lib/api";
 import { loadSettings, shareLogin } from "./lib/api";
 import { glass, hasGlass, look } from "./lib/look";
+import { prefs, setPrefs } from "./lib/prefs";
 import {
   bookmark as current,
   reset,
@@ -164,7 +165,11 @@ function App() {
   return (
     <View
       // The system's sidebar lies under the root: the desktop's layout paints its own paper.
-      class={nativeSidebar && ready() === "app" && wide() ? "flex-1" : "flex-1 bg-paper"}
+      class={
+        nativeSidebar && ready() === "app" && wide() && !prefs().sidebarHidden
+          ? "flex-1"
+          : "flex-1 bg-paper"
+      }
     >
       {() => {
         const r = ready();
@@ -232,8 +237,12 @@ function Desktop(props: { onReconnect: () => void }) {
   useOpeners((r) => nav.push(r));
   setEditor(edit);
   cleanup(() => setEditor(null));
+  /** View › Hide Sidebar (⌘B) folds it away, kept on the device. */
+  const sidebarShown = () => !prefs().sidebarHidden;
+  /** With the sidebar hidden, the pages keep clear of the traffic lights. */
+  const toolbarInset = () => (sidebarShown() ? 0 : titleBar().left);
   // The window toolbar's leading items line up with the content (`lib/toolbar.ts`).
-  contentLeft.set(SIDEBAR + INSET);
+  effect(() => contentLeft.set(sidebarShown() ? SIDEBAR + INSET : titleBar().left));
   // The window toolbar can't be covered by a dialog: it waits while one is open.
   effect(() => toolbarBlocked.set(settingsOpen() || !!editing() || adding() || prompting()));
   cleanup(() => toolbarBlocked.set(false));
@@ -248,7 +257,10 @@ function Desktop(props: { onReconnect: () => void }) {
     return top?.name === "reader" ? (current(top.bookmark.id) ?? top.bookmark) : null;
   };
   if (nativeSidebar) {
-    Sidebar.show(SIDEBAR + INSET);
+    effect(() => {
+      if (sidebarShown()) Sidebar.show(SIDEBAR + INSET);
+      else Sidebar.hide();
+    });
     cleanup(() => Sidebar.hide());
   }
   useMenuBar({
@@ -257,6 +269,8 @@ function Desktop(props: { onReconnect: () => void }) {
     add,
     newCollection: () => void newCollectionPrompt((id) => select({ kind: "collection", id })),
     settings: () => settingsOpen.set(true),
+    sidebarShown,
+    toggleSidebar: () => setPrefs({ sidebarHidden: sidebarShown() }),
     back: () => {
       if (nav.routes().length > 1) nav.pop();
     },
@@ -270,53 +284,65 @@ function Desktop(props: { onReconnect: () => void }) {
   );
   return (
     <View class="flex-1 flex-row">
-      <View
-        // The system's sidebar is flush with the window's edges, as Finder's;
-        // the app's own floats inset on its glass.
-        class={nativeSidebar ? undefined : "overflow-hidden rounded-[18px]"}
-        style={
-          nativeSidebar
-            ? { width: SIDEBAR + INSET, paddingLeft: INSET / 2, paddingRight: INSET / 2 }
-            : {
-                ...glass(),
-                width: SIDEBAR,
-                margin: INSET,
-                marginRight: 0,
-                borderCurve: "continuous",
-              }
-        }
-      >
-        {nativeSidebar ? null : <GlassTint radius={18} />}
+      <If when={sidebarShown()}>
         <View
-          desktop={{ windowDrag: true }}
-          class="flex-row items-center justify-end px-4"
-          style={{
-            height: nativeSidebar ? TOOLBAR : TOOLBAR - INSET,
-            paddingLeft: Math.max(0, titleBar().left - INSET),
-          }}
+          // The system's sidebar is flush with the window's edges, as Finder's;
+          // the app's own floats inset on its glass.
+          class={nativeSidebar ? undefined : "overflow-hidden rounded-[18px]"}
+          style={
+            nativeSidebar
+              ? { width: SIDEBAR + INSET, paddingLeft: INSET / 2, paddingRight: INSET / 2 }
+              : {
+                  ...glass(),
+                  width: SIDEBAR,
+                  margin: INSET,
+                  marginRight: 0,
+                  borderCurve: "continuous",
+                }
+          }
         >
-          <Wordmark size={21} />
+          {nativeSidebar ? null : <GlassTint radius={18} />}
+          <View
+            desktop={{ windowDrag: true }}
+            class="flex-row items-center justify-end px-4"
+            style={{
+              height: nativeSidebar ? TOOLBAR : TOOLBAR - INSET,
+              paddingLeft: Math.max(0, titleBar().left - INSET),
+            }}
+          >
+            <Wordmark size={21} />
+          </View>
+          <Sources
+            selected={() => source()}
+            onSelect={select}
+            onSettings={() => settingsOpen.set(true)}
+          />
         </View>
-        <Sources
-          selected={() => source()}
-          onSelect={select}
-          onSettings={() => settingsOpen.set(true)}
-        />
-      </View>
+      </If>
       <View class="flex-1 bg-paper">
         <NavStack state={nav} testID={SWIPE_STACK} class="flex-1">
           {(route) => {
             if (route.name === "browser") {
               return (
                 <NavPage animation={pageAnimation} header={<View />} title="">
-                  <Browser url={route.url} wide onClose={() => nav.pop()} />
+                  <Browser
+                    url={route.url}
+                    wide
+                    toolbarInset={toolbarInset()}
+                    onClose={() => nav.pop()}
+                  />
                 </NavPage>
               );
             }
             if (route.name === "reader") {
               return (
                 <NavPage animation={pageAnimation} header={<View />} title="">
-                  <Reader bookmark={route.bookmark} wide onBack={() => nav.pop()} />
+                  <Reader
+                    bookmark={route.bookmark}
+                    wide
+                    toolbarInset={toolbarInset()}
+                    onBack={() => nav.pop()}
+                  />
                 </NavPage>
               );
             }
@@ -328,6 +354,7 @@ function Desktop(props: { onReconnect: () => void }) {
                   onSource={select}
                   onOpen={(b) => openBookmark(b)}
                   onAdd={add}
+                  toolbarInset={toolbarInset()}
                 />
               </NavPage>
             );
@@ -454,11 +481,14 @@ function useMenuBar(app: {
   add: () => void;
   newCollection: () => void;
   settings: () => void;
+  sidebarShown: () => boolean;
+  toggleSidebar: () => void;
   back: () => void;
 }) {
   if (!isAvailable) return;
   effect(() => {
     const b = app.reading();
+    const sidebarShown = app.sidebarShown();
     const go = (label: string, shortcut: string, s: Source) => ({
       label,
       shortcut,
@@ -505,6 +535,12 @@ function useMenuBar(app: {
       {
         label: "View",
         submenu: [
+          {
+            label: sidebarShown ? "Hide Sidebar" : "Show Sidebar",
+            shortcut: "mod+b",
+            onSelect: app.toggleSidebar,
+          },
+          { type: "separator" },
           { label: "Sync Now", shortcut: "mod+r", onSelect: () => void sync() },
           { type: "separator" },
           { role: "toggleFullScreen" },

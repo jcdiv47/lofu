@@ -160,6 +160,8 @@ mod mac {
             const { RefCell::new(None) };
         /// Each `space` item's width constraint.
         static SPACES: RefCell<HashMap<String, Retained<AnyObject>>> = RefCell::new(HashMap::new());
+        /// Numbers the toolbars made, for their identifiers.
+        static SERIAL: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
         /// Where each `mark` was last reported (`right`, `left`).
         static MARKS: RefCell<HashMap<String, (f64, f64)>> = RefCell::new(HashMap::new());
     }
@@ -683,9 +685,7 @@ mod mac {
                 let view: Option<Retained<AnyObject>> = msg_send![&*made, view];
                 let Some(view) = view else { continue };
                 let window: Option<Retained<AnyObject>> = msg_send![&*view, window];
-                if window.is_none() {
-                    continue;
-                }
+                let Some(window) = window else { continue };
                 let bounds: NSRect = msg_send![&*view, bounds];
                 let at: NSRect = msg_send![
                     &*view,
@@ -697,6 +697,9 @@ mod mac {
                     let now: f64 = msg_send![&*constraint, constant];
                     if (now - width).abs() >= 1.0 {
                         let _: () = msg_send![&*constraint, setConstant: width];
+                        // Laid out now, so the marks read next are where
+                        // the items went (the sidebar's ⌘B moves them).
+                        let _: () = msg_send![&*window, layoutIfNeeded];
                     }
                 }
             }
@@ -829,9 +832,17 @@ mod mac {
                 let mtm = MainThreadMarker::new().expect("on the main thread");
                 let delegate = Delegate::new(mtm);
                 let toolbar: Allocated<AnyObject> = msg_send![class!(NSToolbar), alloc];
+                // A fresh identifier each time: toolbars sharing one are a
+                // family, and AppKit inserts an item into every toolbar of
+                // the family at the same index, which throws once an older
+                // one (still alive, or on another window) has fewer items.
+                let serial = SERIAL.with(|n| {
+                    n.set(n.get() + 1);
+                    n.get()
+                });
                 let toolbar: Retained<AnyObject> = msg_send![
                     toolbar,
-                    initWithIdentifier: &*NSString::from_str("lofu.window")
+                    initWithIdentifier: &*NSString::from_str(&format!("lofu.window.{serial}"))
                 ];
                 let _: () = msg_send![&*toolbar, setDelegate: &*delegate];
                 // NSToolbarDisplayModeIconOnly
