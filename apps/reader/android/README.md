@@ -4,7 +4,7 @@ The existing Native Shell reader, not a WebView wrapper or a second client. Libr
 
 ## Build and install
 
-Install Bun, Rust, Native Shell **0.7.0**, JDK 17, and the Android command-line tools. Accept the SDK licenses, then:
+Install Bun, Rust, Native Shell **0.7.1**, JDK 17, and the Android command-line tools. Accept the SDK licenses, then:
 
 ```sh
 export ANDROID_HOME=/path/to/android-sdk
