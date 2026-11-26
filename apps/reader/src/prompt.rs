@@ -8,8 +8,10 @@ use std::sync::mpsc::{Sender, channel};
 use block2::RcBlock;
 use objc2::rc::{Retained, Weak};
 use objc2::runtime::AnyObject;
-use objc2::{class, msg_send};
+use objc2::{class, msg_send, sel};
 use objc2_foundation::{NSArray, NSString};
+
+use crate::controls::ios::set_text_trait;
 
 /// What `ask` asks: the alert's title, a message under it (an error from the
 /// last try), the text it starts with, the field's placeholder and the
@@ -98,8 +100,10 @@ unsafe fn present(ask: Ask, tx: Sender<Option<String>>) {
             let _: () = msg_send![field, setText: &*value];
             let _: () = msg_send![field, setPlaceholder: &*placeholder];
             let _: () = msg_send![field, setClearButtonMode: 1isize]; // while editing
-            let _: () = msg_send![field, setAutocorrectionType: 1isize]; // no
-            let _: () = msg_send![field, setReturnKeyType: 9isize]; // done
+            if let Some(field) = field.as_ref() {
+                set_text_trait(field, sel!(setAutocorrectionType:), 1); // no
+                set_text_trait(field, sel!(setReturnKeyType:), 9); // done
+            }
         });
         let _: () = msg_send![&*alert, addTextFieldWithConfigurationHandler: &*configure];
 
