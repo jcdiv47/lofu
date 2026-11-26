@@ -2,7 +2,7 @@ import { colorScheme, platform } from "nsh";
 
 /**
  * The catalog-card palette shared with the browser extension: warm paper,
- * iron-gall ink, a red stamp, highlighter yellow. Surfaces step from the
+ * iron-gall ink, a red stamp, bookcloth-green tags, highlighter yellow. Surfaces step from the
  * sidebar (deepest) through the page to the cards (lightest in light mode,
  * raised in dark mode).
  *
@@ -27,6 +27,8 @@ const light = {
   ruleSoft: "#e3dacb",
   stamp: "#c2412d",
   stampSoft: "#c2412d1f",
+  /** Tags: a bookcloth green, so a tagged card never reads as an error (the stamp's red). */
+  tag: "#3d7262",
   favorite: "#d4952a",
   highlight: "#f2d37a",
   shadow: "0px 1px 2px rgb(60 45 25 / 0.08), 0px 4px 14px rgb(60 45 25 / 0.06)",
@@ -65,6 +67,7 @@ const dark: typeof light = {
   ruleSoft: "#2e2a24",
   stamp: "#f0694f",
   stampSoft: "#f0694f24",
+  tag: "#82b8a6",
   favorite: "#e8b04a",
   highlight: "#6e5a24",
   shadow: "0px 1px 2px rgb(0 0 0 / 0.3)",

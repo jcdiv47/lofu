@@ -297,7 +297,7 @@ function Details(props: ItemProps & { lines: number }) {
         <Note text={b().note ?? ""} lines={props.lines} />
       </If>
       <If when={on("tags") && b().tags.length}>
-        <Text class="truncate text-stamp" style={{ fontSize: 12, lineHeight: 17 }}>
+        <Text class="truncate text-tag" style={{ fontSize: 12, lineHeight: 17 }}>
           {tagLine(b())}
         </Text>
       </If>
@@ -483,7 +483,7 @@ export function BookmarkRow(props: {
           <Note text={b().note ?? ""} lines={2} />
         </If>
         <If when={on("tags") && b().tags.length}>
-          <Text class="truncate text-stamp" style={{ fontSize: 12.5, lineHeight: 17 }}>
+          <Text class="truncate text-tag" style={{ fontSize: 12.5, lineHeight: 17 }}>
             {tagLine(b())}
           </Text>
         </If>
@@ -636,7 +636,7 @@ export function BookmarkHeadline(props: ItemProps) {
         </Text>
       </If>
       <If when={on("tags") && b().tags.length}>
-        <Text class="truncate text-stamp" style={{ fontSize: 12, flexShrink: 3 }}>
+        <Text class="truncate text-tag" style={{ fontSize: 12, flexShrink: 3 }}>
           {tagLine(b())}
         </Text>
       </If>
