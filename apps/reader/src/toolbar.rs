@@ -685,9 +685,7 @@ mod mac {
                 let view: Option<Retained<AnyObject>> = msg_send![&*made, view];
                 let Some(view) = view else { continue };
                 let window: Option<Retained<AnyObject>> = msg_send![&*view, window];
-                if window.is_none() {
-                    continue;
-                }
+                let Some(window) = window else { continue };
                 let bounds: NSRect = msg_send![&*view, bounds];
                 let at: NSRect = msg_send![
                     &*view,
@@ -699,6 +697,9 @@ mod mac {
                     let now: f64 = msg_send![&*constraint, constant];
                     if (now - width).abs() >= 1.0 {
                         let _: () = msg_send![&*constraint, setConstant: width];
+                        // Laid out now, so the marks read next are where
+                        // the items went (the sidebar's ⌘B moves them).
+                        let _: () = msg_send![&*window, layoutIfNeeded];
                     }
                 }
             }
