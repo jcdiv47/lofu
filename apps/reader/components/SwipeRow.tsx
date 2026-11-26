@@ -19,6 +19,7 @@ import {
   showBookmarkMenu,
 } from "../lib/actions";
 import type { Bookmark } from "../lib/api";
+import { glideNext } from "../lib/motion";
 import { inTrash, restoreBookmark } from "../lib/store";
 import { BookmarkHeadline, BookmarkRow, type Shows } from "./BookmarkCard";
 import { focusRing, Icon, type IconName } from "./ui";
@@ -192,7 +193,10 @@ export function SwipeRow(props: {
               label="Put back"
               tone="bg-action-info"
               testID="swipe-restore"
-              onPress={then(() => void restoreBookmark(b().id).catch(() => {}))}
+              onPress={then(() => {
+                glideNext();
+                void restoreBookmark(b().id).catch(() => {});
+              })}
             />
           </If>
         </View>
