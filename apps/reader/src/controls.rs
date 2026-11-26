@@ -99,12 +99,37 @@ pub mod ios {
     use nsh_core::JsonValue;
     use nsh_platform_ios::{ComponentContext, Components, NativeComponent};
     use objc2::rc::{Allocated, Retained};
-    use objc2::runtime::{AnyClass, AnyObject};
+    use objc2::runtime::{AnyClass, AnyObject, Sel};
     use objc2::{class, msg_send, sel};
     use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
     use objc2_ui_kit::UIView;
 
     use super::{ButtonProps, boolean, number, parse_color, string};
+
+    /// Sets one of a text field's `UITextInputTraits` (`setReturnKeyType:`,
+    /// `setAutocorrectionType:`, …), all of which take an `NSInteger`.
+    ///
+    /// From iOS 27 `UITextField` forwards these to an object of its own
+    /// instead of implementing them, so `class_getInstanceMethod` doesn't
+    /// find them and `msg_send!`'s check in debug builds panics ("method not
+    /// found"). The message itself still arrives, as it does in release
+    /// builds: send it without that check, and only if the field answers it.
+    ///
+    /// # Safety
+    ///
+    /// `field` is a `UITextField` (or another `UITextInputTraits`), on the
+    /// main thread, and `sel` is one of its setters that takes an `NSInteger`.
+    pub(crate) unsafe fn set_text_trait(field: &AnyObject, sel: Sel, value: isize) {
+        unsafe {
+            let answers: bool = msg_send![field, respondsToSelector: sel];
+            if !answers {
+                return;
+            }
+            let send: unsafe extern "C-unwind" fn(&AnyObject, Sel, isize) =
+                std::mem::transmute(objc2::ffi::objc_msgSend as unsafe extern "C-unwind" fn());
+            send(field, sel, value);
+        }
+    }
 
     // UIControlEvents
     const PRIMARY_ACTION: usize = 1 << 13;
@@ -322,9 +347,9 @@ pub mod ios {
                 let _: () = msg_send![&*field, setBorderStyle: 0isize];
                 let clear: Retained<AnyObject> = msg_send![class!(UIColor), clearColor];
                 let _: () = msg_send![&*field, setBackgroundColor: &*clear];
-                let _: () = msg_send![&*field, setReturnKeyType: 6isize]; // UIReturnKeySearch
-                let _: () = msg_send![&*field, setAutocapitalizationType: 0isize];
-                let _: () = msg_send![&*field, setAutocorrectionType: 1isize]; // No
+                set_text_trait(&field, sel!(setReturnKeyType:), 6); // UIReturnKeySearch
+                set_text_trait(&field, sel!(setAutocapitalizationType:), 0);
+                set_text_trait(&field, sel!(setAutocorrectionType:), 1); // No
                 let content: Retained<AnyObject> = msg_send![&*glass, contentView];
                 let _: () = msg_send![&*content, addSubview: &*field];
 
