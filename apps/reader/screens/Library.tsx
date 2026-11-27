@@ -31,10 +31,11 @@ import {
 } from "../components/BookmarkCard";
 import {
   applyListChoice,
-  currentSort,
   currentView,
   EntryMenu,
   FilterButton,
+  filterMenu,
+  filterSummary,
   type ListMenuOptions,
   listMenuEntries,
   phoneListMenu,
@@ -106,12 +107,12 @@ const PAD = 24;
 /** The desktop's toolbar, floating over the grid. */
 const TOOLBAR = 52;
 /**
- * The room the Mac's window toolbar takes at the title row's right end (sort,
- * view, sync, +, filters and the search field, about 545 points on macOS 26)
+ * The room the Mac's window toolbar takes at the title row's right end (view,
+ * sort and filter, +, and the search field, about 480 points on macOS 26)
  * until the toolbar says where its items start (its `mark`): the title
  * truncates before them instead of running under their glass.
  */
-const TOOLBAR_ITEMS = 545;
+const TOOLBAR_ITEMS = 480;
 /**
  * The room the title keeps beside the window toolbar's items: they start no
  * nearer the sidebar than this (a `space`), so as the window narrows AppKit
@@ -266,27 +267,12 @@ export function Library(props: {
       { kind: "space", id: "title", x: contentLeft() + PAD + TITLE_ROOM },
       { kind: "flex" },
       { kind: "mark", id: "items", onPlace: (right) => toolbarItems.set(right) },
-      // Sort and view, as Finder's: a symbol whose menu opens under it. A
-      // search keeps the server's order, *By relevance*, as Raindrop shows it;
-      // the item stays (greyed out), since a toolbar whose items change is
-      // built again, and its search field loses the keyboard.
-      searching()
-        ? {
-            kind: "button" as const,
-            id: "sort",
-            symbol: "sparkle.magnifyingglass",
-            label: "Sort by: By relevance",
-            disabled: true,
-            onPress: () => {},
-          }
-        : {
-            kind: "button" as const,
-            id: "sort",
-            symbol: currentSort(props.source).symbol,
-            label: `Sort by: ${sortLabel(props.source)}`,
-            onPress: (at: { x: number; y: number }) =>
-              void Menu.popup(sortMenu(props.source), at.x >= 0 ? at : undefined),
-          },
+      // What shapes the list, in one capsule (AppKit groups the items side by
+      // side): view, sort and filter. They're set once per source, so the bar
+      // keeps them together and out of the way of *+* and search. Their
+      // symbols stay put, and the choice shows in its menu, checked (a sort's
+      // own symbol read as something else, By date's clock as history); the
+      // view's is the view's, as Finder's.
       {
         kind: "button",
         id: "view",
@@ -294,15 +280,31 @@ export function Library(props: {
         label: `View: ${currentView(props.source).label}`,
         onPress: (at) => void Menu.popup(viewMenu(props.source), at.x >= 0 ? at : undefined),
       },
-      { kind: "gap" },
+      // A search keeps the server's order, best match first: the item stays,
+      // greyed out, since a toolbar whose items change is built again, and its
+      // search field loses the keyboard.
       {
         kind: "button",
-        id: "sync",
-        symbol: "arrow.clockwise",
-        label: "Sync now",
-        disabled: syncing(),
-        onPress: () => void sync(),
+        id: "sort",
+        symbol: "arrow.up.arrow.down",
+        label: searching() ? "Sort by: By relevance" : `Sort by: ${sortLabel(props.source)}`,
+        disabled: searching(),
+        onPress: (at) => void Menu.popup(sortMenu(props.source), at.x >= 0 ? at : undefined),
       },
+      // Filled while a filter is on, as Mail's; the title says how many it leaves.
+      {
+        kind: "button",
+        id: "filter",
+        symbol: isFiltered(filter())
+          ? "line.3.horizontal.decrease.circle.fill"
+          : "line.3.horizontal.decrease.circle",
+        label: `Filter: ${filterSummary(filter())}`,
+        onPress: (at) => void Menu.popup(filterMenu(menuOptions()), at.x >= 0 ? at : undefined),
+      },
+      { kind: "gap" },
+      // The one action that adds, and the bar's one color. Sync isn't here:
+      // it runs by itself, and the sidebar's foot, which says how it's going,
+      // starts it (and ⌘R).
       {
         kind: "button",
         id: "add",
@@ -313,25 +315,12 @@ export function Library(props: {
         onPress: () => props.onAdd?.(),
       },
       {
-        kind: "button",
-        id: "filters",
-        symbol: "line.3.horizontal.decrease.circle",
-        label: "Search settings / filters",
-        // Under the search field, as when it has the keyboard.
-        onPress: (at, search) =>
-          box.toggleNarrow(
-            search
-              ? frameBounds(search)
-              : { origin: { x: at.x, y: at.y }, size: { width: 0, height: 0 } },
-          ),
-      },
-      {
         kind: "search",
         id: "search",
         label: "Search",
         placeholder: "Search",
         value: query(),
-        width: 260,
+        width: 240,
         onChange: (v) => box.onChange(v),
         onFocus: (f) => box.onFocus(frameBounds(f)),
         onBlur: () => box.onBlur(),
@@ -576,7 +565,9 @@ export function Library(props: {
               ? props.source.kind === "all"
                 ? ""
                 : `in ${sourceTitle(props.source)}`
-              : countFor(props.source) || ""}
+              : isFiltered(filter())
+                ? `${items().length.toLocaleString()} of ${countFor(props.source).toLocaleString()}`
+                : countFor(props.source) || ""}
           </Text>
         </View>
         <If when={!native}>
@@ -1071,7 +1062,12 @@ export function Library(props: {
             // doesn't come here: the lists follow `items` in place).
             sourceKey();
             const empty = (
-              <Empty searching={searching()} pending={pending()} source={props.source} />
+              <Empty
+                searching={searching()}
+                pending={pending()}
+                source={props.source}
+                filtered={isFiltered(filter())}
+              />
             );
             const top = TOOLBAR + 18;
             switch (view()) {

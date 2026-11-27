@@ -18,6 +18,8 @@ import {
   moveCollectionTo,
   type Source,
   sameSource,
+  sync,
+  syncing,
   typeTitles,
 } from "../lib/store";
 
@@ -279,9 +281,20 @@ export function Sources(props: {
           </If>
         </If>
       </Scroll>
-      {/* Sync status and settings, at the foot of the sidebar. */}
-      <View class="flex-row items-center gap-2 border-t border-ink/7 px-3 py-2.5">
-        <SyncStatus class="min-w-0 flex-1" />
+      {/* Sync status and settings, at the foot of the sidebar. The status is
+          the sync button too: it says how syncing goes, so it starts one
+          (the Mac's toolbar has none; ⌘R does it too). */}
+      <View class="flex-row items-center gap-2 border-t border-ink/7 py-2.5 pr-3 pl-1.5">
+        <Button
+          accessibilityLabel="Sync now"
+          testID="sidebar-sync"
+          disabled={syncing()}
+          onPress={() => void sync()}
+          class={`h-7 min-w-0 flex-1 flex-row items-center gap-1.5 rounded-full px-1.5 hover:bg-ink/5 active:opacity-60 ${focusRing}`}
+        >
+          <SyncStatus class="min-w-0 flex-1" />
+          <Icon name="refresh" size={12} class="tint-ink-faint" />
+        </Button>
         <Button
           accessibilityLabel="Settings"
           testID="settings"
