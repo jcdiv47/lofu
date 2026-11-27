@@ -2,12 +2,30 @@ import { Clipboard, platform, signal, Text, View } from "nsh";
 import { Input } from "nsh/base";
 import { extractUrl, isRedirectLink } from "../../../packages/shared/src/links";
 import type { Bookmark } from "../lib/api";
-import { addBookmark, type Source, sourceTitle } from "../lib/store";
+import {
+  addBookmark,
+  collectionName,
+  inTrash,
+  type Source,
+  savedFor,
+  sourceTitle,
+} from "../lib/store";
 import { ActionButton, ErrorText, fieldClass } from "./ui";
 
 /** Where saving adds something the source shows; the fixed views just save. */
 const intoLabel = (s: Source) =>
   s.kind === "collection" || s.kind === "tag" || s.kind === "favorites" ? sourceTitle(s) : "";
+
+/** Says where a link that's saved already is, rather than saving it twice. */
+const alreadySaved = (b: Bookmark) => {
+  const name = b.title.trim() || b.domain || b.url;
+  const where = inTrash(b)
+    ? " It's in the Trash."
+    : b.collectionId && collectionName(b.collectionId)
+      ? ` It's in ${collectionName(b.collectionId)}.`
+      : "";
+  return `Already saved as “${name}”.${where}`;
+};
 
 /**
  * Save a page by its address. A dialog on desktops, a page on phones. Saving
@@ -60,10 +78,17 @@ export function AddBookmark(props: {
       error.set("No web address in that text.");
       return;
     }
+    const saved = savedFor(u);
+    if (saved) {
+      error.set(alreadySaved(saved));
+      return;
+    }
     busy.set(true);
     error.set("");
     try {
-      props.onDone(await addBookmark(u, props.source));
+      const { bookmark, existing } = await addBookmark(u, props.source);
+      if (existing) error.set(alreadySaved(bookmark));
+      else props.onDone(bookmark);
     } catch (e) {
       error.set((e as Error).message);
     } finally {

@@ -404,6 +404,52 @@ test("desktop: + saves a page into the collection being shown", async () => {
   expect(app.value("id:add-url")).toBe("");
 });
 
+test("desktop: + doesn't save a link that's already saved", async () => {
+  const posts: unknown[] = [];
+  const network = saveStub(posts);
+  const app = await open("./App.tsx", {
+    ...saved,
+    platform: "macos",
+    width: 1200,
+    height: 800,
+    network: {
+      ...network,
+      // The server follows a short link to a page that's saved: it answers with that bookmark.
+      [`POST ${S}/v1/bookmarks`]: (r: { body?: string | null }) => {
+        const input = JSON.parse(r.body ?? "{}");
+        if (input.url !== "https://t.co/abc") return network[`POST ${S}/v1/bookmarks`](r);
+        posts.push(input);
+        return { status: 200, body: library.bookmarks[1] };
+      },
+    },
+  });
+  await app.waitFor("text:Article a");
+  await app.press("label:Add bookmark");
+  await app.waitFor("id:add-url");
+
+  // The same page, as another address for it: not sent at all.
+  await app.type("id:add-url", "http://www.example.com/a?utm_source=x#top");
+  await app.press("id:add-save");
+  await app.waitFor("text:Already saved as “Article a”. It's in Homelab.");
+  expect(posts).toEqual([]);
+  expect(app.shows("id:add-url")).toBe(true);
+
+  // One in the Trash says so.
+  await app.clear("id:add-url");
+  await app.type("id:add-url", "https://example.com/ccc");
+  await app.press("id:add-save");
+  await app.waitFor("text:Already saved as “Article ccc”. It's in the Trash.");
+  expect(posts).toEqual([]);
+
+  // One only the server knows is saved: the dialog says so rather than closing.
+  await app.clear("id:add-url");
+  await app.type("id:add-url", "https://t.co/abc");
+  await app.press("id:add-save");
+  await app.waitFor("text:Already saved as “Article bb”.");
+  expect(posts).toEqual([{ url: "https://t.co/abc" }]);
+  expect(app.shows("id:add-url")).toBe(true);
+});
+
 test("phone: the Library page's search narrows it to the names that match", async () => {
   const app = await open("./App.tsx", {
     ...saved,
