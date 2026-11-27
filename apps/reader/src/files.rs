@@ -25,13 +25,17 @@ impl Files {
     /// Writes `text` to the file `name` (whole, through a temporary file, so
     /// a crash never leaves half of it). Resolves with whether it was written.
     pub async fn write(name: String, text: String) -> bool {
-        imp::run(move || imp::write(&name, text.as_bytes())).await.unwrap_or(false)
+        imp::run(move || imp::write(&name, text.as_bytes()))
+            .await
+            .unwrap_or(false)
     }
 
     /// Writes `bytes` to the file `name`, as `write` does. Resolves with
     /// whether it was written.
     pub async fn write_bytes(name: String, bytes: Vec<u8>) -> bool {
-        imp::run(move || imp::write(&name, &bytes)).await.unwrap_or(false)
+        imp::run(move || imp::write(&name, &bytes))
+            .await
+            .unwrap_or(false)
     }
 
     /// The absolute path of the file `name` (whether or not it exists), for
@@ -50,7 +54,9 @@ impl Files {
 
     /// The names of the files whose names start with `prefix`.
     pub async fn list(prefix: String) -> Vec<String> {
-        imp::run(move || imp::list(&prefix)).await.unwrap_or_default()
+        imp::run(move || imp::list(&prefix))
+            .await
+            .unwrap_or_default()
     }
 
     /// The bytes the files whose names start with `prefix` take, together.
@@ -133,7 +139,9 @@ mod imp {
     pub fn path(name: &str) -> Option<PathBuf> {
         let ok = !name.is_empty()
             && !name.starts_with('.')
-            && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'));
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'));
         ok.then(|| dir().map(|d| d.join(name))).flatten()
     }
 

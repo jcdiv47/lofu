@@ -315,10 +315,15 @@ mod mac {
 
     /// The id of the search item the app gave.
     fn search_id() -> String {
-        ITEMS.with(|items| {
-            items.borrow().iter().find(|i| i.kind == "search").map(|i| i.id.clone())
-        })
-        .unwrap_or_default()
+        ITEMS
+            .with(|items| {
+                items
+                    .borrow()
+                    .iter()
+                    .find(|i| i.kind == "search")
+                    .map(|i| i.id.clone())
+            })
+            .unwrap_or_default()
     }
 
     define_class!(
@@ -388,7 +393,8 @@ mod mac {
     unsafe fn frame_in_window(view: &AnyObject) -> (f64, f64, f64, f64) {
         unsafe {
             let bounds: NSRect = msg_send![view, bounds];
-            let at: NSRect = msg_send![view, convertRect: bounds, toView: Option::<&AnyObject>::None];
+            let at: NSRect =
+                msg_send![view, convertRect: bounds, toView: Option::<&AnyObject>::None];
             let window: Option<Retained<AnyObject>> = msg_send![view, window];
             let content: Option<Retained<AnyObject>> =
                 window.and_then(|w| msg_send![&*w, contentView]);
@@ -409,7 +415,11 @@ mod mac {
 
     fn identifiers() -> Retained<NSArray<NSString>> {
         let ids: Vec<Retained<NSString>> = ITEMS.with(|items| {
-            items.borrow().iter().map(|i| NSString::from_str(&i.identifier())).collect()
+            items
+                .borrow()
+                .iter()
+                .map(|i| NSString::from_str(&i.identifier()))
+                .collect()
         });
         NSArray::from_retained_slice(&ids)
     }
@@ -552,7 +562,8 @@ mod mac {
                         msg_send![made, initWithItemIdentifier: &*identifier];
                     let view: Retained<AnyObject> = msg_send![MarkView::class(), new];
                     for anchor in [sel!(widthAnchor), sel!(heightAnchor)] {
-                        let anchor: Retained<AnyObject> = msg_send![&*view, performSelector: anchor];
+                        let anchor: Retained<AnyObject> =
+                            msg_send![&*view, performSelector: anchor];
                         let size: Retained<AnyObject> =
                             msg_send![&*anchor, constraintEqualToConstant: 1.0f64];
                         let _: () = msg_send![&*size, setActive: true];
@@ -758,16 +769,18 @@ mod mac {
                 let left = slot_x.round();
                 let moved = MARKS.with(|m| {
                     let mut m = m.borrow_mut();
-                    let moved = m.get(&id).is_none_or(|(r, l)| {
-                        (r - right).abs() >= 1.0 || (l - left).abs() >= 1.0
-                    });
+                    let moved = m
+                        .get(&id)
+                        .is_none_or(|(r, l)| (r - right).abs() >= 1.0 || (l - left).abs() >= 1.0);
                     if moved {
                         m.insert(id.clone(), (right, left));
                     }
                     moved
                 });
                 if moved {
-                    emit(serde_json::json!({ "type": "mark", "id": id, "right": right, "left": left }));
+                    emit(
+                        serde_json::json!({ "type": "mark", "id": id, "right": right, "left": left }),
+                    );
                 }
             }
         }
@@ -827,7 +840,8 @@ mod mac {
 
             let installed = TOOLBAR.with(|t| t.borrow().as_ref().map(|(tb, _)| tb.clone()));
             let current: Option<Retained<AnyObject>> = msg_send![&*window, toolbar];
-            let ours = matches!((&installed, &current), (Some(a), Some(b)) if std::ptr::eq(&**a, &**b));
+            let ours =
+                matches!((&installed, &current), (Some(a), Some(b)) if std::ptr::eq(&**a, &**b));
             if !ours {
                 let mtm = MainThreadMarker::new().expect("on the main thread");
                 let delegate = Delegate::new(mtm);

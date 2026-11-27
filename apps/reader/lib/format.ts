@@ -1,10 +1,21 @@
-/** "3:43 PM" today, "Nov 4" this year, "Nov 4, 2024" before. */
-export function shortDate(iso: string, now = new Date()): string {
+/** How a time of day is shown: as the system has it, or on a 12- or 24-hour clock. */
+export type TimeFormat = "system" | "12h" | "24h";
+
+/** "3:43 PM" (or "15:43") on `clock`. */
+export function timeOfDay(d: Date, clock: TimeFormat = "system"): string {
+  if (clock === "system")
+    return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const m = String(d.getMinutes()).padStart(2, "0");
+  const h = d.getHours();
+  if (clock === "24h") return `${String(h).padStart(2, "0")}:${m}`;
+  return `${h % 12 || 12}:${m} ${h < 12 ? "AM" : "PM"}`;
+}
+
+/** "3:43 PM" today (on `clock`), "Nov 4" this year, "Nov 4, 2024" before. */
+export function shortDate(iso: string, now = new Date(), clock: TimeFormat = "system"): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  if (d.toDateString() === now.toDateString()) {
-    return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-  }
+  if (d.toDateString() === now.toDateString()) return timeOfDay(d, clock);
   const sameYear = d.getFullYear() === now.getFullYear();
   return d.toLocaleDateString(undefined, {
     month: "short",

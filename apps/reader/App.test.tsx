@@ -1,4 +1,5 @@
 import { expect, open, test } from "nsh/test";
+import { shortDate, timeOfDay } from "./lib/format";
 
 const S = "https://lofu.test";
 const saved = { storage: { server: S, token: "lofu_test" } };
@@ -726,6 +727,25 @@ test("desktop: a tap opens bookmarks where Settings says", async () => {
   await app.press("text:Article a");
   expect(app.openedUrls()).toEqual(["https://example.com/a"]);
   expect(app.shows("id:article")).toBe(false);
+});
+
+test("times are shown on the clock Settings chooses", async () => {
+  const at = new Date(2026, 10, 27, 15, 43);
+  expect(timeOfDay(at, "12h")).toBe("3:43 PM");
+  expect(timeOfDay(at, "24h")).toBe("15:43");
+  expect(timeOfDay(new Date(2026, 10, 27, 0, 5), "12h")).toBe("12:05 AM");
+  expect(timeOfDay(new Date(2026, 10, 27, 9, 5), "24h")).toBe("09:05");
+  expect(shortDate(at.toISOString(), at, "24h")).toBe("15:43");
+
+  const app = await open("./App.tsx", { ...desktop, network: readable });
+  await app.waitFor("text:Article a");
+  await app.press("id:settings");
+  await app.waitFor("id:time-format");
+  await app.press("id:time-format");
+  expect((app.menu() ?? []).map((m) => m.label)).toContain("24-hour (15:43)");
+  await app.chooseMenuItem("24-hour (15:43)");
+  expect(app.storage()["prefs.v1"]).toContain('"timeFormat":"24h"');
+  await app.waitFor("text:24-hour");
 });
 
 test("desktop: a bookmark is marked read or unread from its menu", async () => {

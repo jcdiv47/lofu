@@ -520,7 +520,11 @@ mod menu {
     fn close_if(this_one: impl Fn(&Open) -> bool) {
         let taken = OPEN.with(|o| {
             let mut o = o.borrow_mut();
-            if o.as_ref().is_some_and(this_one) { o.take() } else { None }
+            if o.as_ref().is_some_and(this_one) {
+                o.take()
+            } else {
+                None
+            }
         });
         if let Some(open) = taken {
             let _ = open.tx.send(String::new());

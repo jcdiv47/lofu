@@ -186,12 +186,13 @@ export function IconButton(props: {
 
 /**
  * The app's text buttons: `primary` (ink filled: Save, Connect), `secondary`
- * (a capsule on the glass of Settings' groups) and `cancel` (text only).
+ * (a capsule on the glass of Settings' groups), `destructive` (that capsule,
+ * its title red) and `cancel` (text only).
  */
 export function ActionButton(props: {
   label: string;
   onPress: () => void;
-  variant?: "primary" | "secondary" | "cancel";
+  variant?: "primary" | "secondary" | "destructive" | "cancel";
   /** Its action runs: screen readers say so, and it shows dimmed. */
   busy?: boolean;
   disabled?: boolean;
@@ -204,6 +205,7 @@ export function ActionButton(props: {
       case "primary":
         return "rounded-full bg-ink px-5 py-2.5 active:opacity-70";
       case "secondary":
+      case "destructive":
         return "rounded-full border border-group-edge bg-control px-4 py-2 active:opacity-60";
       default:
         return "rounded-full px-4 py-2.5 active:opacity-60";
@@ -225,10 +227,12 @@ export function ActionButton(props: {
             ? "text-paper"
             : variant() === "secondary"
               ? "text-ink"
-              : "text-ink-soft"
+              : variant() === "destructive"
+                ? "text-stamp"
+                : "text-ink-soft"
         }
         style={{
-          fontSize: variant() === "secondary" ? 13.5 : 14.5,
+          fontSize: variant() === "secondary" || variant() === "destructive" ? 13.5 : 14.5,
           fontWeight: variant() === "primary" ? "600" : "500",
         }}
       >
