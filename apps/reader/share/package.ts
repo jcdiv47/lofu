@@ -9,6 +9,11 @@
  *   bun share/package.ts ios-simulator [--install]
  *   bun share/package.ts ios --sign "Apple Development: …" --profile <app.lofu.reader's .mobileprovision> [--install --device <udid>]
  *
+ * For TestFlight, sign with Apple Distribution and App Store profiles for
+ * both: `--sign "Apple Distribution: …" --profile <app's> --share-profile
+ * <extension's>`. `--id` packages it under another bundle id (the
+ * extension's is `<id>.share`), for a team that doesn't own `nsh.json`'s.
+ *
  * The app and the extension share a Keychain group (`<team>.app.lofu.shared`),
  * which the app's Info.plist names (`LofuKeychainGroup`): the app puts the
  * server address and token there, and the extension saves with them.
@@ -28,6 +33,8 @@ const { values: opts, positionals } = parseArgs({
     team: { type: "string" },
     install: { type: "boolean" },
     device: { type: "string" },
+    id: { type: "string" },
+    "share-profile": { type: "string" },
   },
 });
 
@@ -52,15 +59,20 @@ const nsh = JSON.parse(readFileSync(join(app, "nsh.json"), "utf8")) as {
   build: number;
 };
 
+const id = opts.id ?? nsh.id;
+
 /** What a provisioning profile (a signed plist) says about the team and entitlements. */
 async function readProfile(path: string) {
   const plist = join(work, "profile.plist");
   await $`security cms -D -i ${path} -o ${plist}`.quiet();
-  const team = (await $`plutil -extract TeamIdentifier.0 raw -o - ${plist}`.quiet().text()).trim();
+  const read = async (key: string) =>
+    (await $`plutil -extract ${key} raw -o - ${plist}`.quiet().text()).trim();
+  const team = await read("TeamIdentifier.0");
+  const uuid = await read("UUID");
   const entitlements = JSON.parse(
     await $`plutil -extract Entitlements json -o - ${plist}`.quiet().text(),
   ) as Record<string, unknown>;
-  return { team, entitlements };
+  return { team, uuid, entitlements };
 }
 
 rmSync(work, { recursive: true, force: true });
@@ -78,8 +90,8 @@ const group = team ? `${team}.app.lofu.shared` : "app.lofu.shared";
 // `work`, by their contents, so cargo relinks when they change.
 const entitlements: Record<string, unknown> = { ...profile?.entitlements };
 // A wildcard profile (`<team>.*`) signs any bundle id; the signature has to name this one.
-entitlements["application-identifier"] = team ? `${team}.${nsh.id}` : nsh.id;
-entitlements["keychain-access-groups"] = [team ? `${team}.${nsh.id}` : nsh.id, group];
+entitlements["application-identifier"] = team ? `${team}.${id}` : id;
+entitlements["keychain-access-groups"] = [team ? `${team}.${id}` : id, group];
 const entitlementsJson = JSON.stringify(entitlements);
 const entitlementsDir = join(
   app,
@@ -93,12 +105,21 @@ writeFileSync(entitlementsXml, entitlementsJson);
 await $`plutil -convert xml1 ${entitlementsXml}`;
 await $`derq query -f xml -i ${entitlementsXml} -o ${entitlementsDer} --raw`;
 
+// The runner and the extension are built for it, and nsh.json's
+// `ios.infoPlist` says so (nsh's default is 15.0, which App Store Connect
+// rejects: ITMS-90208).
+const minimumOS = "17.0";
+
 console.log(`▸ nsh package --target ${target}`);
-const packageArgs = device ? ["--sign", opts.sign!, "--profile", resolve(opts.profile!)] : [];
+const packageArgs = [
+  "--id",
+  id,
+  ...(device ? ["--sign", opts.sign!, "--profile", resolve(opts.profile!)] : []),
+];
 const env: Record<string, string | undefined> = {
   ...process.env,
   // Without it the runner links for iOS 10, which lacks `___chkstk_darwin` (README).
-  IPHONEOS_DEPLOYMENT_TARGET: "17.0",
+  IPHONEOS_DEPLOYMENT_TARGET: minimumOS,
 };
 if (!device) {
   const sections = [
@@ -127,9 +148,29 @@ const settings = [
   `CURRENT_PROJECT_VERSION=${nsh.build}`,
   `LOFU_KEYCHAIN_GROUP=${group}`,
   ...(team ? [`DEVELOPMENT_TEAM=${team}`] : []),
+  `PRODUCT_BUNDLE_IDENTIFIER=${id}.share`,
   ...(device ? [] : ["ARCHS=arm64", "CODE_SIGN_IDENTITY=-"]),
 ];
-const provisioning = device ? ["-allowProvisioningUpdates"] : [];
+// An App Store build signs the extension with the given profile; otherwise
+// xcodebuild signs it for development and makes its profile.
+const shareProfile = device && opts["share-profile"] ? resolve(opts["share-profile"]) : null;
+if (shareProfile) {
+  const { uuid } = await readProfile(shareProfile);
+  const installed = join(
+    process.env.HOME!,
+    "Library/Developer/Xcode/UserData/Provisioning Profiles",
+  );
+  mkdirSync(installed, { recursive: true });
+  const copy = join(installed, `${uuid}.mobileprovision`);
+  // Xcode's own downloads are already there; cp refuses to copy a file onto itself.
+  if (resolve(copy) !== shareProfile) await $`cp ${shareProfile} ${copy}`;
+  settings.push(
+    "CODE_SIGN_STYLE=Manual",
+    `CODE_SIGN_IDENTITY=${opts.sign!}`,
+    `PROVISIONING_PROFILE_SPECIFIER=${uuid}`,
+  );
+}
+const provisioning = device && !shareProfile ? ["-allowProvisioningUpdates"] : [];
 const xcodebuild =
   await $`xcodebuild -quiet -project ${join(work, "LofuShare.xcodeproj")} -target LofuShare -configuration Release -sdk ${sdk} ${provisioning} build ${settings}`
     .nothrow()
