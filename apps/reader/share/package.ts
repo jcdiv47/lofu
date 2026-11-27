@@ -76,9 +76,9 @@ const group = team ? `${team}.app.lofu.shared` : "app.lofu.shared";
 // app wouldn't launch): they go into the binary instead, as Xcode does
 // (`__TEXT,__entitlements`), when nsh links the runner. They're kept out of
 // `work`, by their contents, so cargo relinks when they change.
-const entitlements: Record<string, unknown> = profile
-  ? { ...profile.entitlements }
-  : { "application-identifier": team ? `${team}.${nsh.id}` : nsh.id };
+const entitlements: Record<string, unknown> = { ...profile?.entitlements };
+// A wildcard profile (`<team>.*`) signs any bundle id; the signature has to name this one.
+entitlements["application-identifier"] = team ? `${team}.${nsh.id}` : nsh.id;
 entitlements["keychain-access-groups"] = [team ? `${team}.${nsh.id}` : nsh.id, group];
 const entitlementsJson = JSON.stringify(entitlements);
 const entitlementsDir = join(
