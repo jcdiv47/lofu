@@ -1,4 +1,5 @@
 import { batch, computed, Storage, signal } from "nsh";
+import { normalizeUrl } from "../../../packages/shared/src/url";
 import {
   api,
   type Bookmark,
@@ -632,13 +633,41 @@ const domainOf = (url: string) => {
   }
 };
 
+const urlKey = (url: string) => {
+  try {
+    return normalizeUrl(url);
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The bookmark already saved for a URL, compared as the server compares them
+ * (`normalizeUrl`: http or https, www., tracking params and #anchors aside).
+ */
+export function savedFor(url: string): Bookmark | undefined {
+  const key = urlKey(url);
+  if (!key) return undefined;
+  for (const b of byId().values()) if (!b.deletedAt && urlKey(b.url) === key) return b;
+  return undefined;
+}
+
 /**
  * Saves a URL into a source (its collection, tag or favorites). The bookmark
  * shows at once; the server reads the page in the background, so a sync a
  * little later brings its title, excerpt and cover. Offline it waits in the
  * outbox under an id made here, which the server keeps.
+ *
+ * A link already in the library isn't saved again: `existing` is its bookmark,
+ * left as it is. One the server finds saved (a short link to a saved page, say)
+ * comes back as that bookmark, with `existing` set too.
  */
-export async function addBookmark(url: string, into: Source): Promise<Bookmark> {
+export async function addBookmark(
+  url: string,
+  into: Source,
+): Promise<{ bookmark: Bookmark; existing: boolean }> {
+  const saved = savedFor(url);
+  if (saved) return { bookmark: saved, existing: true };
   const fields: CreateFields =
     into.kind === "collection"
       ? { collectionId: into.id }
@@ -679,13 +708,15 @@ export async function addBookmark(url: string, into: Source): Promise<Bookmark> 
     enqueue({ kind: "create", id: b.id, url, fields });
     offline.set(true);
   }
+  const had = byId().get(b.id);
+  const existing = !!had && !had.deletedAt;
   byId.update((m) => m.set(b.id, b));
   persist();
   if (b.contentStatus === "pending" && !offline()) {
     setTimeout(() => void sync(), 3000);
     setTimeout(() => void sync(), 12000);
   }
-  return b;
+  return { bookmark: b, existing };
 }
 
 /** Makes a collection on the server, then brings it (and its `seq`) in with a sync. */
