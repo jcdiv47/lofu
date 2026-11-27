@@ -147,10 +147,8 @@ mod ios {
             None => AnyClass::get(&name)?,
         };
         MADE.with(|m| {
-            m.borrow_mut().insert(
-                made as *const AnyClass as usize,
-                base as *const AnyClass as usize,
-            )
+            m.borrow_mut()
+                .insert(made as *const AnyClass as usize, base as *const AnyClass as usize)
         });
         Some(made)
     }
@@ -187,7 +185,8 @@ mod ios {
         unsafe {
             let base = ours(Some(this.class())).map(|(_, base)| base);
             let theirs: Option<Retained<AnyObject>> = match base {
-                Some(base) if msg_send![base, instancesRespondToSelector: sel!(editMenuInteraction:menuForConfiguration:suggestedActions:)] =>
+                Some(base)
+                    if msg_send![base, instancesRespondToSelector: sel!(editMenuInteraction:menuForConfiguration:suggestedActions:)] =>
                 {
                     let menu: Option<Retained<AnyObject>> = msg_send![
                         super(this, base),
@@ -227,7 +226,8 @@ mod ios {
                 children.insert(0, action);
             }
             let children = NSArray::from_retained_slice(&children);
-            let menu: Retained<AnyObject> = msg_send![class!(UIMenu), menuWithChildren: &*children];
+            let menu: Retained<AnyObject> =
+                msg_send![class!(UIMenu), menuWithChildren: &*children];
             Retained::autorelease_return(menu)
         }
     }

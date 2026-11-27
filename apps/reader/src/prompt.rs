@@ -81,9 +81,7 @@ unsafe fn present(ask: Ask, tx: Sender<Option<String>>) {
         ];
 
         // The app's accent on the buttons, as its other controls have it.
-        if let Some(c) =
-            crate::controls::parse_color(Some(&serde_json::Value::from(ask.tint.as_str())))
-        {
+        if let Some(c) = crate::controls::parse_color(Some(&serde_json::Value::from(ask.tint.as_str()))) {
             let tint: Retained<AnyObject> = msg_send![
                 class!(UIColor),
                 colorWithRed: c[0],

@@ -47,15 +47,8 @@ fn items(value: Option<&JsonValue>) -> Vec<Item> {
             Some(Item {
                 id: v.get("id")?.as_str()?.to_owned(),
                 symbol: v.get("symbol")?.as_str()?.to_owned(),
-                label: v
-                    .get("label")
-                    .and_then(JsonValue::as_str)
-                    .unwrap_or("")
-                    .to_owned(),
-                disabled: v
-                    .get("disabled")
-                    .and_then(JsonValue::as_bool)
-                    .unwrap_or(false),
+                label: v.get("label").and_then(JsonValue::as_str).unwrap_or("").to_owned(),
+                disabled: v.get("disabled").and_then(JsonValue::as_bool).unwrap_or(false),
             })
         })
         .collect()
@@ -162,12 +155,12 @@ impl GlassBar {
                 ];
                 let _: () = msg_send![&*config, setPreferredSymbolConfigurationForImage: &*symbols];
                 let _: () = msg_send![&*config, setBaseForegroundColor: &*tint];
-                let button: Retained<AnyObject> = msg_send![class!(UIButton), buttonWithConfiguration: &*config, primaryAction: Option::<&AnyObject>::None];
+                let button: Retained<AnyObject> =
+                    msg_send![class!(UIButton), buttonWithConfiguration: &*config, primaryAction: Option::<&AnyObject>::None];
                 let _: () = msg_send![&*button, setEnabled: !item.disabled];
                 let label = NSString::from_str(&item.label);
                 let _: () = msg_send![&*button, setAccessibilityLabel: &*label];
-                let _: () =
-                    msg_send![&*button, setAccessibilityIdentifier: &*NSString::from_str(&item.id)];
+                let _: () = msg_send![&*button, setAccessibilityIdentifier: &*NSString::from_str(&item.id)];
                 let cx = self.cx.clone();
                 let id = item.id.clone();
                 let handler = RcBlock::new(move |action: *mut AnyObject| {

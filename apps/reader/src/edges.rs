@@ -157,8 +157,7 @@ impl EdgeView {
                         let theirs: isize = msg_send![&*previous, contentInsetAdjustmentBehavior];
                         let ours: isize = msg_send![&*scroll, contentInsetAdjustmentBehavior];
                         if theirs != ours {
-                            let _: () =
-                                msg_send![&*scroll, setContentInsetAdjustmentBehavior: theirs];
+                            let _: () = msg_send![&*scroll, setContentInsetAdjustmentBehavior: theirs];
                             // Its content starts at the top of the inset it now
                             // has (under the large title), not under the bar.
                             // With the large title shown, as a page opens, even
@@ -176,14 +175,12 @@ impl EdgeView {
                         }
                     }
                     // NSDirectionalRectEdgeTop
-                    let _: () =
-                        msg_send![&*controller, setContentScrollView: &*scroll, forEdge: 1usize];
+                    let _: () = msg_send![&*controller, setContentScrollView: &*scroll, forEdge: 1usize];
                     state.controller = Some(Weak::from_retained(&controller));
                     // nsh insets the page itself, so the bar doesn't take the
                     // effect from the controller alone: the bar is also made
                     // a container of elements over the scroll view's top edge.
-                    let nav: Option<Retained<AnyObject>> =
-                        msg_send![&*controller, navigationController];
+                    let nav: Option<Retained<AnyObject>> = msg_send![&*controller, navigationController];
                     if let Some(nav) = nav {
                         let bar: Retained<AnyObject> = msg_send![&*nav, navigationBar];
                         let interaction = edge_interaction(&scroll, 1);
@@ -237,11 +234,7 @@ thread_local! {
 
 /// The top of `scroll`'s safe area with its page's large title open (at
 /// this width): the tallest it has been (it's shorter while the title is folded).
-unsafe fn tallest_top(
-    controller: &Retained<AnyObject>,
-    root: &AnyObject,
-    scroll: &AnyObject,
-) -> f64 {
+unsafe fn tallest_top(controller: &Retained<AnyObject>, root: &AnyObject, scroll: &AnyObject) -> f64 {
     let now: Insets = unsafe { msg_send![scroll, safeAreaInsets] };
     let bounds: NSRect = unsafe { msg_send![root, bounds] };
     let width = bounds.size.width.round() as u32;
@@ -249,8 +242,7 @@ unsafe fn tallest_top(
         seen.retain(|(c, _, _)| c.load().is_some());
         let at = seen.iter().position(|(c, w, _)| {
             *w == width
-                && c.load()
-                    .is_some_and(|c| Retained::as_ptr(&c) == Retained::as_ptr(controller))
+                && c.load().is_some_and(|c| Retained::as_ptr(&c) == Retained::as_ptr(controller))
         });
         match at {
             Some(i) => {
