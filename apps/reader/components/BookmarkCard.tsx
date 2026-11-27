@@ -5,7 +5,7 @@ import { isKept } from "../lib/articles";
 import { onDisk } from "../lib/files";
 import { markRuns, shortDate } from "../lib/format";
 import { fonts, look } from "../lib/look";
-import { displayTitle, type ShowField } from "../lib/prefs";
+import { displayTitle, type ShowField, timeFormat } from "../lib/prefs";
 import { collectionName, highlightCount, offline } from "../lib/store";
 import { BookmarkContextMenu } from "./BookmarkMenu";
 import type { DragProps } from "./ManualDrag";
@@ -179,7 +179,7 @@ function MetaLine(props: { b: Bookmark; showCollection: boolean; highlights?: bo
     [
       props.b.domain.replace(/^www\./, ""),
       props.showCollection ? collectionName(props.b.collectionId) : "",
-      shortDate(props.b.createdAt),
+      shortDate(props.b.createdAt, undefined, timeFormat()),
     ]
       .filter(Boolean)
       .join("  ·  ");
@@ -660,7 +660,7 @@ export function BookmarkHeadline(props: ItemProps) {
           <If when={on("info")} else={<HighlightCount b={b()} on={on} />}>
             {/* Secondary: it grows less than the title, which keeps the row. */}
             <Text class="text-ink-faint" maxFontSizeMultiplier={1.5} style={{ fontSize: 12 }}>
-              {shortDate(b().createdAt)}
+              {shortDate(b().createdAt, undefined, timeFormat())}
             </Text>
             <Marks b={b()} highlights={on("highlights")} maxScale={1.5} />
           </If>

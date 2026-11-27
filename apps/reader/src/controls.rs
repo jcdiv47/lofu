@@ -478,7 +478,7 @@ pub mod macos {
 
     use nsh_core::JsonValue;
     use nsh_platform_macos::{ComponentContext, Components, NativeComponent};
-    use objc2::rc::Retained;
+    use objc2::rc::{Allocated, Retained};
     use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol};
     use objc2::{
         DefinedClass, MainThreadMarker, MainThreadOnly, class, define_class, msg_send, sel,
@@ -627,6 +627,33 @@ pub mod macos {
                 let _: () = msg_send![b, setControlSize: size];
                 let title = NSString::from_str(p.title.as_deref().unwrap_or(""));
                 let _: () = msg_send![b, setTitle: &*title];
+                // The glass bezel draws its title in the label's color too,
+                // whatever `contentTintColor` says: a tinted title (a red
+                // Remove…) is an attributed one, dimmed as the bezel dims
+                // a disabled button's.
+                if let (Some(tint), true) =
+                    (p.tint, p.title.is_some() && p.variant() != "prominent")
+                {
+                    let mut rgba = tint;
+                    if p.disabled {
+                        rgba[3] *= 0.35;
+                    }
+                    let font: Retained<AnyObject> = msg_send![b, font];
+                    let keys = NSArray::from_retained_slice(&[
+                        NSString::from_str("NSColor"),
+                        NSString::from_str("NSFont"),
+                    ]);
+                    let values = NSArray::from_retained_slice(&[color(rgba), font]);
+                    let attributes: Retained<AnyObject> = msg_send![
+                        class!(NSDictionary),
+                        dictionaryWithObjects: &*values,
+                        forKeys: &*keys
+                    ];
+                    let string: Allocated<AnyObject> = msg_send![class!(NSAttributedString), alloc];
+                    let string: Retained<AnyObject> =
+                        msg_send![string, initWithString: &*title, attributes: &*attributes];
+                    let _: () = msg_send![b, setAttributedTitle: &*string];
+                }
                 if let Some(symbol) = &p.symbol {
                     let label = p.label.as_deref().map(NSString::from_str);
                     let image: Option<Retained<AnyObject>> = msg_send![

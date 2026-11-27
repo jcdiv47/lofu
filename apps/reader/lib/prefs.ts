@@ -1,5 +1,6 @@
 import { computed, platform, Storage, signal } from "nsh";
 import type { Bookmark } from "./api";
+import type { TimeFormat } from "./format";
 import { collections, counts, type Source, tags } from "./store";
 
 /**
@@ -51,6 +52,8 @@ interface Prefs {
   coverPosition: CoverPosition;
   /** Wide windows: the sidebar is hidden (View › Hide Sidebar, ⌘B). */
   sidebarHidden?: boolean;
+  /** The clock of the times shown (Settings › Time format); the system's by default. */
+  timeFormat?: TimeFormat;
 }
 
 const KEY = "prefs.v1";
@@ -85,6 +88,9 @@ export function setPrefs(patch: Partial<Prefs>) {
   prefs.set(next);
   void Storage.setItem(KEY, JSON.stringify(next)).catch(() => {});
 }
+
+/** The clock Settings chose for the times shown. */
+export const timeFormat = (): TimeFormat => prefs().timeFormat ?? "system";
 
 export const isCollapsed = (s: Section) => prefs().collapsed.includes(s);
 export const toggleSection = (s: Section) =>

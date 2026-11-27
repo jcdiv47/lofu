@@ -30,8 +30,9 @@ import {
   setKeepMode,
 } from "../lib/articles";
 import { onDisk } from "../lib/files";
-import { fonts } from "../lib/look";
-import { type OpenIn, prefs, setPrefs } from "../lib/prefs";
+import { type TimeFormat, timeOfDay } from "../lib/format";
+import { fonts, look } from "../lib/look";
+import { type OpenIn, prefs, setPrefs, timeFormat } from "../lib/prefs";
 import { bookmarks, offline } from "../lib/store";
 import { Wordmark } from "./Sidebar";
 
@@ -202,12 +203,13 @@ export function Settings(props: { onDone: () => void; onCancel?: () => void; fir
             title="Server"
             footer={
               <View class="flex-row items-center gap-3">
+                {/* The Mac's groups go without notes; an error still shows. */}
                 <Text
                   testID={error() ? "settings-error" : undefined}
                   class={error() ? "flex-1 text-stamp" : "flex-1 text-ink-soft"}
                   style={{ fontSize: 12, lineHeight: 16 }}
                 >
-                  {error() || "The lofu server on your network or tailnet."}
+                  {error() || (popUps ? "" : "The lofu server on your network or tailnet.")}
                 </Text>
                 <GroupButton
                   label={busy() ? "Connecting…" : "Connect"}
@@ -224,6 +226,7 @@ export function Settings(props: { onDone: () => void; onCancel?: () => void; fir
             <Row label="API token">{rowField("token", token, (v) => token.set(v), "lofu_…")}</Row>
           </Group>
           <OpeningBookmarks />
+          <DatesAndTimes />
           <If when={onDisk}>
             <OfflineReading />
           </If>
@@ -328,6 +331,8 @@ function GroupButton(props: {
   testID: string;
   onPress: () => void;
   disabled?: boolean;
+  /** It deletes something: its title is red. */
+  destructive?: boolean;
 }) {
   if (systemButtons)
     return (
@@ -335,6 +340,7 @@ function GroupButton(props: {
         title={props.label}
         label={props.label}
         controlSize="large"
+        tint={props.destructive ? look().stamp : undefined}
         testID={props.testID}
         disabled={props.disabled}
         onPress={props.onPress}
@@ -342,7 +348,7 @@ function GroupButton(props: {
     );
   return (
     <ActionButton
-      variant="secondary"
+      variant={props.destructive ? "destructive" : "secondary"}
       label={props.label}
       testID={props.testID}
       disabled={props.disabled}
@@ -351,7 +357,8 @@ function GroupButton(props: {
   );
 }
 
-type Option<T extends string> = { value: T; label: string };
+/** `short`: what the pop-up button shows of it, when its menu item says more. */
+type Option<T extends string> = { value: T; label: string; short?: string };
 
 /**
  * One of a few choices. On the Mac, a pop-up button whose system menu has
@@ -372,7 +379,7 @@ function PopUp<T extends string>(props: {
         ref = r;
       }}
       testID={props.testID}
-      accessibilityLabel={`${props.label}: ${current()?.label ?? ""}`}
+      accessibilityLabel={`${props.label}: ${current()?.short ?? current()?.label ?? ""}`}
       onPress={async () => {
         const m = await ref?.measure();
         await Menu.popup(
@@ -387,7 +394,7 @@ function PopUp<T extends string>(props: {
       class={`flex-row items-center gap-1.5 rounded-[7px] bg-control py-1 pr-1.5 pl-2.5 active:opacity-60 ${focusRing}`}
     >
       <Text class="text-ink" style={{ fontSize: 13.5 }}>
-        {current()?.label ?? ""}
+        {current()?.short ?? current()?.label ?? ""}
       </Text>
       <Icon name="upDown" size={11} />
     </Button>
@@ -444,7 +451,7 @@ function OpeningBookmarks() {
     <Group
       title="Opening bookmarks"
       footer={
-        <Note>{`What ${popUps ? "a click" : "a tap"} on a bookmark opens. Its menu has the others.`}</Note>
+        popUps ? undefined : <Note>What a tap on a bookmark opens. Its menu has the others.</Note>
       }
     >
       <If
@@ -461,6 +468,52 @@ function OpeningBookmarks() {
       >
         <Row label="Open in" first>
           <PopUp testID="open-in" label="Open in" options={options} value={value} onChange={set} />
+        </Row>
+      </If>
+    </Group>
+  );
+}
+
+/**
+ * The clock of the times shown (a bookmark saved today, a recent search):
+ * the system's, or one of its own. Each choice shows a time on it.
+ */
+function DatesAndTimes() {
+  const sample = new Date(2000, 0, 1, 15, 43);
+  const names: [TimeFormat, string][] = [
+    ["system", "System"],
+    ["12h", "12-hour"],
+    ["24h", "24-hour"],
+  ];
+  const options = () =>
+    names.map(([value, name]) => ({
+      value,
+      label: `${name} (${timeOfDay(sample, value)})`,
+      short: name,
+    }));
+  const set = (v: TimeFormat) => setPrefs({ timeFormat: v });
+  return (
+    <Group title="Dates and times">
+      <If
+        when={popUps}
+        else={
+          <Choices
+            label="Time format"
+            id={(v) => `time-format-${v}`}
+            options={options}
+            value={timeFormat}
+            onChange={set}
+          />
+        }
+      >
+        <Row label="Time format" first>
+          <PopUp
+            testID="time-format"
+            label="Time format"
+            options={options}
+            value={timeFormat}
+            onChange={set}
+          />
         </Row>
       </If>
     </Group>
@@ -520,11 +573,14 @@ function OfflineReading() {
       title="Reading offline"
       footer={
         <View class="gap-3">
-          <Note>Every article you open is kept here, with its pictures.</Note>
+          <If when={!popUps}>
+            <Note>Every article you open is kept here, with its pictures.</Note>
+          </If>
           <View class="flex-row flex-wrap justify-end gap-2">
             <GroupButton
               label={`Remove from ${here === "this Mac" ? "This Mac" : "This Device"}…`}
               testID="offline-remove"
+              destructive
               disabled={!!downloading() || keptCount() === 0}
               onPress={() => void remove()}
             />

@@ -12,6 +12,7 @@ import type { IconName } from "../components/ui";
 import type { Bookmark } from "./api";
 import { shortDate } from "./format";
 import { glyphColors } from "./look";
+import { timeFormat } from "./prefs";
 import { type BookmarkType, highlightCount, type Source, typeTitles } from "./store";
 
 /*
@@ -182,7 +183,7 @@ const recentRows = (list: Recent[], now: Date): SuggestRow[] =>
     key: `recent:${r.query}`,
     icon: "search",
     label: r.query,
-    detail: shortDate(new Date(r.at).toISOString(), now),
+    detail: shortDate(new Date(r.at).toISOString(), now, timeFormat()),
     action: { kind: "query", query: r.query },
   }));
 
