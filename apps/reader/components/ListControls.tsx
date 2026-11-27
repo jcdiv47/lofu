@@ -446,7 +446,7 @@ export function ViewButton(props: { source: Source }) {
  */
 
 /** How a filter reads under *Filter*: its parts, or *Off*. */
-const filterSummary = (f: ListFilter) => {
+export const filterSummary = (f: ListFilter) => {
   const parts = filterParts(f).map((p) => p.label);
   return parts.length ? parts.join(", ") : "Off";
 };
@@ -460,6 +460,49 @@ export type ListMenuOptions = {
   /** A search keeps the server's order: no *Sort by*. */
   searching: boolean;
 };
+
+/**
+ * *Filter* as the system's menu (the Mac's toolbar): the toggles and the kind
+ * of page, each with how many it leaves, checked when on, then *Clear filter*.
+ */
+export function filterMenu(o: ListMenuOptions): NativeItems {
+  const s = o.source;
+  const f = o.filter;
+  const n = filterCounts(f, o.list);
+  const counted = (label: string, k: number | undefined) =>
+    `${label} (${(k ?? 0).toLocaleString()})`;
+  const types = typeChoices.filter((t) => (n.types.get(t.value) ?? 0) > 0 || f.type === t.value);
+  return [
+    { label: "Filter", disabled: true },
+    ...togglesFor(s).map((c) => ({
+      label: counted(c.label, n.toggles.get(c.value)),
+      checked: f.toggles.includes(c.value),
+      onSelect: () => o.setFilter(toggled(f, c.value)),
+    })),
+    ...(offersType(s) && types.length > 1
+      ? [
+          { type: "separator" as const },
+          { label: "Type", disabled: true },
+          {
+            label: "Any type",
+            checked: f.type === null,
+            onSelect: () => o.setFilter({ ...f, type: null }),
+          },
+          ...types.map((t) => ({
+            label: counted(typeTitles[t.value], n.types.get(t.value)),
+            checked: f.type === t.value,
+            onSelect: () => o.setFilter({ ...f, type: t.value }),
+          })),
+        ]
+      : []),
+    ...(isFiltered(f)
+      ? [
+          { type: "separator" as const },
+          { label: "Clear Filter", onSelect: () => o.setFilter(NO_FILTER) },
+        ]
+      : []),
+  ];
+}
 
 /** The phone list's menu (iOS): what's picked is applied here, the filter through `setFilter`. */
 export async function phoneListMenu(o: ListMenuOptions) {
