@@ -2,7 +2,7 @@
   "name": "lofu",
   "id": "app.lofu.reader",
   "version": "1.0.0",
-  "build": 1,
+  "build": 2,
   "rust": ".",
   "icon": "../../design/logo/logo.png",
   "capabilities": {
@@ -27,6 +27,11 @@
     },
     "host": ["lofu.secret.read", "lofu.secret.write", "lofu.keyboard.keepAway"],
     "share": true
+  },
+  "ios": {
+    "infoPlist": {
+      "MinimumOSVersion": "17.0"
+    }
   },
   "window": {
     "titleBar": {
