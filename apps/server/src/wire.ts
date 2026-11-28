@@ -22,6 +22,7 @@ import { CollectionStore } from "./store/collections.ts";
 import { HighlightStore } from "./store/highlights.ts";
 import type { Hooks } from "./store/hooks.ts";
 import { JobStore } from "./store/jobs.ts";
+import { SettingsStore } from "./store/settings.ts";
 import { TokenStore } from "./store/tokens.ts";
 
 /** Builds every long-lived component. Shared by main.ts and the tests. */
@@ -48,6 +49,7 @@ export function wire(config: Config) {
   const collections = new CollectionStore(db, hooks);
   const highlights = new HighlightStore(db, bookmarks, hooks);
   const tokens = new TokenStore(db);
+  const settings = new SettingsStore(db, jobs, hooks);
 
   const pool = new ExtractPool(config.extractWorkers);
   const pdf = new PdfExtractor(config.extractWorkers);
@@ -88,6 +90,7 @@ export function wire(config: Config) {
         pdf,
         browser,
         githubToken: config.githubToken,
+        skipDomains: () => settings.skipDomains(),
       }),
       images: imagesHandler({ bookmarks }),
       markdown: markdownHandler({ bookmarks, pool }),
@@ -111,6 +114,7 @@ export function wire(config: Config) {
     collections,
     highlights,
     tokens,
+    settings,
     images,
     math: new MathPictures(pool, (value) => images.sign(value)),
     searcher,

@@ -39,6 +39,7 @@ import inboxIcon from "../assets/icons/inbox.svg";
 import infoIcon from "../assets/icons/info.svg";
 import linkIcon from "../assets/icons/link.svg";
 import listIcon from "../assets/icons/list.svg";
+import minusIcon from "../assets/icons/minus.svg";
 import moodboardIcon from "../assets/icons/moodboard.svg";
 import moreIcon from "../assets/icons/more.svg";
 import noteIcon from "../assets/icons/note.svg";
@@ -113,6 +114,7 @@ export const icons = {
   inbox: inboxIcon,
   link: linkIcon,
   list: listIcon,
+  minus: minusIcon,
   more: moreIcon,
   pencil: pencilIcon,
   plus: plusIcon,

@@ -33,6 +33,7 @@ import { onDisk } from "../lib/files";
 import { type TimeFormat, timeOfDay } from "../lib/format";
 import { fonts, look } from "../lib/look";
 import { type OpenIn, prefs, setPrefs, timeFormat } from "../lib/prefs";
+import { setSites, siteDomain, skipDomains } from "../lib/sites";
 import { bookmarks, offline } from "../lib/store";
 import { Wordmark } from "./Sidebar";
 
@@ -226,6 +227,7 @@ export function Settings(props: { onDone: () => void; onCancel?: () => void; fir
             <Row label="API token">{rowField("token", token, (v) => token.set(v), "lofu_…")}</Row>
           </Group>
           <OpeningBookmarks />
+          <OpenAsPages />
           <DatesAndTimes />
           <If when={onDisk}>
             <OfflineReading />
@@ -470,6 +472,102 @@ function OpeningBookmarks() {
           <PopUp testID="open-in" label="Open in" options={options} value={value} onChange={set} />
         </Row>
       </If>
+    </Group>
+  );
+}
+
+/**
+ * Sites whose bookmarks open as the page itself, with no reader: the server
+ * doesn't read them (`lib/sites.ts`). A row each, with a button that takes
+ * it off; a field under them adds one.
+ */
+function OpenAsPages() {
+  const draft = signal("");
+  const error = signal("");
+  const busy = signal(false);
+  const save = async (list: string[]) => {
+    busy.set(true);
+    error.set("");
+    try {
+      await setSites(list);
+      return true;
+    } catch (e) {
+      error.set((e as Error).message);
+      return false;
+    } finally {
+      busy.set(false);
+    }
+  };
+  const add = async () => {
+    if (busy() || !draft().trim()) return;
+    const site = siteDomain(draft());
+    if (!site) {
+      error.set("Type a site as example.com, or paste an address on it.");
+      return;
+    }
+    if (skipDomains().includes(site) || (await save([...skipDomains(), site]))) draft.set("");
+  };
+  const remove = (site: string) => void save(skipDomains().filter((d) => d !== site));
+
+  return (
+    <Group
+      title="Open as web pages"
+      footer={
+        <View class="flex-row items-center gap-3">
+          <Text
+            testID={error() ? "sites-error" : undefined}
+            class={error() ? "flex-1 text-stamp" : "flex-1 text-ink-soft"}
+            style={{ fontSize: 12, lineHeight: 16 }}
+          >
+            {error() ||
+              "Bookmarks from these sites open as the page itself. The server doesn't read them."}
+          </Text>
+          <GroupButton
+            label="Add Site"
+            testID="sites-add"
+            disabled={busy() || !draft().trim()}
+            onPress={() => void add()}
+          />
+        </View>
+      }
+    >
+      <Each of={skipDomains()} key={(d) => d}>
+        {(site, i) => (
+          <Row label={site()} first={i() === 0}>
+            <View
+              role="button"
+              testID={`sites-remove-${site()}`}
+              accessibilityLabel={`Remove ${site()}`}
+              disabled={busy()}
+              onPress={() => remove(site())}
+              class={`h-5 w-5 items-center justify-center rounded-full bg-control active:opacity-60 ${focusRing}`}
+            >
+              <Icon name="minus" size={11} />
+            </View>
+          </Row>
+        )}
+      </Each>
+      <View
+        class={`flex-row items-center border-group-edge px-3.5 ${skipDomains().length ? "border-t" : ""}`}
+        style={{ minHeight: 44 }}
+      >
+        <Input
+          testID="sites-new"
+          value={draft()}
+          placeholder="example.com"
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="url"
+          returnKeyType="done"
+          onChange={({ value }) => {
+            draft.set(value);
+            error.set("");
+          }}
+          onSubmit={() => void add()}
+          class="flex-1 rounded-[7px] bg-control px-2.5 text-ink placeholder:text-ink-faint"
+          style={{ height: popUps ? 28 : 34, fontSize: body }}
+        />
+      </View>
     </Group>
   );
 }

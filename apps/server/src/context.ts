@@ -6,6 +6,7 @@ import type { Searcher } from "./search/search.ts";
 import type { BookmarkStore } from "./store/bookmarks.ts";
 import type { CollectionStore } from "./store/collections.ts";
 import type { HighlightStore } from "./store/highlights.ts";
+import type { SettingsStore } from "./store/settings.ts";
 import type { TokenStore } from "./store/tokens.ts";
 
 export interface AppContext {
@@ -15,6 +16,8 @@ export interface AppContext {
   collections: CollectionStore;
   highlights: HighlightStore;
   tokens: TokenStore;
+  /** Settings every client shares (the sites not read). */
+  settings: SettingsStore;
   /** Signs and serves article images (extract/images.ts). */
   images: ImageProxy;
   /** Draws and serves formulas as pictures (extract/mathPictures.ts). */

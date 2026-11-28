@@ -13,6 +13,7 @@ import {
 import { clearArticles, prefetchArticles, removeArticle } from "./articles";
 import { readText, removeText, writeText } from "./files";
 import { plainExcerpt } from "./format";
+import { forgetSites, loadSites } from "./sites";
 
 /**
  * A local mirror of the library, kept current with `/v1/sync` (every write on
@@ -490,6 +491,8 @@ export function sync(): Promise<void> {
           });
         }
       }
+      // The sites opened as pages, which the articles kept ahead leave out.
+      await loadSites();
       syncError.set("");
       persist();
       // Newest first, as the library lists them.
@@ -526,6 +529,7 @@ export async function reset() {
   await Storage.removeItem(OUTBOX_KEY);
   await removeText(SNAPSHOT_KEY);
   await clearArticles();
+  forgetSites();
 }
 
 /**

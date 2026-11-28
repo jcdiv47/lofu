@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { siteDomain } from "./url.ts";
 
 /**
  * API contract shared by the server, the web/native clients and (via the
@@ -351,6 +352,32 @@ export const SyncResponse = z
     highlights: z.array(Highlight),
   })
   .meta({ id: "SyncResponse" });
+
+/** A site, as typed (`example.com`, or an address on it); stored as its bare domain. */
+export const SiteDomain = z
+  .string()
+  .max(253)
+  .transform((s, ctx) => {
+    const d = siteDomain(s);
+    if (!d) ctx.addIssue({ code: "custom", message: `not a site: ${s}` });
+    return d ?? "";
+  });
+
+const skipDomains =
+  "Sites whose pages the server doesn't read: their bookmarks open as the page itself, " +
+  "and a subdomain counts as its site (`x.com` covers `mobile.x.com`)";
+
+/** Settings kept on the server, shared by every client. */
+export const Settings = z
+  .object({ skipDomains: z.array(z.string()).describe(skipDomains) })
+  .meta({ id: "Settings" });
+export type Settings = z.infer<typeof Settings>;
+
+export const UpdateSettings = z
+  .object({ skipDomains: z.array(SiteDomain).max(1000).describe(skipDomains) })
+  .partial()
+  .meta({ id: "UpdateSettings" });
+export type UpdateSettings = z.infer<typeof UpdateSettings>;
 
 export const ApiError = z
   .object({ error: z.string(), details: z.unknown().optional() })
