@@ -155,6 +155,13 @@ mod mac {
         static ITEMS: RefCell<Vec<Item>> = const { RefCell::new(Vec::new()) };
         /// The toolbar items made for them, by identifier.
         static MADE: RefCell<HashMap<String, Retained<AnyObject>>> = RefCell::new(HashMap::new());
+        /// Search items made for this toolbar, by identifier, kept while
+        /// other pages' items show. A new `NSSearchToolbarItem` comes in
+        /// folded into its button and opens out, the button's magnifier
+        /// fading at the field's end: going back to the library flashed it.
+        /// The one made before comes back as it was.
+        static SEARCHES: RefCell<HashMap<String, Retained<AnyObject>>> =
+            RefCell::new(HashMap::new());
         /// The toolbar and its delegate (which the toolbar holds weakly).
         static TOOLBAR: RefCell<Option<(Retained<AnyObject>, Retained<Delegate>)>> =
             const { RefCell::new(None) };
@@ -186,8 +193,25 @@ mod mac {
                     items.borrow().iter().find(|i| i.identifier() == identifier).cloned()
                 });
                 item.map(|item| {
+                    let kept = (item.kind == "search")
+                        .then(|| SEARCHES.with(|s| s.borrow().get(&identifier).cloned()))
+                        .flatten();
                     // SAFETY: AppKit asks on the main thread.
-                    let made = unsafe { make(&item, self) };
+                    let made = match kept {
+                        Some(kept) => {
+                            unsafe { update(&kept, &item) };
+                            kept
+                        }
+                        None => {
+                            let made = unsafe { make(&item, self) };
+                            if item.kind == "search" {
+                                SEARCHES.with(|s| {
+                                    s.borrow_mut().insert(identifier.clone(), made.clone())
+                                });
+                            }
+                            made
+                        }
+                    };
                     MADE.with(|m| m.borrow_mut().insert(identifier, made.clone()));
                     made
                 })
@@ -851,6 +875,7 @@ mod mac {
                 let _: () = msg_send![&*toolbar, setAutosavesConfiguration: false];
                 MADE.with(|m| m.borrow_mut().clear());
                 SPACES.with(|s| s.borrow_mut().clear());
+                SEARCHES.with(|s| s.borrow_mut().clear());
                 let _: () = msg_send![&*window, setToolbar: &*toolbar];
                 // NSWindowToolbarStyleUnified: the height nsh's title bar asked for.
                 let _: () = msg_send![&*window, setToolbarStyle: 3isize];
