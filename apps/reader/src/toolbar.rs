@@ -155,13 +155,6 @@ mod mac {
         static ITEMS: RefCell<Vec<Item>> = const { RefCell::new(Vec::new()) };
         /// The toolbar items made for them, by identifier.
         static MADE: RefCell<HashMap<String, Retained<AnyObject>>> = RefCell::new(HashMap::new());
-        /// Search items made for this toolbar, by identifier, kept while
-        /// other pages' items show. A new `NSSearchToolbarItem` comes in
-        /// folded into its button and opens out, the button's magnifier
-        /// fading at the field's end: going back to the library flashed it.
-        /// The one made before comes back as it was.
-        static SEARCHES: RefCell<HashMap<String, Retained<AnyObject>>> =
-            RefCell::new(HashMap::new());
         /// The toolbar and its delegate (which the toolbar holds weakly).
         static TOOLBAR: RefCell<Option<(Retained<AnyObject>, Retained<Delegate>)>> =
             const { RefCell::new(None) };
@@ -193,25 +186,8 @@ mod mac {
                     items.borrow().iter().find(|i| i.identifier() == identifier).cloned()
                 });
                 item.map(|item| {
-                    let kept = (item.kind == "search")
-                        .then(|| SEARCHES.with(|s| s.borrow().get(&identifier).cloned()))
-                        .flatten();
                     // SAFETY: AppKit asks on the main thread.
-                    let made = match kept {
-                        Some(kept) => {
-                            unsafe { update(&kept, &item) };
-                            kept
-                        }
-                        None => {
-                            let made = unsafe { make(&item, self) };
-                            if item.kind == "search" {
-                                SEARCHES.with(|s| {
-                                    s.borrow_mut().insert(identifier.clone(), made.clone())
-                                });
-                            }
-                            made
-                        }
-                    };
+                    let made = unsafe { make(&item, self) };
                     MADE.with(|m| m.borrow_mut().insert(identifier, made.clone()));
                     made
                 })
@@ -809,6 +785,13 @@ mod mac {
         });
     }
 
+    /// The item with toolbar identifier `identifier` among those to show.
+    fn items_now(identifier: &str) -> Option<Item> {
+        ITEMS.with(|items| {
+            items.borrow().iter().find(|i| i.identifier() == identifier).cloned()
+        })
+    }
+
     /// The toolbar's search item, if it shows one.
     fn search_item() -> Option<Retained<AnyObject>> {
         MADE.with(|m| {
@@ -875,7 +858,6 @@ mod mac {
                 let _: () = msg_send![&*toolbar, setAutosavesConfiguration: false];
                 MADE.with(|m| m.borrow_mut().clear());
                 SPACES.with(|s| s.borrow_mut().clear());
-                SEARCHES.with(|s| s.borrow_mut().clear());
                 let _: () = msg_send![&*window, setToolbar: &*toolbar];
                 // NSWindowToolbarStyleUnified: the height nsh's title bar asked for.
                 let _: () = msg_send![&*window, setToolbarStyle: 3isize];
@@ -892,21 +874,52 @@ mod mac {
                 TOOLBAR.with(|t| *t.borrow_mut() = Some((toolbar, delegate)));
             } else if before != after {
                 let toolbar = installed.expect("ours");
-                let count = |tb: &AnyObject| -> usize {
-                    let items: Retained<NSArray<AnyObject>> = msg_send![tb, items];
-                    items.count()
-                };
-                while count(&toolbar) > 0 {
-                    let _: () = msg_send![&*toolbar, removeItemAtIndex: 0isize];
+                // The search item stays, hidden while other pages' items
+                // show: a new `NSSearchToolbarItem` comes in folded into its
+                // button and opens out, the button's magnifier fading at the
+                // field's end (going back to the library flashed it), and
+                // AppKit wants a new item each time it asks for one, so the
+                // old one can't be handed back. Items can hide from macOS 15.
+                // From the toolbar's own items: a hidden one isn't in `MADE`.
+                let items: Retained<NSArray<AnyObject>> = msg_send![&*toolbar, items];
+                let kept = items.iter().find(|made| {
+                    let id: Retained<NSString> = msg_send![&**made, itemIdentifier];
+                    let hides: bool = msg_send![&**made, respondsToSelector: sel!(setHidden:)];
+                    hides && id.to_string().starts_with(&format!("{PREFIX}search."))
+                });
+                let kept_id = kept.as_ref().map(|made| {
+                    let id: Retained<NSString> = msg_send![&**made, itemIdentifier];
+                    id.to_string()
+                });
+                for i in (0..items.count()).rev() {
+                    let id: Retained<NSString> =
+                        msg_send![&*items.objectAtIndex(i), itemIdentifier];
+                    if kept_id.as_deref() != Some(&*id.to_string()) {
+                        let _: () = msg_send![&*toolbar, removeItemAtIndex: i as isize];
+                    }
                 }
                 MADE.with(|m| m.borrow_mut().clear());
                 SPACES.with(|s| s.borrow_mut().clear());
+                // Inserted around the kept item: those before its place
+                // push it along, so it ends up where the new items have it
+                // (or last, out of the way, when they have none).
                 for (i, identifier) in after.iter().enumerate() {
+                    if kept_id.as_deref() == Some(identifier.as_str()) {
+                        continue;
+                    }
                     let _: () = msg_send![
                         &*toolbar,
                         insertItemWithItemIdentifier: &*NSString::from_str(identifier),
                         atIndex: i as isize
                     ];
+                }
+                if let (Some(made), Some(id)) = (kept, kept_id) {
+                    let item = items_now(&id);
+                    let _: () = msg_send![&*made, setHidden: item.is_none()];
+                    if let Some(item) = item {
+                        update(&made, &item);
+                        MADE.with(|m| m.borrow_mut().insert(id, made));
+                    }
                 }
             } else {
                 for item in &items {
