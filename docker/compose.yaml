@@ -85,7 +85,7 @@ services:
   browser:
     # A browser running untrusted pages needs its updates. Pinned so a deploy
     # is reproducible; Dependabot proposes each new release weekly.
-    image: chromedp/headless-shell:158.0.8127.37@sha256:8c574e39f0db5c1d9efe7c472c6e0fcfc1d91ac0be70eb1dead0f2d52cf104cc
+    image: chromedp/headless-shell:159.0.8154.6@sha256:0a09ac93fbc9e0849dc2bc178fc29e0a9c1ff0b79ca64c03b46dbc0757b3c3ac
     restart: unless-stopped
     user: "65534:65534"
     environment:
