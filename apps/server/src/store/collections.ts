@@ -1,6 +1,6 @@
-import type { Collection } from "@lofu/shared";
+import type { Collection, CollectionWithCount } from "@lofu/shared";
 import type { Db } from "../db/index.ts";
-import { NotFoundError } from "./bookmarks.ts";
+import { NotFoundError } from "../errors.ts";
 import type { Hooks } from "./hooks.ts";
 import { type CollectionRow, toCollection } from "./rows.ts";
 
@@ -18,13 +18,27 @@ export class CollectionStore {
     private hooks: Hooks,
   ) {}
 
-  list(): Collection[] {
+  /** Live collections, each with its count of live bookmarks outside the Trash. */
+  list(): CollectionWithCount[] {
     return this.db
-      .query<CollectionRow, []>(
-        "SELECT * FROM collections WHERE deleted_at IS NULL ORDER BY parent_id NULLS FIRST, sort, name",
+      .query<CollectionRow & { bookmark_count: number }, []>(
+        `SELECT c.*, (SELECT count(*) FROM bookmarks b
+           WHERE b.collection_id = c.id AND b.deleted_at IS NULL AND b.archived = 0) AS bookmark_count
+         FROM collections c WHERE c.deleted_at IS NULL ORDER BY c.parent_id NULLS FIRST, c.sort, c.name`,
       )
       .all()
-      .map(toCollection);
+      .map((r) => ({ ...toCollection(r), bookmarkCount: r.bookmark_count }));
+  }
+
+  /** A live collection with its count of live bookmarks outside the Trash. */
+  getWithCount(id: string): CollectionWithCount {
+    const c = this.get(id);
+    const n = this.db
+      .query<{ n: number }, [string]>(
+        "SELECT count(*) AS n FROM bookmarks WHERE collection_id = ? AND deleted_at IS NULL AND archived = 0",
+      )
+      .get(id)!.n;
+    return { ...c, bookmarkCount: n };
   }
 
   get(id: string): Collection {
@@ -110,7 +124,10 @@ export class CollectionStore {
           .run(current.parentId, now, this.db.nextSeq(), child);
       }
       for (const { id: bid } of this.db
-        .query<{ id: string }, [string]>("SELECT id FROM bookmarks WHERE collection_id = ?")
+        .query<{ id: string }, [string]>(
+          // Tombstones keep theirs: they aren't shown, and a new seq would only resend them.
+          "SELECT id FROM bookmarks WHERE collection_id = ? AND deleted_at IS NULL",
+        )
         .all(id)) {
         this.db
           .query("UPDATE bookmarks SET collection_id = NULL, updated_at = ?, seq = ? WHERE id = ?")

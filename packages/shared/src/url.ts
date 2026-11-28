@@ -60,11 +60,19 @@ function isTrackingParam(host: string, key: string): boolean {
   return false;
 }
 
-/** Returns a canonical dedupe key, or throws on a non-http(s) / unparsable URL. */
+/**
+ * Returns a canonical dedupe key. Throws a RangeError (a bad request) on a
+ * non-http(s) or unparsable URL.
+ */
 export function normalizeUrl(input: string): string {
-  const url = new URL(input.trim());
+  let url: URL;
+  try {
+    url = new URL(input.trim());
+  } catch {
+    throw new RangeError(`invalid URL: ${input.slice(0, 200)}`);
+  }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error(`unsupported URL scheme: ${url.protocol}`);
+    throw new RangeError(`unsupported URL scheme: ${url.protocol}`);
   }
 
   // Scheme is folded: http and https of the same page are one bookmark.

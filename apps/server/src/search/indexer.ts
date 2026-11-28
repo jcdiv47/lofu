@@ -4,9 +4,10 @@ import type { Meili } from "./meili.ts";
 
 /**
  * Bump when settings or the documents' fields change: the settings are sent
- * again and every bookmark is pushed again (2: `hasNote`, `hasHighlights`).
+ * again and every bookmark is pushed again (2: `hasNote`, `hasHighlights`;
+ * 3: `contentStatus`).
  */
-const SETTINGS_VERSION = "2";
+const SETTINGS_VERSION = "3";
 const SETTINGS = {
   searchableAttributes: [
     "title",
@@ -28,6 +29,7 @@ const SETTINGS = {
     "createdAt",
     "hasNote",
     "hasHighlights",
+    "contentStatus",
     // `info:` and `link:` match within them (`CONTAINS`).
     "title",
     "excerpt",
@@ -59,6 +61,7 @@ export interface SearchDoc {
   /** For the search box's `note:true` and `highlights:true` (see packages/shared/src/query.ts). */
   hasNote: boolean;
   hasHighlights: boolean;
+  contentStatus: string;
   content: string;
 }
 
@@ -255,6 +258,7 @@ export class Indexer {
         highlights: highlights.get(r.id) ?? [],
         hasNote: !!r.note?.trim(),
         hasHighlights: highlights.has(r.id),
+        contentStatus: r.content_status,
         content: texts.get(r.id) ?? "",
       }));
       const t = await this.meili.request<{ taskUid: number }>(

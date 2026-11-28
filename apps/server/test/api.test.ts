@@ -241,9 +241,9 @@ describe("bookmarks", () => {
 
   test("validation errors are 400", async () => {
     expect((await api("POST", "/v1/bookmarks", { url: "javascript:alert(1)" })).status).toBe(400);
-    expect(
-      (await api("POST", "/v1/bookmarks", { url: `${base}/x`, collectionId: "nope" })).status,
-    ).toBe(409);
+    // A collection that isn't there is a 404, as for a collection's parent.
+    const missing = await api("POST", "/v1/bookmarks", { url: `${base}/x`, collectionId: "nope" });
+    expect([missing.status, missing.data.code]).toEqual([404, "NOT_FOUND"]);
   });
 
   test("the manual order starts newest first and a drop moves one between two, bumping seq", async () => {

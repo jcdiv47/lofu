@@ -36,11 +36,37 @@ export function queryMatcher(q: string): RegExp | null {
 
 /** ~`width` chars around the first match, matches wrapped in <mark>, HTML-escaped. */
 export function makeSnippet(text: string, re: RegExp, width = 220): string | null {
-  re.lastIndex = 0;
+  return snippetAt(text, re, 0, width)?.html ?? null;
+}
+
+/**
+ * Up to `max` excerpts around successive matches that don't overlap, in the
+ * order they come in the text.
+ */
+export function makeSnippets(text: string, re: RegExp, max: number, width = 220): string[] {
+  const out: string[] = [];
+  let from = 0;
+  while (out.length < max && from < text.length) {
+    const s = snippetAt(text, re, from, width);
+    if (!s) break;
+    out.push(s.html);
+    from = s.end;
+  }
+  return out;
+}
+
+/** The excerpt around the first match at or after `from`, and where it ends. */
+function snippetAt(
+  text: string,
+  re: RegExp,
+  from: number,
+  width: number,
+): { html: string; end: number } | null {
+  re.lastIndex = from;
   const first = re.exec(text);
   if (!first) return null;
 
-  let start = Math.max(0, first.index - Math.floor(width / 3));
+  let start = Math.max(from, first.index - Math.floor(width / 3));
   let end = Math.min(text.length, start + width);
   // Snap to whitespace so words aren't cut (no-op for CJK, which has none).
   if (start > 0) {
@@ -62,5 +88,8 @@ export function makeSnippet(text: string, re: RegExp, width = 220): string | nul
   }
   out += escapeHtml(slice.slice(last));
   out = out.replace(/\s+/g, " ").trim();
-  return `${start > 0 ? "…" : ""}${out}${end < text.length ? "…" : ""}`;
+  return {
+    html: `${start > 0 ? "…" : ""}${out}${end < text.length ? "…" : ""}`,
+    end: Math.max(end, first.index + first[0].length),
+  };
 }

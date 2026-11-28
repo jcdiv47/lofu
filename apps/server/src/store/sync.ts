@@ -58,6 +58,8 @@ export function syncSince(db: Db, images: ImageProxy, since: number, limit: numb
       .get(maxSeen) !== null;
 
   return {
+    generation: db.generation,
+    serverSeq: db.currentSeq(),
     cursor: maxSeen,
     hasMore,
     bookmarks: bookmarks.map((r) => toBookmark(r, images)),

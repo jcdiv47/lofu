@@ -103,9 +103,7 @@ export function wire(config: Config) {
 
   const meili = config.meiliUrl ? new Meili(config.meiliUrl, config.meiliKey) : null;
   if (meili) indexer = new Indexer(db, meili, config.meiliIndex);
-  const searcher = meili
-    ? new Searcher(meili, config.meiliIndex, bookmarks, config.meiliEmbedder)
-    : null;
+  const searcher = new Searcher(meili, config.meiliIndex, bookmarks, config.meiliEmbedder);
 
   const ctx: AppContext = {
     config,
@@ -118,6 +116,7 @@ export function wire(config: Config) {
     images,
     math: new MathPictures(pool, (value) => images.sign(value)),
     searcher,
+    features: { browser: browser !== null, pdf: pdf.available },
     meiliHealthy: () => meili?.health() ?? Promise.resolve(false),
   };
 

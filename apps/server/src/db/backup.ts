@@ -18,6 +18,15 @@ export function backupDb(db: Database, dest: string): void {
   rmSync(tmp, { force: true });
   try {
     db.run("VACUUM INTO ?", [tmp]);
+    // A restored copy is another database to sync against: its seq may be behind.
+    const writable = new Database(tmp);
+    try {
+      writable
+        .query("UPDATE meta SET value = ? WHERE key = 'db_generation'")
+        .run(Bun.randomUUIDv7());
+    } finally {
+      writable.close();
+    }
     const copy = new Database(tmp, { readonly: true });
     try {
       const check = copy.query<{ integrity_check: string }, []>("PRAGMA integrity_check").get();

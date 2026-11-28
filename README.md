@@ -53,7 +53,7 @@
 bun install
 cp .env.example .env                             # set MEILI_MASTER_KEY
 bun run services:up                              # Meilisearch in Docker on 127.0.0.1:7700
-bun run --cwd apps/server token create laptop    # prints an API token once
+bun run --cwd apps/server token create laptop    # prints an API token once (--scopes read,write,delete,admin)
 bun run dev                                      # API on http://127.0.0.1:8787
 ```
 
@@ -217,26 +217,29 @@ The import is idempotent and safe to re-run:
 
 ## API
 
-The full OpenAPI 3.1 specification is served live at `/openapi.json`, generated directly from the Zod schemas in [`packages/shared`](packages/shared). Request bodies support `Content-Encoding: gzip`.
+The full OpenAPI 3.1 specification is served live at `/openapi.json`, generated directly from the Zod schemas in [`packages/shared`](packages/shared); every operation has an `operationId` and tags. Request bodies support `Content-Encoding: gzip` (up to 32 MiB decoded). Errors are `{ error, code, details? }`, with a stable `code` (`INVALID_REQUEST`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `SEQ_CONFLICT`, `PAYLOAD_TOO_LARGE`, `SEARCH_UNAVAILABLE`, `INTERNAL_ERROR`).
 
 | Method & Path | Description |
 | --- | --- |
-| `POST /v1/bookmarks` | Save a bookmark (idempotent on normalized URL). Pass `html` to skip server fetching; otherwise short links (`t.co`, `t.cn`, `xhslink.com`, `b23.tv`, `bit.ly`, …) and wrappers (`weibo.cn/sinaurl?u=`, `link.zhihu.com/?target=`) are unwrapped automatically. |
-| `GET /v1/bookmarks` | List bookmarks with keyset pagination (`collectionId`, `tags`, `archived`, `favorite`, `type`). |
-| `GET /v1/bookmarks/lookup?url=` | Look up a bookmark by any normalized variant of a URL. |
-| `GET \| PATCH \| DELETE /v1/bookmarks/{id}` | Read, update, or permanently delete a bookmark. With `?content=markdown`, also returns measured article `images` (`src`, `width`, `height`, `proxy`). |
-| `POST /v1/bookmarks/{id}/refetch` | Re-queue page extraction. |
-| `GET /v1/bookmarks/{id}/content` | Fetch extracted content (`?format=markdown\|html\|text`), serving stored zstd bytes directly when accepted. |
-| `GET /v1/search` | Full-text search via Meilisearch hydrated from SQLite. |
-| `GET /v1/sync?since=<cursor>` | Incremental delta sync of all changes and deletion tombstones since `<cursor>`. |
+| `POST /v1/bookmarks` | Save a bookmark (idempotent on normalized URL). Pass `html` to skip server fetching; otherwise short links (`t.co`, `t.cn`, `xhslink.com`, `b23.tv`, `bit.ly`, …) and wrappers (`weibo.cn/sinaurl?u=`, `link.zhihu.com/?target=`) are unwrapped automatically. `?wait=true` (10 s) or `?waitMs=` (≤ 15000) answers once the page is read. Saving one in the Trash again restores it. |
+| `GET /v1/bookmarks` | List bookmarks with keyset pagination (`collectionId` + `includeSubcollections`, `tags`, `archived`, `favorite`, `type`, `contentStatus`, `ids`, `domain`, `hasNote`, `hasHighlights`, `untagged`, `createdAfter`/`createdBefore`; `sort=newest\|oldest\|updated\|manual`). |
+| `GET /v1/bookmarks/lookup?url=`, `POST /v1/bookmarks/lookup` | Look up a bookmark by any normalized (or wrapped) variant of a URL; the POST takes up to 200 `urls` at once. |
+| `POST /v1/bookmarks/batch` | One `patch` for up to 200 bookmarks, or `delete: true`, in one transaction. |
+| `GET \| PATCH \| DELETE /v1/bookmarks/{id}` | Read, update, or permanently delete a bookmark. With `?content=markdown`, also returns measured article `images` (`src`, `width`, `height`, `proxy`); `include=media,highlights,none` picks the extras, `contentOffset`/`contentMaxChars` slice the content (with `headings` for Markdown). PATCH takes `addTags`/`removeTags`, and `expectedSeq` (or `If-Match`) for optimistic concurrency. |
+| `POST /v1/bookmarks/{id}/refetch` | Re-queue page extraction; an optional `{ html }` body supplies the page, `wait`/`waitMs` wait for it. Title, excerpt and cover change only if the page is read. |
+| `GET /v1/bookmarks/{id}/content` | Fetch extracted content (`?format=markdown\|html\|text`), serving stored zstd bytes directly when accepted. Has an `ETag` (`If-None-Match` → 304); `offset`/`maxChars` slice it. |
+| `GET /v1/search` | Full-text search via Meilisearch hydrated from SQLite; queries of conditions only, or every query without Meilisearch, are answered from SQLite (`engine`). `maxSnippets` (≤ 5) excerpts from the text, note, highlights, description or title. |
+| `GET /v1/sync?since=<cursor>` | Incremental delta sync of all changes and deletion tombstones since `<cursor>`. `generation` changes when a backup is restored (sync again from 0). |
 | `GET /v1/tags`, `POST /v1/tags/rename`, `DELETE /v1/tags/{name}` | List tags, rename/merge tags (`{from, to}`), or remove a tag across all bookmarks. |
-| `/v1/collections` | Manage collections (deleting a collection moves its bookmarks to Unsorted). |
-| `/v1/bookmarks/{id}/highlights`, `/v1/highlights/{id}` | Create, list, update, and delete highlights. |
+| `/v1/collections` | Manage collections (deleting a collection moves its bookmarks to Unsorted); each comes with its `bookmarkCount`. |
+| `/v1/bookmarks/{id}/highlights`, `/v1/highlights`, `/v1/highlights/{id}` | Create (idempotent on a client `id`), list (per bookmark, or across the library with filters), update, and delete highlights. |
+| `GET /v1/stats`, `GET /v1/capabilities` | Library counts; what the server (search, browser, PDF) and the calling token can do. |
 | `POST /v1/import/raindrop` | Import a Raindrop.io CSV body and return an import report. |
 | `GET /img/<signature>?u=<url>` | Signed image proxy for covers and article images (no bearer token required; only server-issued URLs are signed). |
 
 > **Notes on API fields:**
 > - `archived` represents **Trash** (the field keeps its original name). Deleting a bookmark already in the Trash removes it permanently.
+> - Tokens have scopes: `read` (GETs and URL lookups), `write` (changes), `delete` (DELETEs and batch deletes), `admin` (settings and imports); a missing one is a 403 `FORBIDDEN`. Tokens made before scopes existed have all four.
 > - `coverProxy` is a computed server-relative proxy path (or `null` without an HTTP(S) cover) for cover images hosted on domains that reject hotlinks (such as WeChat and CSDN).
 > - If a short link is dead or lands on a login wall or site homepage, lofu saves the original URL rather than overwriting it with the dead target.
 

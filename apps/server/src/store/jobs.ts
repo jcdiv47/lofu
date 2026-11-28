@@ -16,6 +16,32 @@ export interface Job {
   attempts: number;
 }
 
+/**
+ * What an extract job carries: page HTML a client sent, and whether the
+ * page's title, excerpt and cover replace the bookmark's (a refetch). Plain
+ * HTML is stored as-is (as before); anything more is JSON behind a marker
+ * no HTML starts with.
+ */
+export interface ExtractPayload {
+  html: string | null;
+  forceMetadata: boolean;
+}
+
+const PAYLOAD_MARK = "\u0000lofu-extract:";
+
+export function encodeExtractPayload(p: ExtractPayload): string | null {
+  if (!p.forceMetadata) return p.html;
+  return PAYLOAD_MARK + JSON.stringify(p);
+}
+
+export function decodeExtractPayload(payload: string | null): ExtractPayload {
+  if (payload?.startsWith(PAYLOAD_MARK)) {
+    const p = JSON.parse(payload.slice(PAYLOAD_MARK.length)) as Partial<ExtractPayload>;
+    return { html: p.html ?? null, forceMetadata: p.forceMetadata === true };
+  }
+  return { html: payload, forceMetadata: false };
+}
+
 /** Durable job queue in SQLite. One pending job per (kind, bookmark). */
 export class JobStore {
   constructor(
@@ -54,6 +80,17 @@ export class JobStore {
       )
       .run(kind, Date.now(), priority, JSON.stringify(bookmarkIds));
     this.hooks.jobEnqueued();
+  }
+
+  /** Whether a `kind` job is queued (or running) for the bookmark. */
+  has(kind: JobKind, bookmarkId: string): boolean {
+    return (
+      this.db
+        .query<{ x: number }, [string, string]>(
+          "SELECT 1 AS x FROM jobs WHERE kind = ? AND bookmark_id = ?",
+        )
+        .get(kind, bookmarkId) !== null
+    );
   }
 
   cancel(kind: JobKind, bookmarkId: string) {

@@ -154,4 +154,19 @@ export const migrations: string[] = [
   ) WITHOUT ROWID;
   CREATE INDEX figures_hash ON figures(hash);
   `,
+
+  /*
+   * 6: when a bookmark's stored content last changed (an extraction, or the
+   * Markdown converted again), for `extractedAt` and the content's ETag.
+   * Backfilled from the content; seq is left alone, so synced copies learn
+   * it with the bookmark's next change (the field is nullable for them).
+   */ `
+  ALTER TABLE bookmarks ADD COLUMN extracted_at INTEGER;
+  UPDATE bookmarks SET extracted_at =
+    (SELECT c.extracted_at FROM contents c WHERE c.bookmark_id = bookmarks.id);
+  `,
+
+  /* 7: what each API token may do (JSON array of read, write, delete, admin) */ `
+  ALTER TABLE api_tokens ADD COLUMN scopes TEXT NOT NULL DEFAULT '["read","write","delete","admin"]';
+  `,
 ];

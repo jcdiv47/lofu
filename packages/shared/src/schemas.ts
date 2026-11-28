@@ -58,6 +58,11 @@ export const Bookmark = z
     publishedAt: z.string().nullable(),
     contentStatus: ContentStatus,
     contentError: z.string().nullable(),
+    extractedAt: isoDate
+      .nullable()
+      .describe(
+        "When the stored content last changed (extracted or converted again); null without content",
+      ),
     sort: z
       .number()
       .describe(
@@ -97,19 +102,48 @@ export const CreateBookmark = z
   .meta({ id: "CreateBookmark" });
 export type CreateBookmark = z.infer<typeof CreateBookmark>;
 
+/** A URL as browsers read its scheme: blanks and control characters dropped. */
+const withoutControls = (v: string) =>
+  Array.from(v)
+    .filter((ch) => ch.charCodeAt(0) > 0x20)
+    .join("")
+    .slice(0, 32);
+
+/**
+ * Its cover: an http(s) URL, one relative to the page, or a `data:` URL;
+ * never one that runs script.
+ */
+const CoverUrl = z
+  .string()
+  .max(4096)
+  .refine((v) => !/^(javascript|vbscript):/i.test(withoutControls(v)), {
+    message: "cover URL must not run script",
+  });
+
 export const UpdateBookmark = z
   .object({
     title: z.string().max(1000),
     note: z.string().max(100_000).nullable(),
+    /** Replaces every tag. Not with `addTags`/`removeTags`. */
     tags: z.array(TagName).max(100),
+    /** Tags added to those it has (atomically, on the server). */
+    addTags: z.array(TagName).max(100),
+    /** Tags taken off (atomically, on the server); applied after `addTags`. */
+    removeTags: z.array(TagName).max(100),
     collectionId: id.nullable(),
     favorite: z.boolean(),
     /** true moves the bookmark to the Trash, false restores it. */
     archived: z.boolean().describe(inTrash),
     readProgress: z.number().min(0).max(1),
-    coverUrl: z.string().nullable(),
+    coverUrl: CoverUrl.nullable(),
     /** Its place in the manual order: between the two it was dropped between. */
     sort: z.number(),
+    /**
+     * Optimistic concurrency: the `seq` the client last saw. The update is
+     * refused (409, code `SEQ_CONFLICT`) if the bookmark changed since. An
+     * `If-Match: "<seq>"` header does the same.
+     */
+    expectedSeq: z.number().int().min(0),
   })
   .partial()
   .meta({ id: "UpdateBookmark" });
@@ -125,15 +159,42 @@ const csvParam = z.string().transform((s) =>
     .filter(Boolean),
 );
 
-export const ListBookmarksQuery = z.object({
+/** Comma-separated ids, kept as given (ids are case-sensitive). */
+const idsParam = z.string().transform((s) =>
+  s
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean),
+);
+
+const filterParams = {
   collectionId: z.string().optional(),
+  /** With `collectionId`: its subcollections' bookmarks too, at any depth. */
+  includeSubcollections: boolParam.optional(),
   tags: csvParam.optional(),
   archived: boolParam.describe("true: only bookmarks in the Trash; false: none of them").optional(),
   favorite: boolParam.optional(),
   type: BookmarkType.optional(),
   contentStatus: ContentStatus.optional(),
+  /** The bookmark's domain, as `domain` shows it (`example.com`). */
+  domain: z.string().max(253).optional(),
+  hasNote: boolParam.optional(),
+  hasHighlights: boolParam.optional(),
+  untagged: boolParam.optional(),
+  createdAfter: isoDate.optional(),
+  createdBefore: isoDate.optional(),
+};
+
+export const ListBookmarksQuery = z.object({
+  ...filterParams,
+  /** Only these bookmarks (comma-separated ids, up to 500). */
+  ids: idsParam.pipe(z.array(id).max(500)).optional(),
+  sort: z
+    .enum(["newest", "oldest", "updated", "manual"])
+    .describe("newest/oldest by save time, updated: last changed first, manual: the drag order")
+    .default("newest"),
   limit: z.coerce.number().int().min(1).max(500).default(50),
-  /** Opaque cursor from a previous page's `nextCursor`. */
+  /** Opaque cursor from a previous page's `nextCursor` (with the same `sort`). */
   cursor: z.string().optional(),
 });
 
@@ -181,19 +242,88 @@ export const ContentFormula = z
   })
   .meta({ id: "ContentFormula" });
 
+/**
+ * Highlights are anchored with a W3C Web Annotation TextQuoteSelector
+ * (exact + prefix/suffix context) rather than offsets, so they survive
+ * re-extraction and differing renderers across platforms.
+ */
+export const Highlight = z
+  .object({
+    id,
+    bookmarkId: id,
+    quote: z.string(),
+    prefix: z.string(),
+    suffix: z.string(),
+    note: z.string().nullable(),
+    color: z.string().nullable(),
+    createdAt: isoDate,
+    updatedAt: isoDate,
+    deletedAt: isoDate.nullable(),
+    seq: z.number().int(),
+  })
+  .meta({ id: "Highlight" });
+export type Highlight = z.infer<typeof Highlight>;
+
+export const Heading = z
+  .object({
+    level: z.number().int().min(1).max(6),
+    text: z.string(),
+    /** Where the heading's line starts in the whole content (for `contentOffset`). */
+    offset: z.number().int(),
+  })
+  .meta({ id: "Heading" });
+
 export const BookmarkWithContent = Bookmark.extend({
   content: z.string().nullable(),
   contentFormat: ContentFormat,
-  /** The images of Markdown content, in order (null for other formats). */
+  /**
+   * The images of Markdown content, in order (null for other formats, or
+   * when `include` is given without `media`).
+   */
   images: z.array(ContentImage).nullable(),
   /**
    * The Markdown's formulas drawn as pictures, each once, in order: those on
    * lines of their own (`$$…$$`), and those in text with scripts, fractions
    * or the like; those MathJax can't read are left out (null for other
-   * formats).
+   * formats, or when `include` is given without `media`).
    */
   formulas: z.array(ContentFormula).nullable(),
+  /** Its live highlights. */
+  highlightCount: z.number().int(),
+  /** With `include=highlights`: the highlights, oldest first. */
+  highlights: z.array(Highlight).optional(),
+  /** With `contentOffset`/`contentMaxChars`: the whole content's length (UTF-16 code units). */
+  contentTotalChars: z.number().int().optional(),
+  contentOffset: z.number().int().optional(),
+  /** Whether content goes on past this slice. */
+  contentHasMore: z.boolean().optional(),
+  /** When slicing Markdown: every heading of the whole content. */
+  headings: z.array(Heading).optional(),
 }).meta({ id: "BookmarkWithContent" });
+
+const includeParam = z
+  .string()
+  .transform((s) =>
+    s
+      .split(",")
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean),
+  )
+  .pipe(z.array(z.enum(["media", "highlights", "none"])));
+
+export const GetBookmarkQuery = z.object({
+  content: ContentFormat.default("none"),
+  /**
+   * What to add besides the bookmark (comma-separated): `media` (the
+   * Markdown's images and formulas), `highlights`, or `none`. Without it,
+   * Markdown content comes with its media.
+   */
+  include: includeParam.optional(),
+  /** Start of the content slice, in UTF-16 code units. */
+  contentOffset: z.coerce.number().int().min(0).optional(),
+  /** At most this much content (UTF-16 code units). */
+  contentMaxChars: z.coerce.number().int().min(1).optional(),
+});
 
 export const SearchQuery = z.object({
   /**
@@ -206,12 +336,7 @@ export const SearchQuery = z.object({
   q: z.string().max(1000).default(""),
   /** The searcher's time zone, in minutes east of UTC: where `created:` days start. */
   tz: z.coerce.number().int().min(-840).max(840).default(0),
-  collectionId: z.string().optional(),
-  tags: csvParam.optional(),
-  archived: boolParam.describe("true: only bookmarks in the Trash; false: none of them").optional(),
-  favorite: boolParam.optional(),
-  type: BookmarkType.optional(),
-  domain: z.string().optional(),
+  ...filterParams,
   sort: z.enum(["relevance", "newest", "oldest"]).default("relevance"),
   limit: z.coerce.number().int().min(1).max(200).default(20),
   offset: z.coerce.number().int().min(0).default(0),
@@ -220,6 +345,8 @@ export const SearchQuery = z.object({
     .enum(["true", "false", "1", "0"])
     .default("true")
     .transform((v) => v === "true" || v === "1"),
+  /** Up to this many excerpts a hit, from its text, note, highlights, description or title. */
+  maxSnippets: z.coerce.number().int().min(1).max(5).default(1),
   /** Semantic weight 0..1 for hybrid search; only used when an embedder is configured. */
   semantic: z.coerce.number().min(0).max(1).optional(),
 });
@@ -229,6 +356,8 @@ export const SearchHit = z
     bookmark: Bookmark,
     /** Excerpt of the matched content with `<mark>` around hits. */
     snippet: z.string().nullable(),
+    /** Up to `maxSnippets` excerpts (the first is `snippet`). */
+    snippets: z.array(z.string()).optional(),
   })
   .meta({ id: "SearchHit" });
 
@@ -237,6 +366,10 @@ export const SearchResult = z
     hits: z.array(SearchHit),
     estimatedTotal: z.number().int(),
     processingTimeMs: z.number().int(),
+    /** Whether hybrid (semantic) ranking was used. */
+    semanticApplied: z.boolean(),
+    /** What answered: Meilisearch, or the database itself (no Meilisearch, or conditions only). */
+    engine: z.enum(["meilisearch", "sqlite"]),
   })
   .meta({ id: "SearchResult" });
 
@@ -254,6 +387,12 @@ export const Collection = z
   })
   .meta({ id: "Collection" });
 export type Collection = z.infer<typeof Collection>;
+
+export const CollectionWithCount = Collection.extend({
+  /** Its live bookmarks outside the Trash (not counting subcollections'). */
+  bookmarkCount: z.number().int(),
+}).meta({ id: "CollectionWithCount" });
+export type CollectionWithCount = z.infer<typeof CollectionWithCount>;
 
 export const CreateCollection = z
   .object({
@@ -295,28 +434,6 @@ export const TagChange = z
   })
   .meta({ id: "TagChange" });
 
-/**
- * Highlights are anchored with a W3C Web Annotation TextQuoteSelector
- * (exact + prefix/suffix context) rather than offsets, so they survive
- * re-extraction and differing renderers across platforms.
- */
-export const Highlight = z
-  .object({
-    id,
-    bookmarkId: id,
-    quote: z.string(),
-    prefix: z.string(),
-    suffix: z.string(),
-    note: z.string().nullable(),
-    color: z.string().nullable(),
-    createdAt: isoDate,
-    updatedAt: isoDate,
-    deletedAt: isoDate.nullable(),
-    seq: z.number().int(),
-  })
-  .meta({ id: "Highlight" });
-export type Highlight = z.infer<typeof Highlight>;
-
 export const CreateHighlight = z
   .object({
     id: id.optional(),
@@ -350,6 +467,13 @@ export const SyncResponse = z
     bookmarks: z.array(Bookmark),
     collections: z.array(Collection),
     highlights: z.array(Highlight),
+    /**
+     * The database's identity. It changes when the database is replaced (a
+     * backup restored): a client that saw another one must sync from 0.
+     */
+    generation: z.string(),
+    /** The newest seq on the server. */
+    serverSeq: z.number().int(),
   })
   .meta({ id: "SyncResponse" });
 
@@ -380,7 +504,16 @@ export const UpdateSettings = z
 export type UpdateSettings = z.infer<typeof UpdateSettings>;
 
 export const ApiError = z
-  .object({ error: z.string(), details: z.unknown().optional() })
+  .object({
+    error: z.string(),
+    /**
+     * Stable machine-readable code: INVALID_REQUEST, UNAUTHORIZED, FORBIDDEN,
+     * NOT_FOUND, CONFLICT, SEQ_CONFLICT, PAYLOAD_TOO_LARGE,
+     * UNSUPPORTED_MEDIA_TYPE, SEARCH_UNAVAILABLE, INTERNAL_ERROR.
+     */
+    code: z.string().optional(),
+    details: z.unknown().optional(),
+  })
   .meta({ id: "ApiError" });
 
 export const ImportReport = z
@@ -400,3 +533,126 @@ export const ImportReport = z
   })
   .meta({ id: "ImportReport" });
 export type ImportReport = z.infer<typeof ImportReport>;
+
+/** Waiting for a page to be read before answering (`POST /v1/bookmarks`, refetch). */
+export const WaitQuery = z.object({
+  /** Wait up to 10 s for extraction to finish. */
+  wait: boolParam.optional(),
+  /** Wait up to this many milliseconds (0..15000) for extraction to finish. */
+  waitMs: z.coerce.number().int().min(0).max(15_000).optional(),
+});
+
+export const RefetchBookmark = z
+  .object({
+    /** The page as the client's browser rendered it; the server doesn't fetch it then. */
+    html: z
+      .string()
+      .max(20 * 1024 * 1024)
+      .optional(),
+  })
+  .meta({ id: "RefetchBookmark" });
+
+export const BatchBookmarks = z
+  .object({
+    ids: z.array(id).min(1).max(200),
+    /** Applied to each (not `expectedSeq`). */
+    patch: UpdateBookmark.optional(),
+    /** true deletes them all (for good: not the Trash). */
+    delete: z.boolean().optional(),
+  })
+  .meta({ id: "BatchBookmarks" });
+
+export const BatchResult = z
+  .object({
+    updated: z.number().int(),
+    deleted: z.number().int(),
+    /** Ids with no live bookmark. */
+    missingIds: z.array(z.string()),
+  })
+  .meta({ id: "BatchResult" });
+
+export const LookupBookmarks = z
+  .object({ urls: z.array(z.string().min(1).max(8192)).min(1).max(200) })
+  .meta({ id: "LookupBookmarks" });
+
+export const LookupResult = z
+  .object({
+    /** Each URL as given: its bookmark, or null (none, or not an http(s) URL). */
+    items: z.record(z.string(), Bookmark.nullable()),
+  })
+  .meta({ id: "LookupResult" });
+
+export const HighlightWithBookmark = Highlight.extend({
+  bookmarkTitle: z.string(),
+  bookmarkUrl: z.string(),
+  bookmarkDomain: z.string(),
+}).meta({ id: "HighlightWithBookmark" });
+
+export const ListHighlightsQuery = z.object({
+  bookmarkId: z.string().optional(),
+  color: z.string().max(32).optional(),
+  hasNote: boolParam.optional(),
+  /** Of bookmarks with this tag. */
+  tag: TagName.optional(),
+  /** Of bookmarks in this collection (`unsorted`: in none). */
+  collectionId: z.string().optional(),
+  /** Of bookmarks in the Trash (true) or not (false). */
+  archived: boolParam.optional(),
+  /** Text in the quote or the note (case-insensitive). */
+  q: z.string().max(1000).optional(),
+  createdAfter: isoDate.optional(),
+  createdBefore: isoDate.optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  cursor: z.string().optional(),
+});
+
+export const HighlightPage = z
+  .object({ items: z.array(HighlightWithBookmark), nextCursor: z.string().nullable() })
+  .meta({ id: "HighlightPage" });
+
+export const ListTagsQuery = z.object({
+  /** Count bookmarks in the Trash too. */
+  includeTrashed: boolParam.optional(),
+});
+
+export const Stats = z
+  .object({
+    bookmarks: z.object({
+      /** Live bookmarks, the Trash included. */
+      total: z.number().int(),
+      /** Not in the Trash. */
+      active: z.number().int(),
+      unsorted: z.number().int(),
+      favorites: z.number().int(),
+      trashed: z.number().int(),
+      withHighlights: z.number().int(),
+      /** Of the active ones. */
+      byType: z.record(z.string(), z.number().int()),
+      byContentStatus: z.record(z.string(), z.number().int()),
+    }),
+    /** Live highlights of active bookmarks. */
+    highlights: z.number().int(),
+    collections: z.number().int(),
+    /** Tags on active bookmarks. */
+    tags: z.number().int(),
+  })
+  .meta({ id: "Stats" });
+
+export const TokenScope = z.enum(["read", "write", "delete", "admin"]);
+export type TokenScope = z.infer<typeof TokenScope>;
+
+export const Capabilities = z
+  .object({
+    version: z.string(),
+    commit: z.string(),
+    /** What answers `/v1/search`. */
+    search: z.enum(["meilisearch", "sqlite"]),
+    semanticSearch: z.boolean(),
+    /** A headless browser renders pages plain fetching can't read. */
+    browserExtraction: z.boolean(),
+    /** PDFs' text is extracted (poppler). */
+    pdfExtraction: z.boolean(),
+    /** What the calling token may do. */
+    scopes: z.array(TokenScope),
+  })
+  .meta({ id: "Capabilities" });

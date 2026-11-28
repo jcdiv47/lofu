@@ -24,6 +24,8 @@ export interface BookmarkRow {
   published_at: string | null;
   content_status: string;
   content_error: string | null;
+  /** When the stored content last changed (migration 6). */
+  extracted_at: number | null;
   sort: number;
   created_at: number;
   updated_at: number;
@@ -84,6 +86,7 @@ export function toBookmark(r: BookmarkRow, images: ImageProxy): Bookmark {
     publishedAt: r.published_at,
     contentStatus: r.content_status as ContentStatus,
     contentError: r.content_error,
+    extractedAt: isoOrNull(r.extracted_at ?? null),
     sort: r.sort,
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),

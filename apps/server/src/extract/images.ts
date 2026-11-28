@@ -134,8 +134,9 @@ export async function measureImages(markdown: string): Promise<ImageSizes> {
 const b64url = (b: Uint8Array) => Buffer.from(b).toString("base64url");
 
 /** An error is not kept by caches: an upstream hiccup must not stick to a cover. */
+/** As the API's errors are (and /math's, /figures'): JSON `{ error }`. */
 const failure = (message: string, status: number) =>
-  new Response(message, { status, headers: { "cache-control": "no-store" } });
+  Response.json({ error: message }, { status, headers: { "cache-control": "no-store" } });
 
 /**
  * The width article images are served at: twice the reader's measure (680
@@ -341,7 +342,9 @@ export class ImageProxy {
       return failure("bad signature", 403);
     }
     const width = w === undefined ? 0 : Number(w);
-    if (width && !IMAGE_WIDTHS.includes(width)) return failure("unsupported width", 400);
+    if (w !== undefined && (!Number.isInteger(width) || !IMAGE_WIDTHS.includes(width))) {
+      return failure("unsupported width", 400);
+    }
     // The variant is in the key: what an older one kept isn't served for a newer.
     const id = width ? `${width}\n${IMAGE_VARIANT}\n${url}` : `0\n${url}`;
     const key = new Bun.CryptoHasher("sha256").update(id).digest("hex");
