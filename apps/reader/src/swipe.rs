@@ -8,8 +8,9 @@
 //! AppKit local monitor sees the scroll events before nsh does. When a
 //! gesture starts, the monitor holds its first events back until it can
 //! tell the gesture's way: sideways to the right hands it to AppKit's own
-//! swipe tracking (`trackSwipeEventWithOptions:…`, Safari's, with its
-//! spring and its cancelling), and nsh never sees it; anything else is
+//! swipe tracking (`trackSwipeEventWithOptions:…`, Safari's, which tells
+//! how far the fingers went and, as they let go, which way it ends), and
+//! nsh never sees it; anything else is
 //! handed on to nsh as it came, so lists scroll as before.
 //!
 //! The pages are nsh's own views: the stack is the view named `pages`
@@ -27,6 +28,23 @@
 //! own swipe (`allowsBackForwardNavigationGestures`, `screens/Browser.tsx`),
 //! which is left to it; once it can't, the swipe closes the page. The app
 //! says when there's somewhere to go back to (`enable`).
+//!
+//! Switching away mid-swipe (⌘-Tab with the fingers still down) sends the
+//! rest of the gesture to another app, and AppKit's tracking never hears it
+//! end: the page would stay where the fingers left it, the one under it
+//! showing and the stack not popped (the toolbar's Back left over the
+//! library). So when the app stops being active, a swipe still going is
+//! settled at once (`abandon`): back if it had already gone back, put back
+//! otherwise, and whatever AppKit's tracking says of it afterwards is
+//! ignored and the tracking stopped.
+//!
+//! Once the fingers let go, AppKit's own spring would run as long as the
+//! trackpad's momentum does, most of a second, and only then say the swipe
+//! is complete (the stack popped, and the toolbar's Back gone, that late).
+//! So the tracking stops as the fingers let go, the rest of the momentum is
+//! dropped, and the pages glide to the end AppKit chose with Core Animation
+//! (`glide`: `GLIDE` seconds for the whole width, less for what's left),
+//! the swipe settling as they get there.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -82,6 +100,7 @@ pub async fn next() -> bool {
 #[cfg(target_os = "macos")]
 mod mac {
     use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
     use std::sync::Once;
     use std::sync::atomic::Ordering;
 
@@ -96,6 +115,10 @@ mod mac {
     /// How far left the page under the top one starts, of the stack's width
     /// (nsh's `PARALLAX`).
     const PARALLAX: f64 = 0.3;
+    /// Seconds the pages take to glide the stack's whole width once the
+    /// fingers let go (less for what's left of it), and the least.
+    const GLIDE: f64 = 0.25;
+    const GLIDE_MIN: f64 = 0.08;
 
     /// `NSEventMaskScrollWheel` (`1 << NSEventTypeScrollWheel`).
     const SCROLL_MASK: u64 = 1 << 22;
@@ -156,6 +179,9 @@ mod mac {
         Held(Vec<Retained<AnyObject>>),
         /// AppKit is tracking it as a swipe; nsh never hears of it.
         Swiping,
+        /// A swipe settled before its momentum ran out (`track`): the rest
+        /// of that momentum is dropped, not scrolled.
+        Draining,
     }
 
     /// The pages a swipe moves: the stack, its top page and the one under it.
@@ -165,8 +191,20 @@ mod mac {
         below: Retained<AnyObject>,
     }
 
+    /// A swipe AppKit is tracking.
+    struct Swipe {
+        pages: Rc<Pages>,
+        /// Whether its fingers let go going back (it springs off to the right).
+        went_back: Cell<bool>,
+        /// Let go (gliding to its end) or settled by `abandon`: the tracking's
+        /// calls after are ignored, and the next one stops it.
+        done: Cell<bool>,
+    }
+
     thread_local! {
         static GESTURE: RefCell<Gesture> = const { RefCell::new(Gesture::Idle) };
+        /// The swipe being tracked, until it's settled.
+        static SWIPE: RefCell<Option<Rc<Swipe>>> = const { RefCell::new(None) };
         /// Set while held events are handed back to the window, which may
         /// pass them through the monitor again.
         static REPLAYING: Cell<bool> = const { Cell::new(false) };
@@ -194,8 +232,64 @@ mod mac {
                     ]
                 };
                 std::mem::forget(monitor);
+                // ⌘-Tab mid-swipe: the rest of the gesture goes elsewhere.
+                let resigned = RcBlock::new(|_note: *mut AnyObject| {
+                    // SAFETY: posted on the main queue, as asked.
+                    unsafe { abandon() };
+                });
+                // SAFETY: AppKit's own methods; the observer lives as long as
+                // the app, so its token is kept forever.
+                let observer: Option<Retained<AnyObject>> = unsafe {
+                    let center: Retained<AnyObject> =
+                        msg_send![class!(NSNotificationCenter), defaultCenter];
+                    let main: Retained<AnyObject> = msg_send![class!(NSOperationQueue), mainQueue];
+                    msg_send![
+                        &*center,
+                        addObserverForName: &*NSString::from_str("NSApplicationDidResignActiveNotification"),
+                        object: std::ptr::null::<AnyObject>(),
+                        queue: &*main,
+                        usingBlock: &*resigned
+                    ]
+                };
+                std::mem::forget(observer);
             });
         });
+    }
+
+    /// The app stopped being active: a gesture going on won't be heard to
+    /// end. Events held back are dropped (nsh never saw the gesture start),
+    /// and a swipe is settled where it is: back if it went back, else put
+    /// back.
+    ///
+    /// # Safety
+    /// On the main thread.
+    unsafe fn abandon() {
+        GESTURE.with_borrow_mut(|g| *g = Gesture::Idle);
+        unsafe { settle_swipe() };
+    }
+
+    /// Settles the swipe being tracked, if there is one, where it is: back
+    /// if it went back, else put back. Whether there was one.
+    ///
+    /// # Safety
+    /// On the main thread.
+    unsafe fn settle_swipe() -> bool {
+        let Some(swipe) = SWIPE.with_borrow(Option::clone) else {
+            return false;
+        };
+        // Gliding to its end already: it settles as the glide ends.
+        if !swipe.done.replace(true) {
+            SWIPE.set(None);
+            unsafe {
+                if swipe.went_back.get() {
+                    place(&swipe.pages, 1.0);
+                    finish(swipe.pages.clone());
+                } else {
+                    put_back(&swipe.pages);
+                }
+            }
+        }
+        true
     }
 
     /// Whether the monitor keeps `event` from nsh: it's held back, or part
@@ -214,6 +308,18 @@ mod mac {
         // may call back into the monitor.
         let mut then = Then::Nothing;
         let take = GESTURE.with_borrow_mut(|gesture| match gesture {
+            Gesture::Draining if momentum != 0 => true,
+            Gesture::Draining => {
+                // Something new: as with nothing going on.
+                *gesture = Gesture::Idle;
+                let starts = precise && phase & (BEGAN | MAY_BEGIN) != 0;
+                if starts && unsafe { may_swipe(event) } {
+                    *gesture = Gesture::Held(vec![event.retain()]);
+                    true
+                } else {
+                    false
+                }
+            }
             Gesture::Swiping => {
                 // AppKit's tracking takes the rest of the gesture; a new one
                 // while the page settles is nsh's.
@@ -292,13 +398,19 @@ mod mac {
     }
 
     /// Whether a gesture starting with `event` may be a swipe back: the app
-    /// has a page to go back to, the system's setting allows it, and it
+    /// has a page to go back to, no swipe is settling, the system's setting
+    /// allows it, and it
     /// isn't over a web view that can go back, which swipes itself.
     ///
     /// # Safety
     /// `event` is an NSEvent, on the main thread.
     unsafe fn may_swipe(event: &AnyObject) -> bool {
         if !super::ENABLED.load(Ordering::Relaxed) {
+            return false;
+        }
+        // The last one still springing to where it ended (or never heard to
+        // end): it's settled now, and this gesture is nsh's.
+        if unsafe { settle_swipe() } {
             return false;
         }
         let enabled: bool =
@@ -483,34 +595,61 @@ mod mac {
     /// # Safety
     /// `event` is the gesture's scroll NSEvent, on the main thread.
     unsafe fn track(event: &AnyObject, pages: Pages) {
-        let pages = std::rc::Rc::new(pages);
-        let went_back = std::rc::Rc::new(Cell::new(false));
+        let swipe = Rc::new(Swipe {
+            pages: Rc::new(pages),
+            went_back: Cell::new(false),
+            done: Cell::new(false),
+        });
+        SWIPE.set(Some(swipe.clone()));
         let handler = RcBlock::new(
-            move |amount: f64, phase: usize, complete: Bool, _stop: *mut Bool| {
-                let amount = amount.abs().clamp(0.0, 1.0);
-                // SAFETY: AppKit calls the handler on the main thread.
+            move |amount: f64, phase: usize, complete: Bool, stop: *mut Bool| {
+                // SAFETY: AppKit calls the handler on the main thread, with
+                // `stop` pointing at its flag.
                 unsafe {
-                    if phase & BEGAN != 0 {
-                        lift(&pages);
+                    if swipe.done.get() {
+                        // Settled already (`abandon`): the pages aren't this
+                        // tracking's any more.
+                        if let Some(stop) = stop.as_mut() {
+                            *stop = Bool::YES;
+                        }
+                        return;
                     }
-                    if phase & ENDED != 0 {
-                        went_back.set(true);
-                    } else if phase & CANCELLED != 0 {
-                        went_back.set(false);
-                    }
-                    place(&pages, amount);
-                    if complete.as_bool() {
+                    let amount = amount.abs().clamp(0.0, 1.0);
+                    let lets_go = phase & (ENDED | CANCELLED) != 0;
+                    if lets_go || complete.as_bool() {
+                        // The fingers let go: AppKit has decided which way
+                        // (the distance and the flick), but its spring runs
+                        // as long as the trackpad's momentum does. The pages
+                        // glide the rest of the way on their own instead
+                        // (`glide`), and the tracking stops.
+                        if phase & ENDED != 0 {
+                            swipe.went_back.set(true);
+                        } else if phase & CANCELLED != 0 {
+                            swipe.went_back.set(false);
+                        }
+                        swipe.done.set(true);
+                        let rest = if complete.as_bool() {
+                            Gesture::Idle
+                        } else {
+                            Gesture::Draining
+                        };
                         GESTURE.with_borrow_mut(|g| {
                             if matches!(g, Gesture::Swiping) {
-                                *g = Gesture::Idle;
+                                *g = rest;
                             }
                         });
-                        if went_back.get() {
-                            finish(pages.clone());
-                        } else {
-                            put_back(&pages);
+                        if !complete.as_bool()
+                            && let Some(stop) = stop.as_mut()
+                        {
+                            *stop = Bool::YES;
                         }
+                        glide(swipe.clone(), amount);
+                        return;
                     }
+                    if phase & BEGAN != 0 {
+                        lift(&swipe.pages);
+                    }
+                    place(&swipe.pages, amount);
                 }
             },
         );
@@ -525,6 +664,88 @@ mod mac {
         }
     }
 
+    /// Glides the pages from `from` of the way back to the end the swipe
+    /// went to, quickly and slowing down, then settles it: the app pops the
+    /// page, or it's put back.
+    ///
+    /// # Safety
+    /// On the main thread.
+    unsafe fn glide(swipe: Rc<Swipe>, from: f64) {
+        let back = swipe.went_back.get();
+        let to = if back { 1.0 } else { 0.0 };
+        let settled = {
+            let swipe = swipe.clone();
+            move || {
+                SWIPE.with_borrow_mut(|s| {
+                    if s.as_ref().is_some_and(|s| Rc::ptr_eq(s, &swipe)) {
+                        *s = None;
+                    }
+                });
+                // SAFETY: on the main thread (Core Animation's completion too).
+                unsafe {
+                    if back {
+                        finish(swipe.pages.clone());
+                    } else {
+                        put_back(&swipe.pages);
+                    }
+                }
+            }
+        };
+        let left = (to - from).abs();
+        let pages = &swipe.pages;
+        if left < 0.005 {
+            unsafe { place(pages, to) };
+            settled();
+            return;
+        }
+        let duration = (GLIDE * left).max(GLIDE_MIN);
+        let frame: NSRect = unsafe { msg_send![&*pages.stack, bounds] };
+        let w = frame.size.width;
+        let done = RcBlock::new(settled);
+        unsafe {
+            let _: () = msg_send![class!(CATransaction), begin];
+            let _: () = msg_send![class!(CATransaction), setCompletionBlock: &*done];
+            // Where they end up; the animations show the way there.
+            place(pages, to);
+            if let Some(l) = layer(&pages.top) {
+                slide(&l, w * from, w * to, duration);
+            }
+            if let Some(l) = layer(&pages.below) {
+                slide(
+                    &l,
+                    -PARALLAX * w * (1.0 - from),
+                    -PARALLAX * w * (1.0 - to),
+                    duration,
+                );
+            }
+            let _: () = msg_send![class!(CATransaction), commit];
+        }
+    }
+
+    /// Animates `layer` sideways from `from` to `to` points over `duration`.
+    ///
+    /// # Safety
+    /// `layer` is a CALayer, on the main thread.
+    unsafe fn slide(layer: &AnyObject, from: f64, to: f64, duration: f64) {
+        unsafe {
+            let path = NSString::from_str("transform.translation.x");
+            let anim: Retained<AnyObject> =
+                msg_send![class!(CABasicAnimation), animationWithKeyPath: &*path];
+            let from: Retained<AnyObject> = msg_send![class!(NSNumber), numberWithDouble: from];
+            let to: Retained<AnyObject> = msg_send![class!(NSNumber), numberWithDouble: to];
+            let _: () = msg_send![&*anim, setFromValue: &*from];
+            let _: () = msg_send![&*anim, setToValue: &*to];
+            let _: () = msg_send![&*anim, setDuration: duration];
+            // Fast at first, as the fingers left it, easing into place.
+            let ease = NSString::from_str("easeOut");
+            let timing: Retained<AnyObject> =
+                msg_send![class!(CAMediaTimingFunction), functionWithName: &*ease];
+            let _: () = msg_send![&*anim, setTimingFunction: &*timing];
+            let key = NSString::from_str("swipe");
+            let _: () = msg_send![layer, addAnimation: &*anim, forKey: &*key];
+        }
+    }
+
     /// The swipe went back: the top page is off to the right, and the app
     /// pops it. A moment later, whatever the app did, the pages lose the
     /// swipe's transforms: nsh has hidden or removed the top one by then,
@@ -532,7 +753,7 @@ mod mac {
     ///
     /// # Safety
     /// On the main thread.
-    unsafe fn finish(pages: std::rc::Rc<Pages>) {
+    unsafe fn finish(pages: Rc<Pages>) {
         unsafe { settle(&pages.below) };
         super::emit();
         let pages = SendPages(pages);
@@ -557,7 +778,7 @@ mod mac {
     }
 
     /// The pages, carried to a later turn of the main queue.
-    struct SendPages(std::rc::Rc<Pages>);
+    struct SendPages(Rc<Pages>);
     // SAFETY: made and used on the main thread only; the main queue runs
     // the closure there.
     unsafe impl Send for SendPages {}
