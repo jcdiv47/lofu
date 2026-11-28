@@ -33,6 +33,11 @@
       "MinimumOSVersion": "17.0"
     }
   },
+  "store": {
+    "ios": {
+      "usesNonExemptEncryption": false
+    }
+  },
   "window": {
     "titleBar": {
       "style": "hidden",
