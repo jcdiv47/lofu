@@ -19,6 +19,7 @@ import {
   writeText,
 } from "./files";
 import { inks } from "./look";
+import { opensAsPage } from "./sites";
 
 /**
  * Articles kept on the device for reading offline (files: `lib/files.ts`).
@@ -78,7 +79,10 @@ export function setKeepMode(mode: KeepMode) {
 /** The bookmarks `mode` keeps on the device, in the order given (newest first). */
 export function toKeep(all: Bookmark[], mode: KeepMode): Bookmark[] {
   if (mode === "opened") return [];
-  const readable = all.filter((b) => !b.archived && !b.deletedAt && b.contentStatus === "ok");
+  // Sites opened as pages have no reader: nothing of theirs is read offline.
+  const readable = all.filter(
+    (b) => !b.archived && !b.deletedAt && b.contentStatus === "ok" && !opensAsPage(b),
+  );
   if (mode === "all") return readable;
   const unread = readable.filter((b) => b.readProgress < 0.98);
   return mode === "unread" ? unread : unread.slice(0, AHEAD);

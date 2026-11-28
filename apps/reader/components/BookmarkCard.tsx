@@ -6,6 +6,7 @@ import { onDisk } from "../lib/files";
 import { markRuns, shortDate } from "../lib/format";
 import { fonts, look } from "../lib/look";
 import { displayTitle, type ShowField, timeFormat } from "../lib/prefs";
+import { opensAsPage } from "../lib/sites";
 import { collectionName, highlightCount, offline } from "../lib/store";
 import { BookmarkContextMenu } from "./BookmarkMenu";
 import type { DragProps } from "./ManualDrag";
@@ -105,7 +106,8 @@ function Marks(props: {
   maxScale?: number;
 }) {
   const hl = () => highlightCount(props.b.id);
-  const status = () => props.b.contentStatus;
+  // A site opened as a page is never read: it's neither fetching nor unreadable.
+  const status = () => (opensAsPage(props.b) ? "skipped" : props.b.contentStatus);
   // Offline, what can't be read without the server (the web keeps nothing, so says nothing).
   const onlineOnly = () =>
     onDisk && offline() && status() === "ok" && !props.b.archived && !isKept(props.b.id);

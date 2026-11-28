@@ -35,6 +35,12 @@ export interface Bookmark {
   seq: number;
 }
 
+/** Settings kept on the server for every device. */
+export interface SharedSettings {
+  /** Sites whose bookmarks open as the page itself; the server doesn't read them. */
+  skipDomains: string[];
+}
+
 export interface Collection {
   id: string;
   name: string;
@@ -273,6 +279,10 @@ export const api = {
   /** Takes a tag off every bookmark. */
   removeTag: (name: string) => request<{ updated: number }>("DELETE", `/v1/tags/${q(name)}`),
   refetch: (id: string) => request<Bookmark>("POST", `/v1/bookmarks/${id}/refetch`),
+  /** Settings every device shares (`Settings` in packages/shared/src/schemas.ts). */
+  settings: () => request<SharedSettings>("GET", "/v1/settings"),
+  updateSettings: (patch: Partial<SharedSettings>) =>
+    request<SharedSettings>("PATCH", "/v1/settings", patch),
   /** The saved text as Markdown, and its images (sizes, and where to load them from). */
   article: async (id: string): Promise<Article> => {
     const r = await request<{

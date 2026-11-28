@@ -775,6 +775,65 @@ test("desktop: a tap opens bookmarks where Settings says", async () => {
   expect(app.shows("id:article")).toBe(false);
 });
 
+test("desktop: a site set to open as a web page has no reader", async () => {
+  const app = await open("./App.tsx", {
+    ...desktop,
+    network: { ...readable, [`GET ${S}/v1/settings`]: { body: { skipDomains: ["example.com"] } } },
+  });
+  await app.waitFor("text:Article a");
+  await app.waitUntil(() => app.storage()["sites.v1"] === '["example.com"]');
+  // Never fetched: it isn't unreadable.
+  expect(app.texts()).not.toContain("Unreadable");
+  await app.rightClick("id:card-a");
+  const labels = (app.menu() ?? []).map((m) => m.label);
+  expect(labels).toContain("Open Original");
+  expect(labels).not.toContain("Open in Reader");
+  await app.chooseMenuItem("Copy Link");
+  // A tap opens the page, though Settings says the reader.
+  await app.press("text:Article a");
+  await app.waitFor("id:web");
+  expect(app.shows("id:article")).toBe(false);
+});
+
+test("desktop: Settings adds and removes the sites opened as web pages", async () => {
+  const sent: unknown[] = [];
+  let sites: string[] = [];
+  const app = await open("./App.tsx", {
+    ...desktop,
+    network: {
+      ...readable,
+      [`GET ${S}/v1/settings`]: () => ({ body: { skipDomains: sites } }),
+      [`PATCH ${S}/v1/settings`]: (r) => {
+        const body = JSON.parse(r.body ?? "{}");
+        sent.push(body);
+        sites = [...body.skipDomains].sort();
+        return { body: { skipDomains: sites } };
+      },
+    },
+  });
+  await app.waitFor("text:Article a");
+  await app.press("id:settings");
+  await app.waitFor("id:sites-new");
+  await app.type("id:sites-new", "not a site");
+  await app.press("id:sites-add");
+  await app.waitFor("id:sites-error");
+  expect(sent).toEqual([]);
+
+  await app.clear("id:sites-new");
+  await app.type("id:sites-new", "https://www.Example.com/a");
+  await app.press("id:sites-add");
+  await app.waitFor("id:sites-remove-example.com");
+  expect(sent).toEqual([{ skipDomains: ["example.com"] }]);
+  await app.type("id:sites-new", "x.com");
+  await app.press("id:sites-add");
+  await app.waitFor("id:sites-remove-x.com");
+  await app.press("id:sites-remove-example.com");
+  await app.waitUntil(() => sent.length === 3);
+  expect(sent[2]).toEqual({ skipDomains: ["x.com"] });
+  await app.waitUntil(() => !app.shows("id:sites-remove-example.com"));
+  expect(app.storage()["sites.v1"]).toBe('["x.com"]');
+});
+
 test("times are shown on the clock Settings chooses", async () => {
   const at = new Date(2026, 10, 27, 15, 43);
   expect(timeOfDay(at, "12h")).toBe("3:43 PM");

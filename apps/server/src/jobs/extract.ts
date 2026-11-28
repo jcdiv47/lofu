@@ -1,4 +1,4 @@
-import type { BookmarkType } from "@lofu/shared";
+import { type BookmarkType, onSite } from "@lofu/shared";
 import type { Browser } from "../extract/browser.ts";
 import { FetchError, type Fetcher, type FetchResult, HONEST_USER_AGENT } from "../extract/fetch.ts";
 import type { PdfExtractor } from "../extract/pdf.ts";
@@ -120,6 +120,8 @@ export function extractHandler(deps: {
   browser: Browser | null;
   /** For GitHub's API (READMEs); null means the 60-an-hour anonymous limit. */
   githubToken?: string | null;
+  /** Sites set not to be read (Settings): their bookmarks are `skipped`, unfetched. */
+  skipDomains?: () => readonly string[];
 }): JobHandler {
   const { bookmarks, fetcher, pool, pdf, browser } = deps;
   const siteCtx = { fetcher, githubToken: deps.githubToken ?? null };
@@ -226,6 +228,14 @@ export function extractHandler(deps: {
     async run(job: Job) {
       const row = bookmarks.row(job.bookmark_id);
       if (!row || row.deleted_at !== null) return;
+
+      if (onSite(row.domain, deps.skipDomains?.() ?? [])) {
+        // Opened as the page itself: nothing is fetched, not even the HTML a client sent.
+        bookmarks.setContentStatus(row.id, "skipped", {
+          type: VIDEO_HOSTS.has(row.domain) ? "video" : undefined,
+        });
+        return;
+      }
 
       if (job.payload !== null) {
         // HTML from the user's own browser: never second-guess it with ours.

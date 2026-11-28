@@ -93,3 +93,31 @@ export function domainOf(input: string): string {
   const host = new URL(input).hostname.toLowerCase();
   return host.startsWith("www.") ? host.slice(4) : host;
 }
+
+/**
+ * The site a user typed, as `domainOf` writes a bookmark's domain: a bare
+ * host, lowercase, without `www.`. Accepts a whole address
+ * (`https://www.example.com/a`) as well as `example.com` or `*.example.com`.
+ * Null when it isn't a host name.
+ */
+export function siteDomain(input: string): string | null {
+  let s = input.trim().toLowerCase().replace(/^\*\./, "");
+  if (!s) return null;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//.test(s)) s = `http://${s}`;
+  let host: string;
+  try {
+    host = new URL(s).hostname;
+  } catch {
+    return null;
+  }
+  host = host.replace(/\.$/, "");
+  if (host.startsWith("www.")) host = host.slice(4);
+  // A name of labels (IDNs arrive as punycode), or an IP address.
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)*$/.test(host) || /^\[[0-9a-f:.]+\]$/.test(host) ? host : null;
+}
+
+/** Whether `domain` (a bookmark's) is one of `sites` or under one of them (`m.x.com` is under `x.com`). */
+export function onSite(domain: string, sites: readonly string[]): boolean {
+  const d = domain.toLowerCase();
+  return sites.some((s) => d === s || d.endsWith(`.${s}`));
+}

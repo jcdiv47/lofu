@@ -6,6 +6,7 @@ import { promptText } from "../components/Prompt";
 import { api, type Bookmark } from "./api";
 import { glideNext } from "./motion";
 import { type OpenIn, prefs, sortedCollections } from "./prefs";
+import { opensAsPage } from "./sites";
 import {
   collectionName,
   collections,
@@ -83,8 +84,8 @@ export function openOriginal(b: Bookmark) {
   else openInBrowser(b.url);
 }
 
-/** The saved text, in the reader. */
-export const openInReader = (b: Bookmark) => read?.(b);
+/** The saved text, in the reader; a site opened as a page (Settings) opens as its page. */
+export const openInReader = (b: Bookmark) => (opensAsPage(b) ? openOriginal(b) : read?.(b));
 
 /**
  * The ways a bookmark opens, in the order menus list them. Without a
@@ -104,8 +105,16 @@ export const openWays = (): { id: OpenIn; label: string; short: string; symbol: 
     : []),
 ];
 
-/** Opens a bookmark the way given, or the way a tap does (Settings › Open bookmarks in). */
+/** The ways this bookmark opens: no reader for a site opened as a page (Settings). */
+export const openWaysFor = (b: Bookmark) =>
+  opensAsPage(b) ? openWays().filter((w) => w.id !== "reader") : openWays();
+
+/**
+ * Opens a bookmark the way given, or the way a tap does (Settings › Open
+ * bookmarks in). A site opened as a page opens in the app instead of the reader.
+ */
 export function openBookmark(b: Bookmark, how: OpenIn = prefs().openIn) {
+  if (how === "reader" && opensAsPage(b)) how = "app";
   if (how === "browser" || (how === "app" && !hasBrowser)) openInBrowser(b.url);
   else if (how === "app") openOriginal(b);
   else openInReader(b);
@@ -324,7 +333,7 @@ const isRead = (b: Bookmark) => b.readProgress >= 1;
 export function bookmarkActions(b: Bookmark, o: BookmarkMenuOptions = {}): BookmarkAction[] {
   const trashed = inTrash(b);
   const actions: (BookmarkAction | false | undefined)[] = [
-    ...openWays()
+    ...openWaysFor(b)
       .filter((w) => !(o.inReader && w.id === "reader"))
       .map(
         (w): BookmarkAction => ({
@@ -389,16 +398,17 @@ export function bookmarkActions(b: Bookmark, o: BookmarkMenuOptions = {}): Bookm
         void restoreBookmark(b.id).catch(() => {});
       },
     },
-    b.contentStatus === "failed" && {
-      id: "refetch",
-      label: "Try Reading It Again",
-      symbol: "arrow.clockwise",
-      group: "bookmark",
-      run: async () => {
-        await api.refetch(b.id).catch(() => {});
-        setTimeout(() => void sync(), 4000);
+    b.contentStatus === "failed" &&
+      !opensAsPage(b) && {
+        id: "refetch",
+        label: "Try Reading It Again",
+        symbol: "arrow.clockwise",
+        group: "bookmark",
+        run: async () => {
+          await api.refetch(b.id).catch(() => {});
+          setTimeout(() => void sync(), 4000);
+        },
       },
-    },
     {
       id: "delete",
       label: trashed ? "Delete Permanently…" : "Delete",

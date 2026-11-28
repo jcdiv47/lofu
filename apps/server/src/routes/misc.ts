@@ -6,12 +6,14 @@ import {
   RenameTag,
   SearchQuery,
   SearchResult,
+  Settings,
   SyncQuery,
   SyncResponse,
   TagChange,
   TagCount,
   TagName,
   UpdateCollection,
+  UpdateSettings,
 } from "@lofu/shared";
 import type { AppContext } from "../context.ts";
 import { syncSince } from "../store/sync.ts";
@@ -116,6 +118,29 @@ export function miscRoutes(app: OpenAPIHono, ctx: AppContext) {
       collections.delete(c.req.valid("param").id);
       return c.body(null, 204);
     },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/v1/settings",
+      summary: "Settings shared by every client",
+      responses: { 200: json(Settings, "Settings") },
+    }),
+    (c) => c.json(ctx.settings.get(), 200),
+  );
+
+  app.openapi(
+    createRoute({
+      method: "patch",
+      path: "/v1/settings",
+      summary:
+        "Change settings. A site added to skipDomains stops being read (its failed bookmarks " +
+        "become skipped); one taken off is read again",
+      request: body(UpdateSettings),
+      responses: { 200: json(Settings, "Settings") },
+    }),
+    (c) => c.json(ctx.settings.update(c.req.valid("json")), 200),
   );
 
   app.openapi(
