@@ -25,6 +25,8 @@ const light = {
   inkFaint: "#968c7d",
   rule: "#d8cdbb",
   ruleSoft: "#e3dacb",
+  /** A hovered card's edge: dark enough to show the hover where its shadow cannot (dark mode). */
+  ruleStrong: "#b8ab95",
   stamp: "#c2412d",
   stampSoft: "#c2412d1f",
   /** Tags: a bookcloth green, so a tagged card never reads as an error (the stamp's red). */
@@ -32,7 +34,8 @@ const light = {
   favorite: "#d4952a",
   highlight: "#f2d37a",
   shadow: "0px 1px 2px rgb(60 45 25 / 0.08), 0px 4px 14px rgb(60 45 25 / 0.06)",
-  shadowLift: "0px 2px 4px rgb(60 45 25 / 0.08), 0px 12px 28px rgb(60 45 25 / 0.12)",
+  /** A hovered card, raised off the page: a wider, softer shadow that stays tucked under it. */
+  shadowLift: "0px 2px 4px rgb(60 45 25 / 0.08), 0px 18px 36px -8px rgb(60 45 25 / 0.24)",
   /** The app's drawn popups: the web's menus, the search box's suggestions. */
   popupShadow: "0px 2px 6px rgb(0 0 0 / 0.12), 0px 12px 32px rgb(0 0 0 / 0.22)",
   /** A menu drawn as a sheet or a panel (phones without the system's). */
@@ -65,13 +68,14 @@ const dark: typeof light = {
   inkFaint: "#7d7567",
   rule: "#39332b",
   ruleSoft: "#2e2a24",
+  ruleStrong: "#5a5145",
   stamp: "#f0694f",
   stampSoft: "#f0694f24",
   tag: "#82b8a6",
   favorite: "#e8b04a",
   highlight: "#6e5a24",
   shadow: "0px 1px 2px rgb(0 0 0 / 0.3)",
-  shadowLift: "0px 2px 4px rgb(0 0 0 / 0.3), 0px 12px 28px rgb(0 0 0 / 0.35)",
+  shadowLift: "0px 2px 4px rgb(0 0 0 / 0.5), 0px 18px 36px -8px rgb(0 0 0 / 0.6)",
   popupShadow: "0px 2px 6px rgb(0 0 0 / 0.12), 0px 12px 32px rgb(0 0 0 / 0.22)",
   menuShadow: "0px 4px 12px rgb(0 0 0 / 0.14), 0px 16px 40px rgb(0 0 0 / 0.24)",
   glassTint: "#4a443bb3",
