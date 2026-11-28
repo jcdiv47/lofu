@@ -64,7 +64,8 @@ type Route =
   | { name: "sources" }
   | { name: "library"; source: Source; query?: string }
   | { name: "reader"; bookmark: Bookmark }
-  | { name: "browser"; url: string; domain: string }
+  /** A bookmark's page, which keeps the bookmark for its ••• menu. */
+  | { name: "browser"; url: string; domain: string; bookmark: Bookmark }
   | { name: "add"; source: Source }
   | { name: "edit"; bookmark: Bookmark };
 
@@ -76,12 +77,12 @@ type Route =
 type DesktopRoute =
   | { name: "library" }
   | { name: "reader"; bookmark: Bookmark }
-  | { name: "browser"; url: string; domain: string };
+  | { name: "browser"; url: string; domain: string; bookmark: Bookmark };
 
 /** The reader and "Open Original" push onto this stack while it's mounted. */
 function useOpeners(push: (r: Extract<Route, { name: "reader" | "browser" }>) => void) {
   setReader((b) => push({ name: "reader", bookmark: b }));
-  setBrowser((b) => push({ name: "browser", url: b.url, domain: b.domain }));
+  setBrowser((b) => push({ name: "browser", url: b.url, domain: b.domain, bookmark: b }));
   cleanup(() => {
     setReader(null);
     setBrowser(null);
@@ -755,17 +756,40 @@ function Phone(props: { onReconnect: () => void }) {
               </NavPage>
             );
           }
-          case "browser":
+          case "browser": {
+            const b = () => current(route.bookmark.id) ?? route.bookmark;
+            /** Off the stack, once deleted; only if it's still on top (a menu can outlive it). */
+            const back = () => {
+              const top = nav.routes().at(-1);
+              if (top?.name === "browser" && top.bookmark.id === route.bookmark.id) nav.pop();
+            };
+            // The bookmark's menu, as the reader's: a site opened as a page (Settings)
+            // has no reader, so this is where its actions are. Already the original here.
+            const more = () => void showBookmarkMenu(b(), { omit: ["open-app"], onGone: back });
             return (
               <NavPage
                 animation={pageAnimation}
                 title={route.domain.replace(/^www\./, "")}
                 headerClass={solidHeaderClass}
                 class="bg-paper"
+                ios={{ headerRightSymbol: "ellipsis" }}
+                headerRight={
+                  <View
+                    role="button"
+                    accessibilityLabel="More"
+                    testID="browser-menu"
+                    onPress={more}
+                  >
+                    {platform.os === "android" ? (
+                      <RoundGlassButton name="more" label="More" onPress={more} />
+                    ) : null}
+                  </View>
+                }
               >
                 <Browser url={route.url} wide={false} onClose={() => nav.pop()} />
               </NavPage>
             );
+          }
           case "add":
             return (
               <NavPage
