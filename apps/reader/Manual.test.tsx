@@ -16,7 +16,7 @@ const b = (id: string, sort: number): Bookmark => ({
   tags: [],
   collectionId: "c1",
   favorite: false,
-  archived: false,
+  trashed: false,
   readProgress: 0,
   wordCount: 1000,
   contentStatus: "ok",

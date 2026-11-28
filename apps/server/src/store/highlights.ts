@@ -20,7 +20,8 @@ export interface HighlightFilter {
   hasNote?: boolean | undefined;
   tag?: string | undefined;
   collectionId?: string | undefined;
-  archived?: boolean | undefined;
+  /** true: only of bookmarks in the Trash; false: none of them; undefined: both. */
+  trashed?: boolean | undefined;
   q?: string | undefined;
   createdAfter?: string | undefined;
   createdBefore?: string | undefined;
@@ -80,9 +81,9 @@ export class HighlightStore {
         params.push(f.collectionId);
       }
     }
-    if (f.archived !== undefined) {
+    if (f.trashed !== undefined) {
       where.push("b.archived = ?");
-      params.push(f.archived ? 1 : 0);
+      params.push(f.trashed ? 1 : 0);
     }
     if (f.q?.trim()) {
       const q = f.q.trim().toLowerCase();
@@ -127,9 +128,13 @@ export class HighlightStore {
     };
   }
 
+  /** A live highlight of a live bookmark, or NotFoundError. */
   get(id: string): Highlight {
     const row = this.db
-      .query<HighlightRow, [string]>("SELECT * FROM highlights WHERE id = ?")
+      .query<HighlightRow, [string]>(
+        `SELECT h.* FROM highlights h JOIN bookmarks b ON b.id = h.bookmark_id
+         WHERE h.id = ? AND b.deleted_at IS NULL`,
+      )
       .get(id);
     if (!row || row.deleted_at !== null) throw new NotFoundError(`highlight ${id} not found`);
     return toHighlight(row);

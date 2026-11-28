@@ -23,7 +23,7 @@ export const MAX_DECODED_BYTES = 32 * 1024 * 1024;
 
 const fail = (
   c: Context,
-  status: 400 | 401 | 403 | 404 | 409 | 413 | 415 | 500 | 503,
+  status: 400 | 401 | 403 | 404 | 409 | 413 | 415 | 422 | 500 | 503,
   code: string,
   error: string,
   details?: unknown,

@@ -25,7 +25,7 @@ const b = (id: string, over: Partial<Bookmark> = {}): Bookmark => ({
   tags: [],
   collectionId: null,
   favorite: false,
-  archived: false,
+  trashed: false,
   readProgress: 0,
   wordCount: 1000,
   contentStatus: "ok",

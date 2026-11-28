@@ -5,9 +5,9 @@ import type { Meili } from "./meili.ts";
 /**
  * Bump when settings or the documents' fields change: the settings are sent
  * again and every bookmark is pushed again (2: `hasNote`, `hasHighlights`;
- * 3: `contentStatus`).
+ * 3: `contentStatus`; 4: `archived` renamed `trashed`).
  */
-const SETTINGS_VERSION = "3";
+const SETTINGS_VERSION = "4";
 const SETTINGS = {
   searchableAttributes: [
     "title",
@@ -25,7 +25,7 @@ const SETTINGS = {
     "domain",
     "type",
     "favorite",
-    "archived",
+    "trashed",
     "createdAt",
     "hasNote",
     "hasHighlights",
@@ -55,7 +55,7 @@ export interface SearchDoc {
   tags: string[];
   collectionId: string | null;
   favorite: boolean;
-  archived: boolean;
+  trashed: boolean;
   createdAt: number;
   highlights: string[];
   /** For the search box's `note:true` and `highlights:true` (see packages/shared/src/query.ts). */
@@ -253,7 +253,7 @@ export class Indexer {
         tags: JSON.parse(r.tags),
         collectionId: r.collection_id,
         favorite: r.favorite === 1,
-        archived: r.archived === 1,
+        trashed: r.archived === 1,
         createdAt: r.created_at,
         highlights: highlights.get(r.id) ?? [],
         hasNote: !!r.note?.trim(),

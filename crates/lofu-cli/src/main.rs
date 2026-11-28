@@ -161,9 +161,12 @@ struct Filters {
     /// Require tag (repeatable or comma-separated; all must match)
     #[arg(short, long = "tag", value_delimiter = ',')]
     tags: Vec<String>,
-    /// Only bookmarks in the Trash (true), or none of them (false)
-    #[arg(long, alias = "archived", value_name = "BOOL")]
-    trashed: Option<bool>,
+    /// The Trash: left out (false, the default), only it (true), or both (all)
+    #[arg(long, alias = "archived", value_enum, value_name = "false|true|all")]
+    trashed: Option<Trashed>,
+    /// Bookmarks in the Trash too (the same as --trashed all)
+    #[arg(long, conflicts_with = "trashed")]
+    include_trashed: bool,
     #[arg(long)]
     favorite: Option<bool>,
     #[arg(long = "type", value_enum)]
@@ -240,6 +243,15 @@ enum Kind {
     Link,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, ValueEnum)]
+enum Trashed {
+    #[value(name = "false", alias = "0")]
+    No,
+    #[value(name = "true", alias = "1")]
+    Yes,
+    All,
+}
+
 #[derive(Clone, Copy, ValueEnum)]
 enum Sort {
     Relevance,
@@ -262,9 +274,14 @@ fn filter_query(f: &Filters) -> Vec<(&'static str, String)> {
     if !f.tags.is_empty() {
         q.push(("tags", f.tags.join(",")));
     }
-    // The API calls the Trash `archived`.
-    if let Some(t) = f.trashed {
-        q.push(("archived", t.to_string()));
+    // The API leaves the Trash out unless told.
+    let trashed = if f.include_trashed {
+        Some(Trashed::All)
+    } else {
+        f.trashed
+    };
+    if let Some(t) = trashed {
+        q.push(("trashed", name(t)));
     }
     if let Some(v) = f.favorite {
         q.push(("favorite", v.to_string()));
@@ -286,6 +303,72 @@ fn read_input(path: &str) -> Result<Vec<u8>, Error> {
     } else {
         std::fs::read(path).map_err(|e| Error::Other(format!("{path}: {e}")))
     }
+}
+
+/// The PATCH body of `lofu update`. Tags added or removed go as `addTags` and
+/// `removeTags`, which the server applies atomically: no read before the write.
+fn update_body(u: &UpdateArgs) -> Result<Map<String, Value>, Error> {
+    let mut body = Map::new();
+    if let Some(t) = &u.title {
+        body.insert("title".into(), json!(t));
+    }
+    if let Some(n) = &u.note {
+        body.insert(
+            "note".into(),
+            if n.is_empty() { Value::Null } else { json!(n) },
+        );
+    }
+    if let Some(c) = &u.collection {
+        body.insert(
+            "collectionId".into(),
+            if c == "none" { Value::Null } else { json!(c) },
+        );
+    }
+    if let Some(f) = u.favorite {
+        body.insert("favorite".into(), json!(f));
+    }
+    if let Some(t) = u.trashed {
+        body.insert("trashed".into(), json!(t));
+    }
+    if let Some(p) = u.progress {
+        body.insert("readProgress".into(), json!(p));
+    }
+    let norm = |t: &String| t.trim().to_lowercase();
+    let add: Vec<String> = u
+        .add_tags
+        .iter()
+        .map(norm)
+        .filter(|t| !t.is_empty())
+        .collect();
+    let remove: Vec<String> = u
+        .remove_tags
+        .iter()
+        .map(norm)
+        .filter(|t| !t.is_empty())
+        .collect();
+    match &u.tags {
+        // Every tag given: worked out here (the server takes `tags` alone).
+        Some(t) => {
+            let mut tags: Vec<String> = t.iter().map(norm).filter(|t| !t.is_empty()).collect();
+            tags.extend(add);
+            tags.retain(|t| !remove.contains(t));
+            let mut seen = std::collections::HashSet::new();
+            tags.retain(|t| seen.insert(t.clone()));
+            body.insert("tags".into(), json!(tags));
+        }
+        None => {
+            if !add.is_empty() {
+                body.insert("addTags".into(), json!(add));
+            }
+            if !remove.is_empty() {
+                body.insert("removeTags".into(), json!(remove));
+            }
+        }
+    }
+    if body.is_empty() {
+        return Err(Error::Usage("nothing to update".into()));
+    }
+    Ok(body)
 }
 
 fn run(cli: Cli, out: &Out) -> Result<(), Error> {
@@ -320,7 +403,7 @@ fn run(cli: Cli, out: &Out) -> Result<(), Error> {
                 body.insert("favorite".into(), json!(true));
             }
             if a.trashed {
-                body.insert("archived".into(), json!(true));
+                body.insert("trashed".into(), json!(true));
             }
             if let Some(path) = a.html {
                 let html = if path == "-" {
@@ -352,48 +435,7 @@ fn run(cli: Cli, out: &Out) -> Result<(), Error> {
             out.raw(&text);
         }
         Cmd::Update(u) => {
-            let mut body = Map::new();
-            if let Some(t) = u.title {
-                body.insert("title".into(), json!(t));
-            }
-            if let Some(n) = u.note {
-                body.insert(
-                    "note".into(),
-                    if n.is_empty() { Value::Null } else { json!(n) },
-                );
-            }
-            if let Some(c) = u.collection {
-                body.insert(
-                    "collectionId".into(),
-                    if c == "none" { Value::Null } else { json!(c) },
-                );
-            }
-            if let Some(f) = u.favorite {
-                body.insert("favorite".into(), json!(f));
-            }
-            if let Some(t) = u.trashed {
-                body.insert("archived".into(), json!(t));
-            }
-            if let Some(p) = u.progress {
-                body.insert("readProgress".into(), json!(p));
-            }
-            if u.tags.is_some() || !u.add_tags.is_empty() || !u.remove_tags.is_empty() {
-                let mut tags: Vec<String> = match u.tags {
-                    Some(t) => t.into_iter().filter(|t| !t.is_empty()).collect(),
-                    None => {
-                        let cur = api.get(&format!("/v1/bookmarks/{}", u.id), &[])?;
-                        serde_json::from_value(cur["tags"].clone()).unwrap_or_default()
-                    }
-                };
-                let norm = |t: &String| t.trim().to_lowercase();
-                tags.extend(u.add_tags.iter().map(norm));
-                let remove: Vec<String> = u.remove_tags.iter().map(norm).collect();
-                tags.retain(|t| !remove.contains(&t.to_lowercase()));
-                body.insert("tags".into(), json!(tags));
-            }
-            if body.is_empty() {
-                return Err(Error::Usage("nothing to update".into()));
-            }
+            let body = update_body(&u)?;
             out.bookmark(&api.patch(&format!("/v1/bookmarks/{}", u.id), &Value::Object(body))?);
         }
         Cmd::Rm { ids } => {
@@ -475,5 +517,71 @@ fn main() -> ExitCode {
             out.error(&e);
             ExitCode::from(e.exit_code())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Cli {
+        Cli::try_parse_from(std::iter::once("lofu").chain(args.iter().copied())).unwrap()
+    }
+
+    fn update(args: &[&str]) -> Result<Map<String, Value>, Error> {
+        let mut all = vec!["update", "b1"];
+        all.extend_from_slice(args);
+        match parse(&all).cmd {
+            Cmd::Update(u) => update_body(&u),
+            _ => unreachable!(),
+        }
+    }
+
+    fn filters(args: &[&str]) -> Vec<(&'static str, String)> {
+        let mut all = vec!["ls"];
+        all.extend_from_slice(args);
+        match parse(&all).cmd {
+            Cmd::Ls(l) => filter_query(&l.filters),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn added_and_removed_tags_go_to_the_server_as_they_are() {
+        let body = update(&["--add-tag", "Rust, perf", "--remove-tag", "old"]).unwrap();
+        assert_eq!(
+            Value::Object(body),
+            json!({ "addTags": ["rust", "perf"], "removeTags": ["old"] })
+        );
+    }
+
+    #[test]
+    fn every_tag_given_is_sent_alone() {
+        let body = update(&["--tags", "a,b", "--add-tag", "c", "--remove-tag", "a"]).unwrap();
+        assert_eq!(Value::Object(body), json!({ "tags": ["b", "c"] }));
+        let cleared = update(&["--tags", ""]).unwrap();
+        assert_eq!(Value::Object(cleared), json!({ "tags": [] }));
+    }
+
+    #[test]
+    fn the_trash_is_trashed() {
+        let body = update(&["--trashed", "true"]).unwrap();
+        assert_eq!(Value::Object(body), json!({ "trashed": true }));
+        let alias = update(&["--archived", "false"]).unwrap();
+        assert_eq!(Value::Object(alias), json!({ "trashed": false }));
+        assert!(update(&[]).is_err());
+    }
+
+    #[test]
+    fn list_filters_name_the_trash() {
+        assert!(filters(&[]).iter().all(|(k, _)| *k != "trashed"));
+        let q = |args: &[&str]| filters(args).into_iter().find(|(k, _)| *k == "trashed");
+        assert_eq!(q(&["--trashed", "true"]), Some(("trashed", "true".into())));
+        assert_eq!(q(&["--trashed", "0"]), Some(("trashed", "false".into())));
+        assert_eq!(q(&["--trashed", "all"]), Some(("trashed", "all".into())));
+        assert_eq!(q(&["--include-trashed"]), Some(("trashed", "all".into())));
+        assert!(
+            Cli::try_parse_from(["lofu", "ls", "--trashed", "true", "--include-trashed"]).is_err()
+        );
     }
 }

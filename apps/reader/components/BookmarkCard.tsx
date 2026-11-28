@@ -134,7 +134,7 @@ function Marks(props: {
   const status = () => (opensAsPage(props.b) ? "skipped" : props.b.contentStatus);
   // Offline, what can't be read without the server (the web keeps nothing, so says nothing).
   const onlineOnly = () =>
-    onDisk && offline() && status() === "ok" && !props.b.archived && !isKept(props.b.id);
+    onDisk && offline() && status() === "ok" && !props.b.trashed && !isKept(props.b.id);
   return (
     <>
       <If when={onlineOnly()}>

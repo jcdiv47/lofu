@@ -72,7 +72,8 @@ try {
 
   // ---- English: the long essay ----
   const pg = await bookmarkId("How to Do Great Work");
-  for (const h of await api<Highlight[]>("GET", `/v1/bookmarks/${pg}/highlights`)) {
+  for (const h of (await api<{ items: Highlight[] }>("GET", `/v1/bookmarks/${pg}/highlights`))
+    .items) {
     if (h.quote !== "the shape of the intersection") await api("DELETE", `/v1/highlights/${h.id}`);
   }
   await openByTitle(page, "How to Do Great Work");
@@ -95,9 +96,9 @@ try {
   console.log(`  screenshot: ${await page.screenshot(SHOTS, "web-selection")}`);
   if (bubble) await page.clickText("=Highlight");
   await page.waitForText("2 highlights", 5000).catch(() => null);
-  const saved = (await api<Highlight[]>("GET", `/v1/bookmarks/${pg}/highlights`)).find((h) =>
-    h.quote.includes("what to work"),
-  );
+  const saved = (
+    await api<{ items: Highlight[] }>("GET", `/v1/bookmarks/${pg}/highlights`)
+  ).items.find((h) => h.quote.includes("what to work"));
   check(
     "the server got a text-quote anchor with context",
     Boolean(saved && saved.prefix.length > 10 && saved.suffix.length > 10),
@@ -123,7 +124,7 @@ try {
   check("a press inside a highlight offers Remove", Boolean(remove));
   if (remove) await page.clickText("Remove highlight");
   await page.waitForText("1 highlight", 5000).catch(() => null);
-  const left = await api<Highlight[]>("GET", `/v1/bookmarks/${pg}/highlights`);
+  const left = (await api<{ items: Highlight[] }>("GET", `/v1/bookmarks/${pg}/highlights`)).items;
   check(
     "Remove deletes it on the server",
     left.length === 1,
@@ -133,7 +134,8 @@ try {
   // ---- Chinese ----
   await page.goto(APP);
   const zh = await bookmarkId("React Hooks");
-  for (const h of await api<Highlight[]>("GET", `/v1/bookmarks/${zh}/highlights`)) {
+  for (const h of (await api<{ items: Highlight[] }>("GET", `/v1/bookmarks/${zh}/highlights`))
+    .items) {
     await api("DELETE", `/v1/highlights/${h.id}`);
   }
   await openByTitle(page, "React Hooks 入门教程");
@@ -143,7 +145,8 @@ try {
   if (await page.waitForText("=Highlight", 3000).catch(() => null))
     await page.clickText("=Highlight");
   await page.waitForText("1 highlight", 5000).catch(() => null);
-  const zhSaved = (await api<Highlight[]>("GET", `/v1/bookmarks/${zh}/highlights`))[0];
+  const zhSaved = (await api<{ items: Highlight[] }>("GET", `/v1/bookmarks/${zh}/highlights`))
+    .items[0];
   check(
     "Chinese text highlights too",
     Boolean(zhSaved?.quote.includes("纯函数")),

@@ -91,12 +91,12 @@ describe("bookmark integrity", () => {
 
   test("saving a bookmark in the Trash again takes it out, unless told otherwise", async () => {
     const b = await saved("trashed");
-    await api("PATCH", `/v1/bookmarks/${b.id}`, { archived: true });
+    await api("PATCH", `/v1/bookmarks/${b.id}`, { trashed: true });
     const again = await api("POST", "/v1/bookmarks", { url: b.url });
-    expect([again.status, again.data.archived]).toEqual([200, false]);
-    await api("PATCH", `/v1/bookmarks/${b.id}`, { archived: true });
-    const kept = await api("POST", "/v1/bookmarks", { url: b.url, archived: true });
-    expect(kept.data.archived).toBe(true);
+    expect([again.status, again.data.trashed]).toEqual([200, false]);
+    await api("PATCH", `/v1/bookmarks/${b.id}`, { trashed: true });
+    const kept = await api("POST", "/v1/bookmarks", { url: b.url, trashed: true });
+    expect(kept.data.trashed).toBe(true);
   });
 
   test("an empty title doesn't replace the title", async () => {
@@ -164,10 +164,10 @@ describe("bookmark integrity", () => {
     const b = await saved("trash-tag", para("x"), { tags: ["only-in-trash"] });
     const counts = async (q = "") =>
       Object.fromEntries(
-        (await api("GET", `/v1/tags${q}`)).data.map((t: any) => [t.name, t.count]),
+        (await api("GET", `/v1/tags${q}`)).data.items.map((t: any) => [t.name, t.count]),
       );
     expect((await counts())["only-in-trash"]).toBe(1);
-    await api("PATCH", `/v1/bookmarks/${b.id}`, { archived: true });
+    await api("PATCH", `/v1/bookmarks/${b.id}`, { trashed: true });
     expect((await counts())["only-in-trash"]).toBeUndefined();
     expect((await counts("?includeTrashed=true"))["only-in-trash"]).toBe(1);
   });
@@ -354,7 +354,7 @@ describe("highlights", () => {
     const first = await api("POST", `/v1/bookmarks/${bm.id}/highlights`, body);
     const again = await api("POST", `/v1/bookmarks/${bm.id}/highlights`, body);
     expect([first.status, again.status, again.data.id]).toEqual([201, 200, "hl-client-1"]);
-    expect((await api("GET", `/v1/bookmarks/${bm.id}/highlights`)).data).toHaveLength(1);
+    expect((await api("GET", `/v1/bookmarks/${bm.id}/highlights`)).data.items).toHaveLength(1);
     const other = await saved("hl-other");
     const clash = await api("POST", `/v1/bookmarks/${other.id}/highlights`, body);
     expect([clash.status, clash.data.code]).toEqual([409, "CONFLICT"]);
@@ -394,12 +394,18 @@ describe("highlights", () => {
   test("get one; those of a bookmark in the Trash can be left out", async () => {
     const one = await api("GET", `/v1/highlights/${made[1].id}`);
     expect([one.status, one.data.quote]).toEqual([200, "Filler words"]);
-    await api("PATCH", `/v1/bookmarks/${bm.id}`, { archived: true });
+    await api("PATCH", `/v1/bookmarks/${bm.id}`, { trashed: true });
     expect(
-      (await api("GET", `/v1/highlights?bookmarkId=${bm.id}&archived=false`)).data.items,
+      (await api("GET", `/v1/highlights?bookmarkId=${bm.id}&trashed=false`)).data.items,
     ).toHaveLength(0);
-    expect((await api("GET", `/v1/highlights?bookmarkId=${bm.id}`)).data.items).toHaveLength(3);
-    await api("PATCH", `/v1/bookmarks/${bm.id}`, { archived: false });
+    expect((await api("GET", `/v1/highlights?bookmarkId=${bm.id}`)).data.items).toHaveLength(0);
+    expect(
+      (await api("GET", `/v1/highlights?bookmarkId=${bm.id}&trashed=true`)).data.items,
+    ).toHaveLength(3);
+    expect(
+      (await api("GET", `/v1/highlights?bookmarkId=${bm.id}&trashed=all`)).data.items,
+    ).toHaveLength(3);
+    await api("PATCH", `/v1/bookmarks/${bm.id}`, { trashed: false });
   });
 });
 
@@ -408,18 +414,20 @@ describe("collections, stats, capabilities", () => {
     const col = (await api("POST", "/v1/collections", { name: "Counted" })).data;
     await saved("counted-1", para("x"), { collectionId: col.id });
     const t = await saved("counted-2", para("x"), { collectionId: col.id });
-    await api("PATCH", `/v1/bookmarks/${t.id}`, { archived: true });
+    await api("PATCH", `/v1/bookmarks/${t.id}`, { trashed: true });
     const one = await api("GET", `/v1/collections/${col.id}`);
     expect([one.status, one.data.name, one.data.bookmarkCount]).toEqual([200, "Counted", 1]);
-    const listed = (await api("GET", "/v1/collections")).data.find((c: any) => c.id === col.id);
+    const listed = (await api("GET", "/v1/collections")).data.items.find(
+      (c: any) => c.id === col.id,
+    );
     expect(listed.bookmarkCount).toBe(1);
     expect((await api("GET", "/v1/collections/nope")).status).toBe(404);
   });
 
   test("stats count the library", async () => {
     const s = (await api("GET", "/v1/stats")).data;
-    const all = (await api("GET", "/v1/bookmarks?limit=500")).data.items;
-    const active = all.filter((b: any) => !b.archived);
+    const all = (await api("GET", "/v1/bookmarks?limit=500&trashed=all")).data.items;
+    const active = all.filter((b: any) => !b.trashed);
     expect(s.bookmarks.total).toBe(all.length);
     expect(s.bookmarks.active).toBe(active.length);
     expect(s.bookmarks.trashed).toBe(all.length - active.length);
@@ -429,8 +437,8 @@ describe("collections, stats, capabilities", () => {
     expect(byType).toBe(active.length);
     expect(s.bookmarks.withHighlights).toBeGreaterThan(0);
     expect(s.highlights).toBeGreaterThanOrEqual(3);
-    expect(s.collections).toBe((await api("GET", "/v1/collections")).data.length);
-    expect(s.tags).toBe((await api("GET", "/v1/tags")).data.length);
+    expect(s.collections).toBe((await api("GET", "/v1/collections")).data.items.length);
+    expect(s.tags).toBe((await api("GET", "/v1/tags")).data.items.length);
   });
 
   test("capabilities say what the server and the token can do", async () => {

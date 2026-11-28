@@ -94,14 +94,14 @@ Highlight:crumb structure",true
       coverUrl: "https://example.com/cover.jpg", // rdl.ink render dropped, og:image used
       contentStatus: "ok",
     });
-    const hs = (await api("GET", `/v1/bookmarks/${first.id}/highlights`)).data;
+    const hs = (await api("GET", `/v1/bookmarks/${first.id}/highlights`)).data.items;
     expect(hs.map((h: any) => [h.quote, h.note])).toEqual([
       ["fermentation curves", "key idea"],
       ["crumb structure", null],
     ]);
     const second = items.find((b: any) => b.url.endsWith("/article-rd-2"));
     expect([second.collectionId, second.coverUrl]).toEqual([null, "https://example.com/c.jpg"]);
-    const cols = (await api("GET", "/v1/collections")).data.map((c: any) => c.name);
+    const cols = (await api("GET", "/v1/collections")).data.items.map((c: any) => c.name);
     expect(cols.sort()).toEqual(["Read Later", "已归档书签"]);
   });
 
@@ -113,7 +113,7 @@ Highlight:crumb structure",true
       highlightsAdded: 0,
       collectionsCreated: [],
     });
-    expect((await api("GET", "/v1/collections")).data).toHaveLength(2);
+    expect((await api("GET", "/v1/collections")).data.items).toHaveLength(2);
   });
 
   test("rejects files that aren't Raindrop exports", async () => {

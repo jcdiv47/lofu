@@ -3,6 +3,7 @@ import {
   ApiError,
   Capabilities,
   Collection,
+  CollectionList,
   CollectionWithCount,
   CreateCollection,
   ListTagsQuery,
@@ -14,7 +15,7 @@ import {
   SyncQuery,
   SyncResponse,
   TagChange,
-  TagCount,
+  TagList,
   TagName,
   UpdateCollection,
   UpdateSettings,
@@ -59,9 +60,9 @@ export function miscRoutes(app: OpenAPIHono, ctx: AppContext) {
       tags: t("tags"),
       summary: "All tags with bookmark counts (the Trash's left out unless includeTrashed)",
       request: { query: ListTagsQuery },
-      responses: { 200: json(z.array(TagCount), "Tags") },
+      responses: { 200: json(TagList, "Tags") },
     }),
-    (c) => c.json(bookmarks.tagCounts(c.req.valid("query")), 200),
+    (c) => c.json({ items: bookmarks.tagCounts(c.req.valid("query")) }, 200),
   );
 
   app.openapi(
@@ -100,9 +101,9 @@ export function miscRoutes(app: OpenAPIHono, ctx: AppContext) {
       operationId: "listCollections",
       tags: t("collections"),
       summary: "List collections (flat; build the tree from parentId), with bookmark counts",
-      responses: { 200: json(z.array(CollectionWithCount), "Collections") },
+      responses: { 200: json(CollectionList, "Collections") },
     }),
-    (c) => c.json(collections.list(), 200),
+    (c) => c.json({ items: collections.list() }, 200),
   );
 
   app.openapi(

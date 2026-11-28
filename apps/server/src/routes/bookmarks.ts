@@ -10,7 +10,9 @@ import {
   CreateHighlight,
   GetBookmarkQuery,
   Highlight,
+  HighlightList,
   HighlightPage,
+  IncludeTrashedParam,
   ListBookmarksQuery,
   ListHighlightsQuery,
   LookupBookmarks,
@@ -54,7 +56,7 @@ const HttpUrl = z
   });
 
 const ContentQuery = z.object({
-  format: z.enum(["html", "markdown", "text"]).default("html"),
+  format: z.enum(["html", "markdown", "text"]).default("markdown"),
   /** Start of the slice, in UTF-16 code units. */
   offset: z.coerce.number().int().min(0).optional(),
   /** At most this much (UTF-16 code units). */
@@ -130,10 +132,14 @@ export function bookmarkRoutes(app: OpenAPIHono, ctx: AppContext) {
       operationId: "lookupBookmark",
       tags: BOOKMARKS,
       summary: "Find the bookmark for a URL (compared after unwrapping and normalization)",
-      request: { query: z.object({ url: HttpUrl }) },
+      description: "A bookmark in the Trash is found only with `includeTrashed`.",
+      request: { query: z.object({ url: HttpUrl, includeTrashed: IncludeTrashedParam }) },
       responses: { 200: json(Bookmark, "The bookmark"), 400: badRequest, 404: notFound },
     }),
-    (c) => c.json(bookmarks.findByUrl(c.req.valid("query").url), 200),
+    (c) => {
+      const { url, includeTrashed } = c.req.valid("query");
+      return c.json(bookmarks.findByUrl(url, { includeTrashed }), 200);
+    },
   );
 
   app.openapi(
@@ -143,10 +149,14 @@ export function bookmarkRoutes(app: OpenAPIHono, ctx: AppContext) {
       operationId: "lookupBookmarks",
       tags: BOOKMARKS,
       summary: "Find the bookmarks of many URLs at once (a read: needs only the read scope)",
+      description: "Bookmarks in the Trash are found only with `includeTrashed`.",
       request: body(LookupBookmarks),
       responses: { 200: json(LookupResult, "Each URL's bookmark, or null"), 400: badRequest },
     }),
-    (c) => c.json({ items: bookmarks.findManyByUrl(c.req.valid("json").urls) }, 200),
+    (c) => {
+      const { urls, includeTrashed } = c.req.valid("json");
+      return c.json({ items: bookmarks.findManyByUrl(urls, { includeTrashed }) }, 200);
+    },
   );
 
   app.openapi(
@@ -277,7 +287,29 @@ export function bookmarkRoutes(app: OpenAPIHono, ctx: AppContext) {
     const b = bookmarks.get(id);
     const blob = bookmarks.contentBlob(id, format);
     if (!blob) {
-      return c.json({ error: "content not extracted yet", code: "NOT_FOUND" }, 404);
+      // The bookmark is there; its content isn't (yet, or ever): say which.
+      switch (b.contentStatus) {
+        case "pending":
+          return c.json(
+            { error: "content is still being extracted", code: "CONTENT_PENDING" },
+            409,
+          );
+        case "failed":
+          return c.json(
+            { error: b.contentError ?? "content extraction failed", code: "CONTENT_FAILED" },
+            422,
+          );
+        case "skipped":
+          return c.json(
+            {
+              error: "content extraction was skipped for this bookmark",
+              code: "CONTENT_SKIPPED",
+            },
+            422,
+          );
+        default:
+          return c.json({ error: "content not available", code: "CONTENT_NOT_FOUND" }, 404);
+      }
     }
     const slicing = offset !== undefined || maxChars !== undefined;
     const extractedAt = b.extractedAt ? Date.parse(b.extractedAt) : null;
@@ -326,9 +358,12 @@ export function bookmarkRoutes(app: OpenAPIHono, ctx: AppContext) {
     tags: BOOKMARKS,
     summary: "The extracted content as a document (zstd passed through when accepted)",
     description:
-      "Sends the stored, zstd-compressed content untouched to a client that accepts zstd. " +
-      "Has an ETag (If-None-Match gets 304). `offset`/`maxChars` return a slice, with " +
-      "X-Content-Total-Chars, X-Content-Offset and X-Content-Has-More headers.",
+      "Markdown unless `format` says otherwise. Sends the stored, zstd-compressed content " +
+      "untouched to a client that accepts zstd. Has an ETag (If-None-Match gets 304). " +
+      "`offset`/`maxChars` return a slice, with X-Content-Total-Chars, X-Content-Offset and " +
+      "X-Content-Has-More headers. Without content: 409 CONTENT_PENDING while it is being " +
+      "read, 422 CONTENT_FAILED or CONTENT_SKIPPED when it won't be, 404 CONTENT_NOT_FOUND " +
+      "otherwise (404 NOT_FOUND: no such bookmark).",
     request: { params: IdParam, query: ContentQuery },
     responses: {
       200: {
@@ -347,7 +382,9 @@ export function bookmarkRoutes(app: OpenAPIHono, ctx: AppContext) {
       },
       304: { description: "Not modified (If-None-Match)" },
       400: badRequest,
-      404: json(ApiError, "No such bookmark, or no content yet"),
+      404: json(ApiError, "No such bookmark (NOT_FOUND), or no content (CONTENT_NOT_FOUND)"),
+      409: json(ApiError, "Content still being extracted (CONTENT_PENDING)"),
+      422: json(ApiError, "Extraction failed (CONTENT_FAILED) or was skipped (CONTENT_SKIPPED)"),
     },
   });
 
@@ -433,9 +470,9 @@ export function bookmarkRoutes(app: OpenAPIHono, ctx: AppContext) {
       tags: HIGHLIGHTS,
       summary: "List highlights of a bookmark",
       request: { params: IdParam },
-      responses: { 200: json(z.array(Highlight), "Highlights"), 404: notFound },
+      responses: { 200: json(HighlightList, "Highlights, oldest first"), 404: notFound },
     }),
-    (c) => c.json(highlights.listFor(c.req.valid("param").id), 200),
+    (c) => c.json({ items: highlights.listFor(c.req.valid("param").id) }, 200),
   );
 
   app.openapi(

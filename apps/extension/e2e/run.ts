@@ -61,7 +61,7 @@ const server = Bun.serve({ port: 0, fetch: app.fetch });
 const lofu = `http://127.0.0.1:${server.port}`;
 const bookmarkFor = (url: string) => {
   try {
-    return sys.ctx.bookmarks.findByUrl(url);
+    return sys.ctx.bookmarks.findByUrl(url, { includeTrashed: true });
   } catch {
     return null;
   }
@@ -284,7 +284,7 @@ try {
   check("re-opening doesn't re-send the page", bookmarkFor(wallUrl)?.seq === seqBefore);
   console.log(`  screenshot: ${await screenshot(again.sessionId, "popup-existing", 360, true)}`);
 
-  // The Trash toggle (the API's `archived`): moves the bookmark there and back.
+  // The Trash toggle (the API's `trashed`): moves the bookmark there and back.
   const trashButton = () =>
     evaluate(
       again.sessionId,
@@ -294,8 +294,8 @@ try {
   check("the Trash button offers to move there", (await trashButton()) === "Move to Trash|false");
   await evaluate(again.sessionId, "document.getElementById('trash').click(), true");
   check(
-    "Move to Trash sets archived",
-    Boolean(await until(async () => bookmarkFor(wallUrl)?.archived === true)),
+    "Move to Trash sets trashed",
+    Boolean(await until(async () => bookmarkFor(wallUrl)?.trashed === true)),
   );
   check("Trash clears the saved badge", await badgeIs(tabId, ""));
   check("the button then says In Trash", (await trashButton()) === "In Trash|true");
@@ -304,7 +304,7 @@ try {
   await evaluate(again.sessionId, "document.getElementById('trash').click(), true");
   check(
     "pressing it again restores it",
-    Boolean(await until(async () => bookmarkFor(wallUrl)?.archived === false)),
+    Boolean(await until(async () => bookmarkFor(wallUrl)?.trashed === false)),
   );
 
   check("restoring from Trash restores the badge", await badgeIs(tabId, "✓"));

@@ -23,7 +23,7 @@ export const TagName = z
   .max(64)
   .transform((t) => t.toLowerCase());
 
-const inTrash = "In the Trash (the field keeps its old name, `archived`)";
+const inTrash = "In the Trash";
 
 export const Bookmark = z
   .object({
@@ -49,8 +49,8 @@ export const Bookmark = z
     tags: z.array(z.string()),
     collectionId: id.nullable(),
     favorite: z.boolean(),
-    /** In the Trash. Clients call it the Trash; deleting from the Trash deletes for good. */
-    archived: z.boolean().describe(inTrash),
+    /** In the Trash; deleting from the Trash deletes for good. */
+    trashed: z.boolean().describe(inTrash),
     readProgress: z.number().min(0).max(1),
     wordCount: z.number().int().nullable(),
     lang: z.string().nullable(),
@@ -86,7 +86,7 @@ export const CreateBookmark = z
     tags: z.array(TagName).max(100).optional(),
     collectionId: id.nullable().optional(),
     favorite: z.boolean().optional(),
-    archived: z.boolean().describe(inTrash).optional(),
+    trashed: z.boolean().describe(inTrash).optional(),
     /**
      * Already-rendered page HTML (e.g. from the browser extension). When
      * present the server skips fetching, which is both faster and the only way
@@ -133,7 +133,7 @@ export const UpdateBookmark = z
     collectionId: id.nullable(),
     favorite: z.boolean(),
     /** true moves the bookmark to the Trash, false restores it. */
-    archived: z.boolean().describe(inTrash),
+    trashed: z.boolean().describe(inTrash),
     readProgress: z.number().min(0).max(1),
     coverUrl: CoverUrl.nullable(),
     /** Its place in the manual order: between the two it was dropped between. */
@@ -150,6 +150,17 @@ export const UpdateBookmark = z
 export type UpdateBookmark = z.infer<typeof UpdateBookmark>;
 
 const boolParam = z.enum(["true", "false", "1", "0"]).transform((v) => v === "true" || v === "1");
+
+/**
+ * Which bookmarks, as to the Trash: `false` (the default) leaves it out,
+ * `true` is only the Trash, `all` is both. Parsed to false, true, or
+ * undefined for `all` (no condition).
+ */
+const trashedParam = z
+  .enum(["false", "true", "all", "0", "1"])
+  .default("false")
+  .describe("false (default): not in the Trash; true: only the Trash; all: both")
+  .transform((v) => (v === "all" ? undefined : v === "true" || v === "1"));
 
 /** Comma-separated list in a query string, e.g. `tags=rust,perf`. */
 const csvParam = z.string().transform((s) =>
@@ -172,7 +183,7 @@ const filterParams = {
   /** With `collectionId`: its subcollections' bookmarks too, at any depth. */
   includeSubcollections: boolParam.optional(),
   tags: csvParam.optional(),
-  archived: boolParam.describe("true: only bookmarks in the Trash; false: none of them").optional(),
+  trashed: trashedParam,
   favorite: boolParam.optional(),
   type: BookmarkType.optional(),
   contentStatus: ContentStatus.optional(),
@@ -263,6 +274,8 @@ export const Highlight = z
   })
   .meta({ id: "Highlight" });
 export type Highlight = z.infer<typeof Highlight>;
+
+export const HighlightList = z.object({ items: z.array(Highlight) }).meta({ id: "HighlightList" });
 
 export const Heading = z
   .object({
@@ -394,6 +407,10 @@ export const CollectionWithCount = Collection.extend({
 }).meta({ id: "CollectionWithCount" });
 export type CollectionWithCount = z.infer<typeof CollectionWithCount>;
 
+export const CollectionList = z
+  .object({ items: z.array(CollectionWithCount) })
+  .meta({ id: "CollectionList" });
+
 export const CreateCollection = z
   .object({
     /** Optional client-generated id (UUIDv7 recommended) for offline creation. */
@@ -418,6 +435,8 @@ export const UpdateCollection = z
 export const TagCount = z
   .object({ name: z.string(), count: z.number().int() })
   .meta({ id: "TagCount" });
+
+export const TagList = z.object({ items: z.array(TagCount) }).meta({ id: "TagList" });
 
 export const RenameTag = z
   .object({
@@ -509,7 +528,9 @@ export const ApiError = z
     /**
      * Stable machine-readable code: INVALID_REQUEST, UNAUTHORIZED, FORBIDDEN,
      * NOT_FOUND, CONFLICT, SEQ_CONFLICT, PAYLOAD_TOO_LARGE,
-     * UNSUPPORTED_MEDIA_TYPE, SEARCH_UNAVAILABLE, INTERNAL_ERROR.
+     * UNSUPPORTED_MEDIA_TYPE, SEARCH_UNAVAILABLE, INTERNAL_ERROR; for
+     * `GET /v1/bookmarks/{id}/content` also CONTENT_PENDING (409),
+     * CONTENT_FAILED and CONTENT_SKIPPED (422), CONTENT_NOT_FOUND (404).
      */
     code: z.string().optional(),
     details: z.unknown().optional(),
@@ -572,7 +593,11 @@ export const BatchResult = z
   .meta({ id: "BatchResult" });
 
 export const LookupBookmarks = z
-  .object({ urls: z.array(z.string().min(1).max(8192)).min(1).max(200) })
+  .object({
+    urls: z.array(z.string().min(1).max(8192)).min(1).max(200),
+    /** Bookmarks in the Trash count too (left out by default). */
+    includeTrashed: z.boolean().optional(),
+  })
   .meta({ id: "LookupBookmarks" });
 
 export const LookupResult = z
@@ -596,8 +621,8 @@ export const ListHighlightsQuery = z.object({
   tag: TagName.optional(),
   /** Of bookmarks in this collection (`unsorted`: in none). */
   collectionId: z.string().optional(),
-  /** Of bookmarks in the Trash (true) or not (false). */
-  archived: boolParam.optional(),
+  /** Of bookmarks outside the Trash (false, the default), in it (true), or both (all). */
+  trashed: trashedParam,
   /** Text in the quote or the note (case-insensitive). */
   q: z.string().max(1000).optional(),
   createdAfter: isoDate.optional(),
@@ -610,10 +635,12 @@ export const HighlightPage = z
   .object({ items: z.array(HighlightWithBookmark), nextCursor: z.string().nullable() })
   .meta({ id: "HighlightPage" });
 
-export const ListTagsQuery = z.object({
-  /** Count bookmarks in the Trash too. */
-  includeTrashed: boolParam.optional(),
-});
+/** Bookmarks in the Trash count too (left out by default). */
+export const IncludeTrashedParam = boolParam
+  .optional()
+  .describe("Bookmarks in the Trash count too (left out by default)");
+
+export const ListTagsQuery = z.object({ includeTrashed: IncludeTrashedParam });
 
 export const Stats = z
   .object({

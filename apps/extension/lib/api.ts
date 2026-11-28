@@ -72,10 +72,16 @@ export const api = {
     return { bookmark: data, created: status === 201 };
   },
   get: async (id: string) => (await request<Bookmark>("GET", `/v1/bookmarks/${id}`)).data,
-  lookup: async (url: string) => {
+  /** The bookmark of a URL; one in the Trash only with `includeTrashed`. */
+  lookup: async (url: string, opts: { includeTrashed?: boolean } = {}) => {
+    const trash = opts.includeTrashed ? "&includeTrashed=true" : "";
     try {
-      return (await request<Bookmark>("GET", `/v1/bookmarks/lookup?url=${encodeURIComponent(url)}`))
-        .data;
+      return (
+        await request<Bookmark>(
+          "GET",
+          `/v1/bookmarks/lookup?url=${encodeURIComponent(url)}${trash}`,
+        )
+      ).data;
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) return null;
       throw e;
@@ -86,8 +92,9 @@ export const api = {
   remove: async (id: string) => {
     await request<null>("DELETE", `/v1/bookmarks/${id}`);
   },
-  tags: async () => (await request<TagCount[]>("GET", "/v1/tags")).data,
-  collections: async () => (await request<Collection[]>("GET", "/v1/collections")).data,
+  tags: async () => (await request<{ items: TagCount[] }>("GET", "/v1/tags")).data.items,
+  collections: async () =>
+    (await request<{ items: Collection[] }>("GET", "/v1/collections")).data.items,
   failed: async () =>
     (await request<{ items: Bookmark[] }>("GET", "/v1/bookmarks?contentStatus=failed&limit=500"))
       .data.items,

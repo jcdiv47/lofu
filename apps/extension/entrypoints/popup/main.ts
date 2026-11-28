@@ -130,10 +130,9 @@ function renderBookmark(b: Bookmark) {
   statusLine.title = text;
   statusLine.classList.toggle("warn", warn);
   favBtn.setAttribute("aria-pressed", String(b.favorite));
-  showTrash(b.archived);
+  showTrash(b.trashed);
 }
 
-/** `archived` is the Trash (the API field keeps its old name). */
 function showTrash(inTrash: boolean) {
   trashBtn.setAttribute("aria-pressed", String(inTrash));
   trashLabel.textContent = inTrash ? "In Trash" : "Move to Trash";
@@ -289,7 +288,7 @@ favBtn.addEventListener("click", () => {
 trashBtn.addEventListener("click", () => {
   const on = trashBtn.getAttribute("aria-pressed") !== "true";
   showTrash(on);
-  patch({ archived: on });
+  patch({ trashed: on });
 });
 
 removeBtn.addEventListener("click", async () => {

@@ -22,7 +22,8 @@ export interface SearchParams {
   collectionId?: string | undefined;
   includeSubcollections?: boolean | undefined;
   tags?: string[] | undefined;
-  archived?: boolean | undefined;
+  /** true: only the Trash; false: none of it; undefined: both. */
+  trashed?: boolean | undefined;
   favorite?: boolean | undefined;
   type?: BookmarkType | undefined;
   contentStatus?: ContentStatus | undefined;
@@ -164,7 +165,7 @@ export class Searcher {
       filter.push(`collectionId IN [${ids.map(quote).join(", ")}]`);
     } else if (p.collectionId) filter.push(`collectionId = ${quote(p.collectionId)}`);
     for (const t of p.tags ?? []) filter.push(`tags = ${quote(t)}`);
-    if (p.archived !== undefined) filter.push(`archived = ${p.archived}`);
+    if (p.trashed !== undefined) filter.push(`trashed = ${p.trashed}`);
     if (p.favorite !== undefined) filter.push(`favorite = ${p.favorite}`);
     if (p.type) filter.push(`type = ${quote(p.type)}`);
     if (p.contentStatus) filter.push(`contentStatus = ${quote(p.contentStatus)}`);
@@ -212,7 +213,7 @@ export class Searcher {
       collectionId: p.collectionId,
       includeSubcollections: p.includeSubcollections,
       tags: p.tags,
-      archived: p.archived,
+      trashed: p.trashed,
       favorite: p.favorite,
       type: p.type,
       contentStatus: p.contentStatus,

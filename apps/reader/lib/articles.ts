@@ -81,7 +81,7 @@ export function toKeep(all: Bookmark[], mode: KeepMode): Bookmark[] {
   if (mode === "opened") return [];
   // Sites opened as pages have no reader: nothing of theirs is read offline.
   const readable = all.filter(
-    (b) => !b.archived && !b.deletedAt && b.contentStatus === "ok" && !opensAsPage(b),
+    (b) => !b.trashed && !b.deletedAt && b.contentStatus === "ok" && !opensAsPage(b),
   );
   if (mode === "all") return readable;
   const unread = readable.filter((b) => b.readProgress < 0.98);
@@ -313,7 +313,7 @@ export async function prefetchArticles(all: Bookmark[], retry = false) {
     const live = new Map(all.map((b) => [b.id, b]));
     for (const id of kept) {
       const b = live.get(id);
-      if (!b || b.deletedAt || b.archived) {
+      if (!b || b.deletedAt || b.trashed) {
         await removeArticle(id);
         kept.delete(id);
       }

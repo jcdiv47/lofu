@@ -78,7 +78,7 @@ export function toBookmark(r: BookmarkRow, images: ImageProxy): Bookmark {
     tags: JSON.parse(r.tags) as string[],
     collectionId: r.collection_id,
     favorite: r.favorite === 1,
-    archived: r.archived === 1,
+    trashed: r.archived === 1,
     readProgress: r.read_progress,
     wordCount: r.word_count,
     lang: r.lang,

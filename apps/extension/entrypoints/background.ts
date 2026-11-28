@@ -46,7 +46,8 @@ async function saveTab(tabId: number): Promise<SaveResult> {
     return { ok: false, error: "Only web pages (http/https) can be saved.", needsSetup: false };
   }
   try {
-    const existing = await api.lookup(tab.url);
+    // One in the Trash too: the popup shows it there, with Restore.
+    const existing = await api.lookup(tab.url, { includeTrashed: true });
     if (existing && HAS_CONTENT.has(existing.contentStatus)) {
       void refreshSavedBadges();
       return { ok: true, bookmark: existing, created: false, captured: false };

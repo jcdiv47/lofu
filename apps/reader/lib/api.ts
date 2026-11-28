@@ -18,7 +18,7 @@ export interface Bookmark {
   tags: string[];
   collectionId: string | null;
   favorite: boolean;
-  archived: boolean;
+  trashed: boolean;
   readProgress: number;
   wordCount: number | null;
   contentStatus: "pending" | "ok" | "failed" | "skipped";
@@ -68,6 +68,12 @@ export interface SyncPage {
   bookmarks: Bookmark[];
   collections: Collection[];
   highlights: Highlight[];
+  /**
+   * The server database's identity: another one than before means it was
+   * replaced (a backup restored) and the client must sync from 0. Older
+   * servers send none.
+   */
+  generation?: string;
 }
 
 /** An image of an article (`ContentImage` in packages/shared/src/schemas.ts). */
@@ -113,7 +119,7 @@ export interface SearchHit {
 export type BookmarkPatch = Partial<
   Pick<
     Bookmark,
-    "title" | "note" | "tags" | "collectionId" | "favorite" | "archived" | "readProgress" | "sort"
+    "title" | "note" | "tags" | "collectionId" | "favorite" | "trashed" | "readProgress" | "sort"
   >
 >;
 
@@ -240,7 +246,7 @@ export const api = {
       tags?: string;
       favorite?: boolean;
       type?: Bookmark["type"];
-      archived?: boolean;
+      trashed?: boolean;
       /** Minutes east of UTC, where the query's `created:` days start. */
       tz?: number;
     },
@@ -248,7 +254,7 @@ export const api = {
   ) => {
     const params = [`q=${q(query)}`, `limit=${SEARCH_PAGE}`, `offset=${offset}`];
     if (filter.tz) params.push(`tz=${filter.tz}`);
-    if (filter.archived !== undefined) params.push(`archived=${filter.archived}`);
+    if (filter.trashed !== undefined) params.push(`trashed=${filter.trashed}`);
     if (filter.type) params.push(`type=${q(filter.type)}`);
     if (filter.collectionId) params.push(`collectionId=${q(filter.collectionId)}`);
     if (filter.tags) params.push(`tags=${q(filter.tags)}`);
@@ -299,7 +305,8 @@ export const api = {
       formulas: (r.formulas ?? []).map((f) => ({ ...f, src: `${server}${f.src}` })),
     };
   },
-  highlights: (id: string) => request<Highlight[]>("GET", `/v1/bookmarks/${id}/highlights`),
+  highlights: async (id: string) =>
+    (await request<{ items: Highlight[] }>("GET", `/v1/bookmarks/${id}/highlights`)).items,
   addHighlight: (id: string, h: { quote: string; prefix: string; suffix: string }) =>
     request<Highlight>("POST", `/v1/bookmarks/${id}/highlights`, h),
   removeHighlight: (id: string) => request<null>("DELETE", `/v1/highlights/${id}`),

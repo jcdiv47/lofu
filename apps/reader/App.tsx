@@ -565,7 +565,7 @@ function useMenuBar(app: {
           {
             label: b?.favorite ? "Remove from Favorites" : "Add to Favorites",
             shortcut: "mod+d",
-            disabled: !b || b.archived,
+            disabled: !b || b.trashed,
             onSelect: () =>
               b && void updateBookmark(b.id, { favorite: !b.favorite }).catch(() => {}),
           },
@@ -594,7 +594,7 @@ function useMenuBar(app: {
           },
           { type: "separator" },
           {
-            label: b?.archived ? "Delete Permanently…" : "Move to Trash",
+            label: b?.trashed ? "Delete Permanently…" : "Move to Trash",
             shortcut: "mod+backspace",
             when: "notEditing",
             disabled: !b,

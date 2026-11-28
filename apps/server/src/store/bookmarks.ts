@@ -32,7 +32,8 @@ export interface BookmarkFilter {
   collectionId?: string | undefined;
   includeSubcollections?: boolean | undefined;
   tags?: string[] | undefined;
-  archived?: boolean | undefined;
+  /** true: only the Trash; false: none of it; undefined: both. */
+  trashed?: boolean | undefined;
   favorite?: boolean | undefined;
   type?: BookmarkType | undefined;
   contentStatus?: ContentStatus | undefined;
@@ -79,7 +80,7 @@ const UPDATE_COLUMNS = {
   note: "note",
   collectionId: "collection_id",
   favorite: "favorite",
-  archived: "archived",
+  trashed: "archived", // the column keeps its first name
   readProgress: "read_progress",
   coverUrl: "cover_url",
   sort: "sort",
@@ -135,9 +136,9 @@ export function bookmarkWhere(f: BookmarkFilter): { where: string[]; params: (st
       params.push(f.collectionId);
     }
   }
-  if (f.archived !== undefined) {
+  if (f.trashed !== undefined) {
     where.push("b.archived = ?");
-    params.push(f.archived ? 1 : 0);
+    params.push(f.trashed ? 1 : 0);
   }
   if (f.favorite !== undefined) {
     where.push("b.favorite = ?");
@@ -227,22 +228,29 @@ export class BookmarkStore {
     return row;
   }
 
-  /** Finds a live bookmark by URL, compared after unwrapping and normalization. */
-  findByUrl(url: string): Bookmark {
+  /**
+   * Finds a live bookmark by URL, compared after unwrapping and
+   * normalization. One in the Trash counts only with `includeTrashed`.
+   */
+  findByUrl(url: string, opts: { includeTrashed?: boolean | undefined } = {}): Bookmark {
     const row = this.db
-      .query<BookmarkRow, [string]>(
-        "SELECT * FROM bookmarks WHERE url_key = ? AND deleted_at IS NULL",
+      .query<BookmarkRow, [string, number]>(
+        "SELECT * FROM bookmarks WHERE url_key = ? AND deleted_at IS NULL AND (archived = 0 OR ?)",
       )
-      .get(normalizeUrl(unwrapUrl(url)));
+      .get(normalizeUrl(unwrapUrl(url)), opts.includeTrashed ? 1 : 0);
     if (!row) throw new NotFoundError("no bookmark for this URL");
     return toBookmark(row, this.images);
   }
 
   /**
    * The live bookmark of each URL (null for none, or for what isn't an
-   * http(s) URL), keyed by the URL as given. One query for them all.
+   * http(s) URL), keyed by the URL as given. One query for them all. Those
+   * in the Trash count only with `includeTrashed`.
    */
-  findManyByUrl(urls: readonly string[]): Record<string, Bookmark | null> {
+  findManyByUrl(
+    urls: readonly string[],
+    opts: { includeTrashed?: boolean | undefined } = {},
+  ): Record<string, Bookmark | null> {
     const keys = new Map<string, string>();
     for (const url of urls) {
       try {
@@ -252,11 +260,12 @@ export class BookmarkStore {
       }
     }
     const rows = this.db
-      .query<BookmarkRow, [string]>(
+      .query<BookmarkRow, [string, number]>(
         `SELECT * FROM bookmarks
-         WHERE url_key IN (SELECT value FROM json_each(?)) AND deleted_at IS NULL`,
+         WHERE url_key IN (SELECT value FROM json_each(?)) AND deleted_at IS NULL
+           AND (archived = 0 OR ?)`,
       )
-      .all(JSON.stringify([...new Set(keys.values())]));
+      .all(JSON.stringify([...new Set(keys.values())]), opts.includeTrashed ? 1 : 0);
     const byKey = new Map(rows.map((r) => [r.url_key, r]));
     const out: Record<string, Bookmark | null> = {};
     for (const url of urls) {
@@ -298,7 +307,7 @@ export class BookmarkStore {
    * Idempotent save keyed on the normalized URL. Re-saving an existing URL
    * merges tags and applies any provided fields instead of duplicating; saving
    * a previously deleted URL revives the original row (same id). Saving one
-   * in the Trash takes it out, unless `archived` says otherwise (or, for an
+   * in the Trash takes it out, unless `trashed` says otherwise (or, for an
    * importer, `restoreFromTrash: false`).
    */
   create(
@@ -340,7 +349,7 @@ export class BookmarkStore {
             JSON.stringify(dedupeTags(input.tags ?? [])),
             input.collectionId ?? null,
             input.favorite ? 1 : 0,
-            input.archived ? 1 : 0,
+            input.trashed ? 1 : 0,
             // New ones go on top of the manual order, as they come.
             -createdAt,
             createdAt,
@@ -380,7 +389,7 @@ export class BookmarkStore {
           input.collectionId !== undefined ? 1 : 0,
           input.collectionId ?? null,
           sqlBool(input.favorite) ?? (revived ? 0 : null),
-          sqlBool(input.archived) ?? (restore ? 0 : null),
+          sqlBool(input.trashed) ?? (restore ? 0 : null),
           now,
           seq,
           existing.id,
