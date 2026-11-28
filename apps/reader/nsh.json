@@ -35,6 +35,7 @@
   },
   "store": {
     "ios": {
+      "appId": "6840040415",
       "usesNonExemptEncryption": false
     }
   },
