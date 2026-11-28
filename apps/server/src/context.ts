@@ -22,7 +22,9 @@ export interface AppContext {
   images: ImageProxy;
   /** Draws and serves formulas as pictures (extract/mathPictures.ts). */
   math: MathPictures;
-  /** null when Meilisearch is not configured. */
-  searcher: Searcher | null;
+  /** Meilisearch when configured, else the database (search/search.ts). */
+  searcher: Searcher;
+  /** What the extractors can do here (GET /v1/capabilities). */
+  features: { browser: boolean; pdf: boolean };
   meiliHealthy(): Promise<boolean>;
 }

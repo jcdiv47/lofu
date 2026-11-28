@@ -145,8 +145,8 @@ const withTimeout = <T,>(p: Promise<T>) =>
 
 /** Search filters that the server's search understands, for a source. */
 const searchFilter = (s: Source) => ({
-  // The Trash is what the server calls archived; it stays out of other searches.
-  archived: s.kind === "trash",
+  // The Trash stays out of other searches.
+  trashed: s.kind === "trash",
   ...sourceFilter(s),
 });
 const sourceFilter = (s: Source) =>

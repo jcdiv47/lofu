@@ -14,6 +14,14 @@ fn s(v: &Value) -> &str {
     v.as_str().unwrap_or("")
 }
 
+/// A list response's entries: `{ "items": [...] }` (or a bare array, from older servers).
+fn items(v: &Value) -> &[Value] {
+    v["items"]
+        .as_array()
+        .or_else(|| v.as_array())
+        .map_or(&[], Vec::as_slice)
+}
+
 impl Out {
     pub fn new(json: bool) -> Self {
         let color =
@@ -93,8 +101,7 @@ impl Out {
         if b["favorite"].as_bool() == Some(true) {
             meta.push("★".into());
         }
-        // `archived` is the Trash.
-        if b["archived"].as_bool() == Some(true) {
+        if b["trashed"].as_bool() == Some(true) {
             meta.push("trash".into());
         }
         match s(&b["contentStatus"]) {
@@ -193,7 +200,7 @@ impl Out {
         if self.json {
             return self.value(tags);
         }
-        for t in tags.as_array().into_iter().flatten() {
+        for t in items(tags) {
             self.print(&format!("{:>6}  {}", t["count"], s(&t["name"])));
         }
     }
@@ -202,7 +209,7 @@ impl Out {
         if self.json {
             return self.value(cols);
         }
-        let all = cols.as_array().cloned().unwrap_or_default();
+        let all = items(cols);
         fn walk(out: &Out, all: &[Value], parent: &Value, depth: usize) {
             for c in all.iter().filter(|c| &c["parentId"] == parent) {
                 out.print(&format!(
@@ -214,14 +221,14 @@ impl Out {
                 walk(out, all, &c["id"], depth + 1);
             }
         }
-        walk(self, &all, &Value::Null, 0);
+        walk(self, all, &Value::Null, 0);
     }
 
     pub fn highlights(&self, hs: &Value) {
         if self.json {
             return self.value(hs);
         }
-        for h in hs.as_array().into_iter().flatten() {
+        for h in items(hs) {
             self.print(&format!("{}  “{}”", self.dim(s(&h["id"])), s(&h["quote"])));
             if let Some(n) = h["note"].as_str() {
                 self.print(&format!("    {n}"));

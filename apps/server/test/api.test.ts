@@ -241,9 +241,9 @@ describe("bookmarks", () => {
 
   test("validation errors are 400", async () => {
     expect((await api("POST", "/v1/bookmarks", { url: "javascript:alert(1)" })).status).toBe(400);
-    expect(
-      (await api("POST", "/v1/bookmarks", { url: `${base}/x`, collectionId: "nope" })).status,
-    ).toBe(409);
+    // A collection that isn't there is a 404, as for a collection's parent.
+    const missing = await api("POST", "/v1/bookmarks", { url: `${base}/x`, collectionId: "nope" });
+    expect([missing.status, missing.data.code]).toEqual([404, "NOT_FOUND"]);
   });
 
   test("the manual order starts newest first and a drop moves one between two, bumping seq", async () => {
@@ -279,7 +279,7 @@ describe("bookmarks", () => {
     });
     expect(h.status).toBe(201);
     const list = await api("GET", `/v1/bookmarks/${id}/highlights`);
-    expect(list.data).toHaveLength(1);
+    expect(list.data.items).toHaveLength(1);
   });
 });
 
@@ -344,7 +344,7 @@ describe("tags", () => {
     Promise.all(ids.map(async (id) => (await api("GET", `/v1/bookmarks/${id}`)).data.tags));
   const counts = async () =>
     Object.fromEntries(
-      (await api("GET", "/v1/tags")).data.map((t: any) => [t.name, t.count]),
+      (await api("GET", "/v1/tags")).data.items.map((t: any) => [t.name, t.count]),
     ) as Record<string, number>;
   let ids: string[];
 
@@ -408,7 +408,7 @@ describe("tags", () => {
     expect(doc.paths["/v1/tags/rename"].post).toBeDefined();
     expect(doc.paths["/v1/tags/{name}"].delete).toBeDefined();
     const bookmark = doc.components.schemas.Bookmark.properties;
-    expect(bookmark.archived.description).toContain("Trash");
+    expect(bookmark.trashed.description).toContain("Trash");
     expect(bookmark.coverProxy).toBeDefined();
   });
 });
@@ -432,7 +432,7 @@ describe("sync and deletes", () => {
     const cursor = (await api("GET", "/v1/sync?since=0&limit=5000")).data.cursor;
     expect((await api("DELETE", `/v1/collections/${col.data.id}`)).status).toBe(204);
     expect((await api("GET", `/v1/bookmarks/${b.data.id}`)).data.collectionId).toBeNull();
-    expect((await api("GET", "/v1/collections")).data.map((c: any) => c.id)).not.toContain(
+    expect((await api("GET", "/v1/collections")).data.items.map((c: any) => c.id)).not.toContain(
       col.data.id,
     );
     const delta = (await api("GET", `/v1/sync?since=${cursor}`)).data;

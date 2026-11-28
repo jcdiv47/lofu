@@ -42,10 +42,11 @@ export const sameSource = (a: Source, b: Source) =>
 
 /**
  * The mirror kept on the device. The version goes up when bookmarks need
- * fields only a full sync brings (v2: `coverProxy`); older ones are dropped.
+ * fields only a full sync brings (v2: `coverProxy`; v3: `archived` renamed
+ * `trashed`); older ones are dropped.
  */
-const SNAPSHOT_KEY = "library.v2";
-const OLD_SNAPSHOTS = ["library.v1"];
+const SNAPSHOT_KEY = "library.v3";
+const OLD_SNAPSHOTS = ["library.v1", "library.v2"];
 
 /**
  * The server a snapshot came from. The file outlives `Storage`'s settings
@@ -61,6 +62,12 @@ const collectionsById = signal(new Map<string, Collection>(), { equals: false })
 const highlightCounts = signal(new Map<string, number>(), { equals: false });
 const highlightOwner = new Map<string, string>();
 let cursor = 0;
+/**
+ * The server database's identity the mirror came from (`generation` in
+ * /v1/sync). Another one means it was replaced (a backup restored), its seqs
+ * went back, and the mirror must be pulled again from the start.
+ */
+let generation: string | null = null;
 
 export const syncing = signal(false);
 export const syncError = signal("");
@@ -88,31 +95,30 @@ export const bookmark = (id: string) => byId().get(id);
 export const highlightCount = (id: string) => highlightCounts().get(id) ?? 0;
 
 /**
- * A bookmark in the Trash is one the server calls `archived`: deleting it from
- * the Trash deletes it for good (a tombstone on the server). Everywhere else
+ * A bookmark in the Trash (`trashed`): deleting it from the Trash deletes it for good (a tombstone on the server). Everywhere else
  * leaves it out.
  */
-export const inTrash = (b: Bookmark) => b.archived;
+export const inTrash = (b: Bookmark) => b.trashed;
 
 /** Whether a bookmark belongs to a source (it's still in the Trash, say). */
 export const matches = (s: Source, b: Bookmark): boolean => {
   switch (s.kind) {
     case "all":
-      return !b.archived;
+      return !b.trashed;
     case "unsorted":
-      return !b.archived && !b.collectionId;
+      return !b.trashed && !b.collectionId;
     case "favorites":
-      return !b.archived && b.favorite;
+      return !b.trashed && b.favorite;
     case "highlights":
-      return !b.archived && (highlightCounts().get(b.id) ?? 0) > 0;
+      return !b.trashed && (highlightCounts().get(b.id) ?? 0) > 0;
     case "trash":
-      return b.archived;
+      return b.trashed;
     case "collection":
-      return !b.archived && b.collectionId === s.id;
+      return !b.trashed && b.collectionId === s.id;
     case "tag":
-      return !b.archived && b.tags.includes(s.name);
+      return !b.trashed && b.tags.includes(s.name);
     case "type":
-      return !b.archived && b.type === s.type;
+      return !b.trashed && b.type === s.type;
   }
 };
 
@@ -132,7 +138,7 @@ export const counts = computed(() => {
   };
   const hl = highlightCounts();
   for (const b of bookmarks()) {
-    if (b.archived) {
+    if (b.trashed) {
       c.trash++;
       continue;
     }
@@ -418,6 +424,7 @@ function persist() {
     const snapshot = JSON.stringify({
       server: snapshotServer(),
       cursor,
+      generation,
       bookmarks: [...byId().values()].filter((b) => !b.deletedAt),
       collections: [...collectionsById().values()].filter((c) => !c.deletedAt),
       highlights: [...highlightOwner.entries()].map(([id, bookmarkId]) => ({ id, bookmarkId })),
@@ -451,6 +458,7 @@ export async function start() {
     } else if (snap) {
       apply(snap);
       cursor = snap.cursor ?? 0;
+      generation = snap.generation ?? null;
       if (byId().size) loaded.set(true);
     }
   } catch {
@@ -469,7 +477,18 @@ export function sync(): Promise<void> {
     try {
       await flush();
       for (;;) {
-        const page = await api.sync(cursor);
+        const since = cursor;
+        const page = await api.sync(since);
+        if (page.generation && page.generation !== generation) {
+          const replaced = generation !== null;
+          generation = page.generation;
+          if (replaced) {
+            // Another database: what the mirror holds may be gone from it,
+            // and a cursor into the old one means nothing. Start over.
+            clearMirror();
+            if (since !== 0) continue;
+          }
+        }
         apply(page);
         cursor = page.cursor;
         if (!page.hasMore) break;
@@ -515,14 +534,22 @@ export function sync(): Promise<void> {
 /** The last sync couldn't reach the server. */
 export const offline = signal(false);
 
-/** Forgets the mirror (a different server or token). */
-export async function reset() {
+/** Empties the synced copy of the library (not the outbox, nor saved articles). */
+function clearMirror() {
   highlightOwner.clear();
   cursor = 0;
   batch(() => {
     byId.set(new Map());
     collectionsById.set(new Map());
     highlightCounts.set(new Map());
+  });
+}
+
+/** Forgets the mirror (a different server or token). */
+export async function reset() {
+  clearMirror();
+  generation = null;
+  batch(() => {
     loaded.set(false);
     outbox.set([]);
   });
@@ -575,13 +602,13 @@ export function setReadProgress(id: string, readProgress: number) {
 
 /** Moves a bookmark to a collection (`null`: Unsorted); out of the Trash too. */
 export const moveBookmark = (id: string, collectionId: string | null) =>
-  updateBookmark(id, { collectionId, archived: false });
+  updateBookmark(id, { collectionId, trashed: false });
 
 /** Puts a bookmark in the Trash. */
-export const trashBookmark = (id: string) => updateBookmark(id, { archived: true });
+export const trashBookmark = (id: string) => updateBookmark(id, { trashed: true });
 
 /** Takes a bookmark out of the Trash, back where it was. */
-export const restoreBookmark = (id: string) => updateBookmark(id, { archived: false });
+export const restoreBookmark = (id: string) => updateBookmark(id, { trashed: false });
 
 /**
  * Deletes a bookmark for good: it goes at once, and comes back if the server
@@ -699,7 +726,7 @@ export async function addBookmark(
       tags: fields.tags ?? [],
       collectionId: fields.collectionId ?? null,
       favorite: fields.favorite ?? false,
-      archived: false,
+      trashed: false,
       readProgress: 0,
       wordCount: null,
       contentStatus: "pending",

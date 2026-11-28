@@ -2,7 +2,7 @@
  * Local admin commands. They open the database directly, so run them on the
  * server host (or `docker compose exec server bun src/admin.ts ...`).
  *
- *   bun src/admin.ts token create <name>
+ *   bun src/admin.ts token create <name> [--scopes read,write,delete,admin]
  *   bun src/admin.ts token list
  *   bun src/admin.ts token revoke <id>
  *   bun src/admin.ts reindex
@@ -17,7 +17,7 @@ import { parseArgs } from "node:util";
 import { config } from "./config.ts";
 import { backupDb, backupName, pruneBackups } from "./db/backup.ts";
 import { openDb } from "./db/index.ts";
-import { TokenStore } from "./store/tokens.ts";
+import { scopesFrom, TokenStore } from "./store/tokens.ts";
 
 const [cmd, sub, arg] = process.argv.slice(2);
 // Backing up a database that isn't there would create an empty one and copy that.
@@ -30,20 +30,37 @@ const tokens = new TokenStore(db);
 
 function usage(): never {
   console.error(
-    "usage: admin.ts token create <name> | token list | token revoke <id> | reindex | " +
+    "usage: admin.ts token create <name> [--scopes read,write,delete,admin] | token list | token revoke <id> | reindex | " +
       "backup [--keep N] [--label L] [path]",
   );
   process.exit(2);
 }
 
-if (cmd === "token" && sub === "create" && arg) {
-  const { id, token } = tokens.create(arg);
-  console.log(`created token ${id} (${arg}). It is shown only once:\n\n  ${token}\n`);
+if (cmd === "token" && sub === "create") {
+  const { values, positionals } = parseArgs({
+    args: process.argv.slice(4),
+    options: { scopes: { type: "string" } },
+    allowPositionals: true,
+  });
+  const name = positionals[0];
+  if (!name || positionals.length > 1) usage();
+  let scopes: ReturnType<typeof scopesFrom> | undefined;
+  try {
+    scopes = values.scopes === undefined ? undefined : scopesFrom(values.scopes);
+  } catch (e) {
+    console.error((e as Error).message);
+    process.exit(2);
+  }
+  const created = tokens.create(name, scopes);
+  console.log(
+    `created token ${created.id} (${name}; ${created.scopes.join(", ")}). ` +
+      `It is shown only once:\n\n  ${created.token}\n`,
+  );
 } else if (cmd === "token" && sub === "list") {
   for (const t of tokens.list()) {
     const used = t.last_used_at ? new Date(t.last_used_at).toISOString() : "never";
     console.log(
-      `${t.id}  ${t.name.padEnd(20)} created ${new Date(t.created_at).toISOString()}  last used ${used}`,
+      `${t.id}  ${t.name.padEnd(20)} ${t.scopes.join(",").padEnd(23)} created ${new Date(t.created_at).toISOString()}  last used ${used}`,
     );
   }
 } else if (cmd === "token" && sub === "revoke" && arg) {

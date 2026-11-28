@@ -1,38 +1,68 @@
 import { SQLiteError } from "bun:sqlite";
-import { OpenAPIHono } from "@hono/zod-openapi";
+import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
+import type { Context } from "hono";
 import { compress } from "hono/compress";
 import { cors } from "hono/cors";
+import { HTTPException } from "hono/http-exception";
+import { grant, requireScope, scopeFor } from "./auth.ts";
 import type { AppContext } from "./context.ts";
+import { HttpError, readCapped } from "./errors.ts";
 import { FIGURE_HASH } from "./extract/figures.ts";
 import { bookmarkRoutes } from "./routes/bookmarks.ts";
 import { importRoutes } from "./routes/imports.ts";
 import { miscRoutes } from "./routes/misc.ts";
-import { NotFoundError } from "./store/bookmarks.ts";
+import { json } from "./routes/util.ts";
+import { MeiliError } from "./search/meili.ts";
+import { ALL_SCOPES } from "./store/tokens.ts";
+import { VERSION } from "./version.ts";
 
-export const VERSION = "0.1.0";
+export { VERSION };
+
+/** The most a compressed upload may grow to once decoded. */
+export const MAX_DECODED_BYTES = 32 * 1024 * 1024;
+
+const fail = (
+  c: Context,
+  status: 400 | 401 | 403 | 404 | 409 | 413 | 415 | 422 | 500 | 503,
+  code: string,
+  error: string,
+  details?: unknown,
+) => c.json({ error, code, ...(details === undefined ? {} : { details }) }, status);
 
 export function createApp(ctx: AppContext) {
   const app = new OpenAPIHono({
     defaultHook: (result, c) => {
       if (!result.success) {
-        return c.json({ error: "invalid request", details: result.error.issues }, 400);
+        return fail(c, 400, "INVALID_REQUEST", "invalid request", result.error.issues);
       }
     },
   });
 
   app.onError((err, c) => {
-    if (err instanceof NotFoundError) return c.json({ error: err.message }, 404);
-    if (err instanceof RangeError || err instanceof TypeError) {
-      // TypeError: e.g. new URL() on a malformed URL inside a store.
-      return c.json({ error: err.message }, 400);
+    if (err instanceof HttpError) return fail(c, err.status, err.code, err.message, err.details);
+    // Bad input found inside a store or parser (a cursor, a URL, a CSV).
+    if (err instanceof RangeError) return fail(c, 400, "INVALID_REQUEST", err.message);
+    if (err instanceof HTTPException) {
+      const status = err.status === 413 ? 413 : err.status < 500 ? 400 : 500;
+      const code =
+        status === 413
+          ? "PAYLOAD_TOO_LARGE"
+          : status === 400
+            ? "INVALID_REQUEST"
+            : "INTERNAL_ERROR";
+      return fail(c, status, code, err.message);
     }
     if (err instanceof SQLiteError && err.code?.startsWith("SQLITE_CONSTRAINT")) {
       const msg =
         err.code === "SQLITE_CONSTRAINT_FOREIGNKEY" ? "referenced item does not exist" : "conflict";
-      return c.json({ error: msg, details: err.message }, 409);
+      return fail(c, 409, "CONFLICT", msg, err.message);
+    }
+    if (err instanceof MeiliError) {
+      console.error(err);
+      return fail(c, 503, "SEARCH_UNAVAILABLE", "search is unavailable");
     }
     console.error(err);
-    return c.json({ error: "internal error" }, 500);
+    return fail(c, 500, "INTERNAL_ERROR", "internal error");
   });
 
   // Browser extensions (and LOFU_CORS_ORIGINS, e.g. the web reader's dev
@@ -44,19 +74,51 @@ export function createApp(ctx: AppContext) {
     cors({
       origin: (origin) =>
         EXTENSION_ORIGIN.test(origin) || ctx.config.corsOrigins.includes(origin) ? origin : null,
-      allowHeaders: ["authorization", "content-type", "content-encoding"],
+      allowHeaders: [
+        "authorization",
+        "content-type",
+        "content-encoding",
+        "if-match",
+        "if-none-match",
+      ],
+      exposeHeaders: ["etag", "x-content-total-chars", "x-content-offset", "x-content-has-more"],
       allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
       maxAge: 86_400,
     }),
   );
 
-  app.get("/health", async (c) =>
-    c.json({
-      ok: true,
-      version: VERSION,
-      commit: ctx.config.commit,
-      search: ctx.searcher ? await ctx.meiliHealthy() : null,
+  app.openapi(
+    createRoute({
+      method: "get",
+      path: "/health",
+      operationId: "health",
+      tags: ["meta"],
+      summary: "Liveness, version, and whether Meilisearch answers (null: not configured)",
+      security: [],
+      responses: {
+        200: json(
+          z
+            .object({
+              ok: z.boolean(),
+              version: z.string(),
+              commit: z.string(),
+              search: z.boolean().nullable(),
+            })
+            .meta({ id: "Health" }),
+          "Up",
+        ),
+      },
     }),
+    async (c) =>
+      c.json(
+        {
+          ok: true,
+          version: VERSION,
+          commit: ctx.config.commit,
+          search: ctx.searcher.engine === "meilisearch" ? await ctx.meiliHealthy() : null,
+        },
+        200,
+      ),
   );
 
   // Article images for readers' <img>, which can't send a token: the URL's
@@ -92,29 +154,46 @@ export function createApp(ctx: AppContext) {
 
   app.use("/v1/*", compress({ threshold: 2048 }));
   // Clients may gzip large uploads (the browser extension sends rendered
-  // pages of several MB); decode before any validator reads the body.
+  // pages of several MB); decode before any validator reads the body, up to
+  // MAX_DECODED_BYTES (a small gzip can decode to gigabytes).
   app.use("/v1/*", async (c, next) => {
     const encoding = c.req.header("content-encoding")?.toLowerCase();
-    if (!encoding || encoding === "identity" || !c.req.raw.body) return next();
-    if (encoding !== "gzip" && encoding !== "deflate") {
-      return c.json({ error: `unsupported content-encoding: ${encoding}` }, 415);
+    const raw = c.req.raw;
+    if (!raw.body) {
+      // No body: a JSON content type alone mustn't read as malformed JSON
+      // where the body is optional (refetch).
+      if (raw.headers.has("content-type") && raw.method !== "GET" && raw.method !== "HEAD") {
+        const headers = new Headers(raw.headers);
+        headers.delete("content-type");
+        c.req.raw = new Request(raw.url, { method: raw.method, headers });
+      }
+      return next();
     }
-    const headers = new Headers(c.req.raw.headers);
+    if (!encoding || encoding === "identity") return next();
+    if (encoding !== "gzip" && encoding !== "deflate") {
+      return fail(c, 415, "UNSUPPORTED_MEDIA_TYPE", `unsupported content-encoding: ${encoding}`);
+    }
+    const decoded = await readCapped(
+      raw.body.pipeThrough(new DecompressionStream(encoding)),
+      MAX_DECODED_BYTES,
+    );
+    const headers = new Headers(raw.headers);
     headers.delete("content-encoding");
-    headers.delete("content-length");
-    c.req.raw = new Request(c.req.raw.url, {
-      method: c.req.raw.method,
-      headers,
-      body: c.req.raw.body.pipeThrough(new DecompressionStream(encoding)),
-      duplex: "half",
-    } as RequestInit);
+    headers.set("content-length", String(decoded.byteLength));
+    c.req.raw = new Request(raw.url, { method: raw.method, headers, body: decoded });
     return next();
   });
   app.use("/v1/*", async (c, next) => {
-    if (ctx.config.authDisabled) return next();
+    if (ctx.config.authDisabled) {
+      grant(c, ALL_SCOPES);
+      return next();
+    }
     const header = c.req.header("authorization");
     const token = header?.startsWith("Bearer ") ? header.slice(7) : undefined;
-    if (!token || !ctx.tokens.verify(token)) return c.json({ error: "unauthorized" }, 401);
+    const scopes = token ? ctx.tokens.verify(token) : null;
+    if (!scopes) return fail(c, 401, "UNAUTHORIZED", "unauthorized");
+    grant(c, scopes);
+    requireScope(c, scopeFor(c.req.method, c.req.path));
     return next();
   });
 

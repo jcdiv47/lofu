@@ -21,9 +21,10 @@ export async function refreshSavedBadge(tabId: number): Promise<void> {
     await browser.action.setTitle({ tabId, title: "Save to lofu" });
     const [tab, settings] = await Promise.all([browser.tabs.get(tabId), getSettings()]);
     if (!current() || !isConfigured(settings) || !isSavableUrl(tab.url)) return;
+    // The lookup leaves the Trash out: a page in it shows as not saved.
     const bookmark = await api.lookup(tab.url);
     if (!current()) return;
-    if (bookmark && !bookmark.archived) {
+    if (bookmark) {
       await browser.action.setBadgeBackgroundColor({ tabId, color: "#315cf5" });
       if (!current()) return;
       await browser.action.setBadgeText({ tabId, text: "✓" });

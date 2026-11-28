@@ -167,7 +167,8 @@ export function importRaindropCsv(csv: string, deps: ImportDeps): ImportReport {
             favorite: r.favorite?.trim() === "true" ? true : undefined,
             createdAt: Number.isFinite(created) ? new Date(created).toISOString() : undefined,
           },
-          { priority: Priority.bulk },
+          // Importing again mustn't take what the user trashed out of the Trash.
+          { priority: Priority.bulk, restoreFromTrash: false },
         );
         if (isNew) report.created++;
         else report.merged++;

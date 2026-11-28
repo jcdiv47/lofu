@@ -154,4 +154,42 @@ export const migrations: string[] = [
   ) WITHOUT ROWID;
   CREATE INDEX figures_hash ON figures(hash);
   `,
+
+  /*
+   * 6: when a bookmark's stored content last changed (an extraction, or the
+   * Markdown converted again), for `extractedAt` and the content's ETag.
+   * Backfilled from the content; seq is left alone, so synced copies learn
+   * it with the bookmark's next change (the field is nullable for them).
+   */ `
+  ALTER TABLE bookmarks ADD COLUMN extracted_at INTEGER;
+  UPDATE bookmarks SET extracted_at =
+    (SELECT c.extracted_at FROM contents c WHERE c.bookmark_id = bookmarks.id);
+  `,
+
+  /* 7: what each API token may do (JSON array of read, write, delete, admin) */ `
+  ALTER TABLE api_tokens ADD COLUMN scopes TEXT NOT NULL DEFAULT '["read","write","delete","admin"]';
+  `,
+
+  /*
+   * 8: highlights left live on a deleted bookmark (by builds before deleting
+   * a bookmark tombstoned its highlights) are deleted with it. Each gets a
+   * new seq past every one handed out (this runs before the allocator reads
+   * the max), so synced clients learn of it.
+   */ `
+  CREATE TEMP TABLE orphan_highlights AS
+    SELECT h.id AS id, max(h.updated_at, b.deleted_at) AS at, b.deleted_at AS gone,
+      (SELECT coalesce(max(s), 0) FROM (
+         SELECT max(seq) AS s FROM bookmarks
+         UNION ALL SELECT max(seq) FROM collections
+         UNION ALL SELECT max(seq) FROM highlights))
+        + row_number() OVER (ORDER BY h.seq, h.id) AS seq
+    FROM highlights h JOIN bookmarks b ON b.id = h.bookmark_id
+    WHERE h.deleted_at IS NULL AND b.deleted_at IS NOT NULL;
+  UPDATE highlights SET
+    deleted_at = (SELECT o.gone FROM orphan_highlights o WHERE o.id = highlights.id),
+    updated_at = (SELECT o.at FROM orphan_highlights o WHERE o.id = highlights.id),
+    seq = (SELECT o.seq FROM orphan_highlights o WHERE o.id = highlights.id)
+  WHERE id IN (SELECT id FROM orphan_highlights);
+  DROP TABLE orphan_highlights;
+  `,
 ];

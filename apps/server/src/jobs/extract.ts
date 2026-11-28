@@ -6,7 +6,7 @@ import type { ExtractPool } from "../extract/pool.ts";
 import type { ExtractOutput } from "../extract/protocol.ts";
 import { siteFor } from "../extract/sites/index.ts";
 import type { BookmarkStore, ExtractedContent } from "../store/bookmarks.ts";
-import type { Job } from "../store/jobs.ts";
+import { decodeExtractPayload, type Job } from "../store/jobs.ts";
 import type { BookmarkRow } from "../store/rows.ts";
 import { type JobHandler, PermanentError } from "./runner.ts";
 
@@ -126,6 +126,9 @@ export function extractHandler(deps: {
   const { bookmarks, fetcher, pool, pdf, browser } = deps;
   const siteCtx = { fetcher, githubToken: deps.githubToken ?? null };
 
+  /** Refetches (their page's title, excerpt and cover win), by bookmark id, while they run. */
+  const forced = new Set<string>();
+
   function save(
     row: BookmarkRow,
     out: ExtractOutput,
@@ -153,6 +156,7 @@ export function extractHandler(deps: {
         publishedAt: out.publishedAt,
       },
       outcome,
+      { forceMetadata: forced.has(row.id) },
     );
   }
 
@@ -226,6 +230,23 @@ export function extractHandler(deps: {
 
   return {
     async run(job: Job) {
+      const payload = decodeExtractPayload(job.payload);
+      if (payload.forceMetadata) forced.add(job.bookmark_id);
+      try {
+        await read(job, payload.html);
+      } finally {
+        forced.delete(job.bookmark_id);
+      }
+      // Whatever came of it (a retry aside), whoever waits on it can stop.
+      bookmarks.settle(job.bookmark_id);
+    },
+    giveUp(job, error) {
+      bookmarks.setContentStatus(job.bookmark_id, "failed", { error: error.message });
+    },
+  };
+
+  async function read(job: Job, html: string | null): Promise<void> {
+    {
       const row = bookmarks.row(job.bookmark_id);
       if (!row || row.deleted_at !== null) return;
 
@@ -237,9 +258,9 @@ export function extractHandler(deps: {
         return;
       }
 
-      if (job.payload !== null) {
+      if (html !== null) {
         // HTML from the user's own browser: never second-guess it with ours.
-        return fromHtml(row, job.payload, row.url, Buffer.byteLength(job.payload), false);
+        return fromHtml(row, html, row.url, Buffer.byteLength(html), false);
       }
 
       const site = siteFor(row.url);
@@ -290,6 +311,7 @@ export function extractHandler(deps: {
             textChars < MIN_TEXT_CHARS
               ? { status: "failed", error: "no text layer in PDF (scanned document?)" }
               : { status: "ok" },
+            { forceMetadata: forced.has(row.id) },
           );
           return;
         }
@@ -303,7 +325,14 @@ export function extractHandler(deps: {
           content.html = zstd(`<pre>${escapeHtml(fetched.text)}</pre>`);
           content.wordCount = countWords(fetched.text);
           content.excerpt = fetched.text.trim().slice(0, 280) || null;
-          bookmarks.saveExtraction(row.id, content);
+          bookmarks.saveExtraction(
+            row.id,
+            content,
+            { status: "ok" },
+            {
+              forceMetadata: forced.has(row.id),
+            },
+          );
           return;
         }
 
@@ -315,9 +344,6 @@ export function extractHandler(deps: {
           });
           return;
       }
-    },
-    giveUp(job, error) {
-      bookmarks.setContentStatus(job.bookmark_id, "failed", { error: error.message });
-    },
-  };
+    }
+  }
 }

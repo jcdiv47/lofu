@@ -3,7 +3,19 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { migrations } from "./migrations.ts";
 
-export type Db = Database & { nextSeq(): number };
+export type Db = Database & {
+  nextSeq(): number;
+  /** The newest seq handed out. */
+  currentSeq(): number;
+  /**
+   * This database's identity (`meta.db_generation`), made once. A backup's
+   * copy gets a new one (db/backup.ts), so a client that synced against the
+   * live database notices when a backup is restored and its seq went back.
+   */
+  generation: string;
+};
+
+export const GENERATION_KEY = "db_generation";
 
 /**
  * Opens the database, applies pragmas and migrations, and attaches a `seq`
@@ -40,6 +52,15 @@ export function openDb(path: string): Db {
     .get();
   let seq = maxSeq?.s ?? 0;
   db.nextSeq = () => ++seq;
+  db.currentSeq = () => seq;
+
+  db.query("INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)").run(
+    GENERATION_KEY,
+    Bun.randomUUIDv7(),
+  );
+  db.generation = db
+    .query<{ value: string }, [string]>("SELECT value FROM meta WHERE key = ?")
+    .get(GENERATION_KEY)!.value;
 
   return db;
 }

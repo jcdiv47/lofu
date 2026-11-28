@@ -17,7 +17,7 @@ const bookmark = (id: string, over: Record<string, unknown> = {}) => ({
   tags: [] as string[],
   collectionId: null,
   favorite: false,
-  archived: false,
+  trashed: false,
   readProgress: 0,
   wordCount: 1200,
   contentStatus: "ok",
@@ -47,7 +47,7 @@ const library = {
     bookmark("a", { collectionId: "c1", tags: ["rust"], createdAt: "2026-11-04T10:00:00.000Z" }),
     bookmark("bb", { favorite: true, createdAt: "2026-11-03T10:00:00.000Z" }),
     bookmark("ccc", {
-      archived: true,
+      trashed: true,
       excerpt: "Mail ( [\\[email protected\\]](https://x.test) ) us",
       createdAt: "2026-11-02T10:00:00.000Z",
     }),
@@ -137,7 +137,7 @@ test("desktop: a snapshot from another server is dropped, not merged", async () 
   // Written by another build (or the e2e host) connected elsewhere.
   const other = await open("./App.tsx", {
     ...desktop,
-    storage: { ...saved.storage, "library.v2": snapshot("http://127.0.0.1:8787") },
+    storage: { ...saved.storage, "library.v3": snapshot("http://127.0.0.1:8787") },
     network: { [`GET ${S}/v1/sync*`]: { body: library } },
   });
   await other.waitFor("text:Article a");
@@ -147,7 +147,7 @@ test("desktop: a snapshot from another server is dropped, not merged", async () 
   // This server's own snapshot shows, and the sync only catches up.
   const same = await open("./App.tsx", {
     ...desktop,
-    storage: { ...saved.storage, "library.v2": snapshot(S) },
+    storage: { ...saved.storage, "library.v3": snapshot(S) },
     network: { [`GET ${S}/v1/sync*`]: { body: empty } },
   });
   await same.waitFor("text:Article zzz");
@@ -290,7 +290,7 @@ test("favoriting from the reader updates at once and on the server", async () =>
       [`GET ${S}/v1/bookmarks/a?content=markdown`]: {
         body: { ...library.bookmarks[0], content: "Some text to read here." },
       },
-      [`GET ${S}/v1/bookmarks/a/highlights`]: { body: [] },
+      [`GET ${S}/v1/bookmarks/a/highlights`]: { body: { items: [] } },
       [`PATCH ${S}/v1/bookmarks/a`]: (r) => {
         const patch = JSON.parse(r.body ?? "{}");
         patches.push(patch);
@@ -313,7 +313,7 @@ const readable = {
   [`GET ${S}/v1/bookmarks/a?content=markdown`]: {
     body: { ...library.bookmarks[0], content: "Some text to read here." },
   },
-  [`GET ${S}/v1/bookmarks/a/highlights`]: { body: [] },
+  [`GET ${S}/v1/bookmarks/a/highlights`]: { body: { items: [] } },
 };
 
 test("desktop: the original opens in the app, and leaves for the browser on request", async () => {
@@ -560,7 +560,7 @@ test("phone: swiping a row left deletes it into the Trash", async () => {
   // It leaves the list at once, before the server answers.
   await app.waitUntil(() => !app.shows("text:Article bb"));
   await app.waitUntil(() => log.patches.length > 0);
-  expect(log.patches).toEqual([["bb", { archived: true }]]);
+  expect(log.patches).toEqual([["bb", { trashed: true }]]);
   expect(log.deletes).toEqual([]);
 });
 
@@ -583,7 +583,7 @@ test("phone: a search result that is deleted leaves the results", async () => {
   await app.press("id:swipe-delete");
   await app.waitUntil(() => log.patches.length > 0);
   await app.waitUntil(() => !app.shows("id:row-bb"));
-  expect(log.patches).toEqual([["bb", { archived: true }]]);
+  expect(log.patches).toEqual([["bb", { trashed: true }]]);
 });
 
 test("phone: the list's filter narrows it, the view changes, and a search keeps the filter", async () => {
@@ -596,7 +596,7 @@ test("phone: the list's filter narrows it, the view changes, and a search keeps 
         const q = new URL(r.url).searchParams.get("q") ?? "";
         searches.push(q);
         const hits = library.bookmarks
-          .filter((b) => !b.archived && (!q.includes("favorite:true") || b.favorite))
+          .filter((b) => !b.trashed && (!q.includes("favorite:true") || b.favorite))
           .map((bookmark) => ({ bookmark, snippet: null }));
         return { body: { hits, estimatedTotal: hits.length } };
       },
@@ -656,7 +656,7 @@ test("phone: swiping a row right moves it to a collection", async () => {
   await app.press("id:swipe-move");
   await app.waitUntil(() => log.patches.length > 0);
   expect(asked[0]).toEqual(["Homelab", "Cancel"]);
-  expect(log.patches).toEqual([["bb", { collectionId: "c1", archived: false }]]);
+  expect(log.patches).toEqual([["bb", { collectionId: "c1", trashed: false }]]);
 });
 
 test("phone: deleting from the Trash asks, then deletes for good", async () => {
@@ -699,12 +699,12 @@ test("desktop: the context menu moves, shares and deletes", async () => {
   expect(labels.some((l) => /archive/i.test(l))).toBe(false);
   await app.chooseMenuItem("Move to > Homelab");
   await app.waitUntil(() => log.patches.length === 1);
-  expect(log.patches[0]).toEqual(["bb", { collectionId: "c1", archived: false }]);
+  expect(log.patches[0]).toEqual(["bb", { collectionId: "c1", trashed: false }]);
 
   await app.rightClick("id:card-a");
   await app.chooseMenuItem("Delete");
   await app.waitUntil(() => log.patches.length === 2);
-  expect(log.patches[1]).toEqual(["a", { archived: true }]);
+  expect(log.patches[1]).toEqual(["a", { trashed: true }]);
   await app.press("label:Trash");
   await app.waitFor("text:Article a");
 });
@@ -888,7 +888,7 @@ test("phone: deleting from the reader's ••• goes back to the list", async 
   });
   await app.press("label:More");
   await app.waitUntil(() => log.patches.length > 0);
-  expect(log.patches).toEqual([["a", { archived: true }]]);
+  expect(log.patches).toEqual([["a", { trashed: true }]]);
   expect(offered).not.toContain("Open in Reader");
   expect(offered).toContain("Open Original");
   await app.waitUntil(() => !app.shows("id:article"));
@@ -902,7 +902,11 @@ test("desktop: a highlight the text has lost still counts, and can be removed", 
     network: {
       ...readable,
       [`GET ${S}/v1/bookmarks/a/highlights`]: {
-        body: [{ id: "h1", bookmarkId: "a", quote: "words that are gone", prefix: "", suffix: "" }],
+        body: {
+          items: [
+            { id: "h1", bookmarkId: "a", quote: "words that are gone", prefix: "", suffix: "" },
+          ],
+        },
       },
       [`DELETE ${S}/v1/highlights/h1`]: () => {
         deleted.push("h1");
@@ -1579,4 +1583,38 @@ test("desktop: the filter button narrows what the search found", async () => {
   await app.press("id:suggest-type");
   expect(app.value("id:search")).toBe("type:");
   await app.waitFor("id:suggest-type:article");
+});
+
+test("a server whose database was replaced is synced again from the start", async () => {
+  const sinces: string[] = [];
+  let generation = "g1";
+  const app = await open("./App.tsx", {
+    ...desktop,
+    network: {
+      [`GET ${S}/v1/sync*`]: (r) => {
+        sinces.push(new URL(r.url).searchParams.get("since") ?? "");
+        if (generation === "g1") return { body: { ...library, generation } };
+        // A backup restored: an older library, its seqs behind the cursor the app holds.
+        const bookmarks = library.bookmarks.filter((b) => b.id !== "bb");
+        return { body: { ...library, cursor: 3, bookmarks, generation } };
+      },
+    },
+  });
+  await app.waitFor("text:Article bb");
+  await app.waitFor("text:Up to date");
+  expect(sinces[0]).toBe("0");
+  expect(sinces.slice(1).every((s) => s === "9")).toBe(true);
+  const before = sinces.length;
+  generation = "g2";
+  await app.press("id:sync");
+  await app.waitUntil(() => !app.shows("text:Article bb"));
+  // The page from the old cursor is dropped, and the library pulled from 0.
+  expect(sinces.slice(before, before + 2)).toEqual(["9", "0"]);
+  expect(app.shows("text:Article a")).toBe(true);
+  // The same database again: on from its cursor.
+  await app.waitFor("text:Up to date");
+  const after = sinces.length;
+  await app.press("id:sync");
+  await app.waitUntil(() => sinces.length > after);
+  expect(sinces[after]).toBe("3");
 });
