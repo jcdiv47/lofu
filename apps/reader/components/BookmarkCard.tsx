@@ -5,6 +5,7 @@ import { isKept } from "../lib/articles";
 import { onDisk } from "../lib/files";
 import { markRuns, shortDate } from "../lib/format";
 import { fonts, look } from "../lib/look";
+import { motion } from "../lib/motion";
 import { displayTitle, type ShowField, timeFormat } from "../lib/prefs";
 import { opensAsPage } from "../lib/sites";
 import { collectionName, highlightCount, offline } from "../lib/store";
@@ -14,6 +15,29 @@ import { Favicon, focusRing, Icon } from "./ui";
 
 export const CARD_COVER = 132;
 const CARD_BODY = 112;
+
+/**
+ * A card's hover, for the grid's cards and the moodboard's tiles: it lifts
+ * 3pt off the page under a wider shadow, and its edge darkens, which carries
+ * the hover in dark mode, where a shadow hardly shows. With reduced motion the
+ * edge and shadow change at once and the card stays where it is; while it is
+ * dragged it neither lifts nor eases, so it keeps up with the pointer. The lift
+ * is `translate`, apart from the drag's `transform`, so the two never fight.
+ */
+function cardHover(drag?: DragProps) {
+  const still = () => reduceMotion() || !!drag?.style();
+  return {
+    style: () => ({
+      transitionProperty: `box-shadow, background-color, border-color${still() ? "" : ", translate"}`,
+      transitionDuration: reduceMotion() ? 0 : motion.fast,
+      transitionTimingFunction: "ease-out" as const,
+    }),
+    hoverStyle: () => ({
+      boxShadow: look().shadowLift,
+      ...(still() ? {} : { translate: "0px -3px" }),
+    }),
+  };
+}
 
 /**
  * A page with no cover image gets a catalog card instead: its excerpt set in
@@ -341,6 +365,7 @@ export function BookmarkCard(
   const on = (f: ShowField) => !props.show || props.show(f);
   const body = () =>
     Math.round((props.show ? cardBody(props.show) : CARD_BODY) * (props.bodyScale ?? 1));
+  const hover = cardHover(props.drag);
   const card = (
     <View
       role="button"
@@ -353,20 +378,15 @@ export function BookmarkCard(
       onContextMenu={
         nativeMenus ? (e) => void showBookmarkMenu(b(), { at: e.pagePosition }) : undefined
       }
-      class="overflow-hidden rounded-[16px] active:opacity-80 bg-card border-rule-soft hover:bg-card-hover hover:border-rule"
+      class="overflow-hidden rounded-[16px] active:opacity-80 bg-card border-rule-soft hover:bg-card-hover hover:border-rule-strong"
       style={{
         borderWidth: 1,
         borderCurve: "continuous",
         boxShadow: look().shadow,
-        transitionProperty: "box-shadow, background-color, border-color",
-        // The hover's lift, at once with reduced motion.
-        transitionDuration: reduceMotion() ? 0 : 160,
-        transitionTimingFunction: "ease-out",
+        ...hover.style(),
         ...props.drag?.style(),
       }}
-      hoverStyle={{
-        boxShadow: look().shadowLift,
-      }}
+      hoverStyle={hover.hoverStyle()}
     >
       <If when={on("cover")}>
         <Cover b={b()} height={props.coverHeight ?? CARD_COVER} radius={15} />
@@ -717,6 +737,7 @@ export function MoodboardTile(props: ItemProps) {
     (on("tags") && b().tags.length > 0) ||
     on("info") ||
     (on("highlights") && highlightCount(b().id) > 0);
+  const hover = cardHover(props.drag);
   const tile = (
     <View
       role="button"
@@ -729,14 +750,15 @@ export function MoodboardTile(props: ItemProps) {
       onContextMenu={
         nativeMenus ? (e) => void showBookmarkMenu(b(), { at: e.pagePosition }) : undefined
       }
-      class={`overflow-hidden rounded-[14px] active:opacity-80 bg-card border-rule-soft hover:bg-card-hover ${focusRing}`}
+      class={`overflow-hidden rounded-[14px] active:opacity-80 bg-card border-rule-soft hover:bg-card-hover hover:border-rule-strong ${focusRing}`}
       style={{
         borderWidth: 1,
         borderCurve: "continuous",
         boxShadow: look().shadow,
+        ...hover.style(),
         ...props.drag?.style(),
       }}
-      hoverStyle={{ boxShadow: look().shadowLift }}
+      hoverStyle={hover.hoverStyle()}
     >
       <If when={on("cover")}>
         <If
